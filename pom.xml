@@ -7,7 +7,7 @@
 		<version>2</version>
 	</parent>
 
-	<artifactId>winrm</artifactId>
+	<artifactId>winrm-java</artifactId>
 	<version>1.1.02-SNAPSHOT</version>
 
 	<name>WinRM Java Client</name>
@@ -18,7 +18,7 @@
 		<url>https://metricshub.com</url>
 	</organization>
 
-	<url>https://metricshub.org/winrm</url>
+	<url>https://metricshub.org/winrm-java</url>
 	<inceptionYear>2023</inceptionYear>
 
 	<licenses>
@@ -31,12 +31,12 @@
 
 	<issueManagement>
 		<system>GitHub</system>
-		<url>https://github.com/metricshub/winrm/issues/</url>
+		<url>https://github.com/metricshub/winrm-java/issues/</url>
 	</issueManagement>
 
 	<scm>
-		<connection>scm:git:https://github.com/metricshub/winrm.git</connection>
-		<url>https://github.com/metricshub/winrm</url>
+		<connection>scm:git:https://github.com/metricshub/winrm-java.git</connection>
+		<url>https://github.com/metricshub/winrm-java</url>
 		<tag>HEAD</tag>
 	</scm>
 
