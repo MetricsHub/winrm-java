@@ -4,7 +4,7 @@
 	<skin>
 		<groupId>org.sentrysoftware.maven</groupId>
 		<artifactId>sentry-maven-skin</artifactId>
-		<version>6.2.00</version>
+		<version>6.4.01</version>
 	</skin>
 
 	<custom>
@@ -13,15 +13,16 @@
 	</custom>
 
 	<bannerLeft>
-		<src>images/sentry-logo-179x75px.png</src>
-		<href>https://sentrysoftware.com</href>
+		<src>images/metricshub-logo-only.png</src>
+		<href>https://metricshub.org</href>
 	</bannerLeft>
 
 	<body>
 
 		<links>
 			<item name="Fork on GitHub" href="${project.scm.url}" />
-			<!-- <item name="First Link" href="https://sentrysoftware.com" /> -->
+			<item name="MetricsHub&reg;" href="https://metricshub.com" />
+			
 		</links>
 
 		<menu name="User Documentation">

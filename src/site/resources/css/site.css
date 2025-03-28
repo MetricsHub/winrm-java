@@ -1,0 +1,86 @@
+/*-
+ * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
+ * Open MetricsHub Web Site
+ * ჻჻჻჻჻჻
+ * Copyright (C) 2025 MetricsHub
+ * ჻჻჻჻჻჻
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
+ */
+
+/* Poppins font */
+@font-face {
+	font-family: 'Poppins';
+	src: url('../fonts/Poppins-ExtraBold.woff2') format('woff2'),
+		url('../fonts/Poppins-ExtraBold.woff') format('woff'),
+		url('../fonts/Poppins-ExtraBold.ttf') format('truetype'),
+		local('Helvetica');
+	font-weight: 800;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Poppins';
+	src: url('../fonts/Poppins-Bold.woff2') format('woff2'),
+		url('../fonts/Poppins-Bold.woff') format('woff'),
+		url('../fonts/Poppins-Bold.ttf') format('truetype'),
+		local('Helvetica');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Poppins';
+	src: url('../fonts/Poppins-Regular.woff2') format('woff2'),
+		url('../fonts/Poppins-Regular.woff') format('woff'),
+		url('../fonts/Poppins-Regular.ttf') format('truetype'),
+		local('Helvetica');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+/* MetricsHub fonts */
+:root {
+	--title-font: "Poppins", sans-serif;
+	--heading-font: "Poppins", sans-serif;
+	--content-font: "Poppins", sans-serif;
+
+	--content-font-size: medium;
+	--banner-font-size: 40px;
+	--banner-font-weight: 800;
+
+}
+
+ /* MetricsHub colors */
+body {
+	--main-fgcolor: #212529;
+	--banner-bgcolor: #266fd0;
+	--link-color: #266fd0;
+	--alternate-bgcolor: #266fd0;
+	--alternate-fgcolor: #fff;
+}
+
+body.dark {
+	--link-color: #7cb6ff;
+	--main-bgcolor: #262626;
+	--main-fgcolor: #e9ecef;
+}

@@ -23,18 +23,18 @@ Use it as follows:
 ```Java
 import static java.nio.file.Paths.get;
 import static java.util.Collections.singletonList;
-import static org.sentrysoftware.winrm.WinRMHttpProtocolEnum.HTTP;
-import static org.sentrysoftware.winrm.service.client.auth.AuthenticationEnum.NTLM;
-import static org.sentrysoftware.winrm.wql.WinRMWqlExecutor.executeWql;
+import static org.metricshub.winrm.WinRMHttpProtocolEnum.HTTP;
+import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.NTLM;
+import static org.metricshub.winrm.wql.WinRMWqlExecutor.executeWql;
 
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 
-import org.sentrysoftware.winrm.exceptions.WinRMException;
-import org.sentrysoftware.winrm.exceptions.WqlQuerySyntaxException;
-import org.sentrysoftware.winrm.service.client.auth.AuthenticationEnum;
-import org.sentrysoftware.winrm.wql.WinRMWqlExecutor;
+import org.metricshub.winrm.exceptions.WinRMException;
+import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
+import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
+import org.metricshub.winrm.wql.WinRMWqlExecutor;
 
 public class Main {
 

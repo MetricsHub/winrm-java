@@ -2,23 +2,23 @@
 	<modelVersion>4.0.0</modelVersion>
 
 	<parent>
-		<groupId>org.sentrysoftware</groupId>
+		<groupId>org.metricshub</groupId>
 		<artifactId>oss-parent</artifactId>
 		<version>2</version>
 	</parent>
 
-	<artifactId>winrm</artifactId>
+	<artifactId>winrm-java</artifactId>
 	<version>1.1.02-SNAPSHOT</version>
 
 	<name>WinRM Java Client</name>
 	<description>WinRM Java Client</description>
 
 	<organization>
-		<name>Sentry Software</name>
-		<url>https://sentrysoftware.com</url>
+		<name>Metricshub</name>
+		<url>https://metricshub.com</url>
 	</organization>
 
-	<url>https://sentrysoftware.org/winrm</url>
+	<url>https://metricshub.org/winrm-java</url>
 	<inceptionYear>2023</inceptionYear>
 
 	<licenses>
@@ -31,12 +31,12 @@
 
 	<issueManagement>
 		<system>GitHub</system>
-		<url>https://github.com/sentrysoftware/winrm/issues/</url>
+		<url>https://github.com/metricshub/winrm-java/issues/</url>
 	</issueManagement>
 
 	<scm>
-		<connection>scm:git:https://github.com/sentrysoftware/winrm.git</connection>
-		<url>https://github.com/sentrysoftware/winrm</url>
+		<connection>scm:git:https://github.com/metricshub/winrm-java.git</connection>
+		<url>https://github.com/metricshub/winrm-java</url>
 		<tag>HEAD</tag>
 	</scm>
 
@@ -179,7 +179,30 @@
 					</execution>
 				</executions>
 			</plugin>
-
+			
+			<!-- Prettier -->
+			<plugin>
+				<groupId>com.hubspot.maven.plugins</groupId>
+				<artifactId>prettier-maven-plugin</artifactId>
+				<version>0.21</version>
+				<configuration>
+					<prettierJavaVersion>2.5.0</prettierJavaVersion>
+					<ignoreConfigFile>false</ignoreConfigFile>
+					<ignoreEditorConfig>false</ignoreEditorConfig>
+					<inputGlobs>
+						<inputGlob>src/main/java/**/*.java</inputGlob>
+						<inputGlob>src/test/java/**/*.java</inputGlob>
+					</inputGlobs>
+				</configuration>
+				<executions>
+					<execution>
+						<phase>validate</phase>
+						<goals>
+							<goal>check</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
 
 		</plugins>
 	</build>
