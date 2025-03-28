@@ -1,13 +1,13 @@
 # WinRM Java Client
 
-![GitHub release (with filter)](https://img.shields.io/github/v/release/sentrysoftware/winrm)
-![Build](https://img.shields.io/github/actions/workflow/status/sentrysoftware/winrm/deploy.yml)
-![GitHub top language](https://img.shields.io/github/languages/top/sentrysoftware/winrm)
-![License](https://img.shields.io/github/license/sentrysoftware/winrm)
+![GitHub release (with filter)](https://img.shields.io/github/v/release/metricshub/winrm-java)
+![Build](https://img.shields.io/github/actions/workflow/status/metricshub/winrm-java/deploy.yml)
+![GitHub top language](https://img.shields.io/github/languages/top/metricshub/winrm-java)
+![License](https://img.shields.io/github/license/metricshub/winrm-java)
 
 This project uses [WS-Man Client](https://github.com/OpenNMS/wsman) and [winrm4j](https://github.com/cloudsoft/winrm4j/)
 
-See **[Project Documentation](https://sentrysoftware.org/winrm)** and the [Javadoc](https://sentrysoftware.org/winrm/apidocs) for more information on how to use this library in your code.
+See **[Project Documentation](https://metricshub.org/winrm-java)** and the [Javadoc](https://metricshub.org/winrm-java/apidocs) for more information on how to use this library in your code.
 
 The Windows Remote Management (WinRM) Java Client is a library that enables to:
 * Connect to a remote Windows server using one of the two authentication types (NTLM, KERBEROS)

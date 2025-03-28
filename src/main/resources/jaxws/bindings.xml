@@ -6,7 +6,7 @@
 	xmlns:xs="http://www.w3.org/2001/XMLSchema"
 	version="3.0">  <!-- Updated to Jakarta version -->
 
-	<jaxws:package name="org.sentrysoftware.winrm.service" />
+	<jaxws:package name="org.metricshub.winrm.service" />
 	<jaxws:enableWrapperStyle>false</jaxws:enableWrapperStyle>
 	<jaxws:enableAsyncMapping>false</jaxws:enableAsyncMapping>
 
@@ -15,7 +15,7 @@
 		<jaxb:globalBindings xmlns:jaxb="https://jakarta.ee/xml/ns/jaxb"
 			xmlns:xs="http://www.w3.org/2001/XMLSchema" />
 		<jaxb:schemaBindings>
-			<jaxb:package name="org.sentrysoftware.winrm.service.enumeration" />
+			<jaxb:package name="org.metricshub.winrm.service.enumeration" />
 		</jaxb:schemaBindings>
 	</jaxws:bindings>
 
@@ -24,7 +24,7 @@
 		<jaxb:globalBindings xmlns:jaxb="https://jakarta.ee/xml/ns/jaxb"
 			xmlns:xs="http://www.w3.org/2001/XMLSchema" />
 		<jaxb:schemaBindings>
-			<jaxb:package name="org.sentrysoftware.winrm.service.shell" />
+			<jaxb:package name="org.metricshub.winrm.service.shell" />
 		</jaxb:schemaBindings>
 	</jaxws:bindings>
 
@@ -33,7 +33,7 @@
 		<jaxb:globalBindings xmlns:jaxb="https://jakarta.ee/xml/ns/jaxb"
 			xmlns:xs="http://www.w3.org/2001/XMLSchema" />
 		<jaxb:schemaBindings>
-			<jaxb:package name="org.sentrysoftware.winrm.service.transfer" />
+			<jaxb:package name="org.metricshub.winrm.service.transfer" />
 		</jaxb:schemaBindings>
 	</jaxws:bindings>
 
@@ -42,7 +42,7 @@
 		<jaxb:globalBindings xmlns:jaxb="https://jakarta.ee/xml/ns/jaxb"
 			xmlns:xs="http://www.w3.org/2001/XMLSchema" />
 		<jaxb:schemaBindings>
-			<jaxb:package name="org.sentrysoftware.winrm.service.wsman" />
+			<jaxb:package name="org.metricshub.winrm.service.wsman" />
 		</jaxb:schemaBindings>
 	</jaxws:bindings>
 </jaxws:bindings>
