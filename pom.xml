@@ -191,7 +191,6 @@
 					<ignoreEditorConfig>false</ignoreEditorConfig>
 					<inputGlobs>
 						<inputGlob>src/main/java/**/*.java</inputGlob>
-						<!--<inputGlob>!src/main/java/org/metricshub/winrm/service/client/encryption/NtlmEncryptionUtils.java</inputGlob>-->
 						<inputGlob>src/test/java/**/*.java</inputGlob>
 					</inputGlobs>
 				</configuration>
