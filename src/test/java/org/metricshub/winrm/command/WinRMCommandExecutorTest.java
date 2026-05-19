@@ -21,13 +21,11 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 
-import java.nio.charset.Charset;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
-import org.metricshub.winrm.WindowsRemoteExecutor;
 import org.metricshub.winrm.WindowsRemoteProcessUtils;
 import org.metricshub.winrm.service.WinRMEndpoint;
 import org.metricshub.winrm.service.WinRMService;
@@ -201,22 +199,20 @@ class WinRMCommandExecutorTest {
 				.thenReturn("launch remote/localFile");
 
 			final SmbTempShare smbTempShare = mock(SmbTempShare.class);
-			final WindowsRemoteExecutor windowsRemoteExecutor = mock(WindowsRemoteExecutor.class);
+			final WinRMService winRMService = mock(WinRMService.class);
 
 			mockedSmbTempShare
 				.when(() -> SmbTempShare.createInstance(any(WinRMEndpoint.class), anyLong(), isNull(), isNull()))
 				.thenReturn(smbTempShare);
 
 			doNothing().when(smbTempShare).checkConnectedFirst();
-			doReturn(windowsRemoteExecutor).when(smbTempShare).getWindowsRemoteExecutor();
+			doReturn(winRMService).when(smbTempShare).getWindowsRemoteExecutor();
 			doReturn("\\\\2001-db8--85b-3c51-f5ff-ffdb.ipv6-literal.net\\SEN_ShareFor_PC-TEST$")
 				.when(smbTempShare)
 				.getUncSharePath();
 			doReturn("Windows\\Temp\\SEN_ShareFor_TEST$").when(smbTempShare).getRemotePath();
 
-			doReturn(expected)
-				.when(windowsRemoteExecutor)
-				.executeCommand(anyString(), isNull(), any(Charset.class), anyLong());
+			doReturn(expected).when(winRMService).executeCommand(anyString(), isNull(), eq(UTF_8), anyLong());
 
 			assertEquals(
 				expected,
