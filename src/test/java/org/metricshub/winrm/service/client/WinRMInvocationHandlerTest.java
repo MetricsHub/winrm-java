@@ -20,6 +20,7 @@ import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.KERBER
 import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.NTLM;
 import static org.metricshub.winrm.service.client.auth.kerberos.KerberosUtils.createCredentials;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -36,7 +37,6 @@ import jakarta.xml.soap.SOAPFactory;
 import jakarta.xml.ws.WebServiceException;
 import jakarta.xml.ws.soap.SOAPFaultException;
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.LinkedList;
@@ -51,7 +51,6 @@ import org.apache.http.auth.NTCredentials;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.metricshub.winrm.Utils;
 import org.metricshub.winrm.exceptions.KerberosCredentialsException;
@@ -63,6 +62,10 @@ import org.metricshub.winrm.service.client.WinRMInvocationHandler.RetryTgtExpira
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 import org.metricshub.winrm.service.client.auth.kerberos.KerberosUtils;
 import org.metricshub.winrm.service.client.auth.ntlm.NTCredentialsWithEncryption;
+import org.metricshub.winrm.service.shell.Receive;
+import org.metricshub.winrm.service.shell.ReceiveResponse;
+import org.metricshub.winrm.service.wsman.Locale;
+import org.metricshub.winrm.service.wsman.SelectorSetType;
 import org.mockito.MockedStatic;
 
 class WinRMInvocationHandlerTest {
@@ -100,8 +103,28 @@ class WinRMInvocationHandlerTest {
 	private static final Client WS_CLIENT = mock(Client.class);
 	private static final KerberosCredentials KERBEROS_CREDENTIALS = mock(KerberosCredentials.class);
 	private static final NTCredentials NTC_CREDENTIALS = mock(NTCredentialsWithEncryption.class);
-	private static final Method METHOD = mock(Method.class);
+	private static final Method RECEIVE_METHOD;
+	private static final Object[] RECEIVE_ARGS;
 	private static final List<AuthenticationEnum> AUTHENTICATIONS = singletonList(NTLM);
+
+	static {
+		try {
+			RECEIVE_METHOD =
+				WinRMWebService.class.getMethod(
+						"receive",
+						Receive.class,
+						String.class,
+						int.class,
+						String.class,
+						Locale.class,
+						SelectorSetType.class
+					);
+			RECEIVE_ARGS =
+				new Object[] { new Receive(), "resourceURI", 512000, "PT60S", new Locale(), new SelectorSetType() };
+		} catch (ReflectiveOperationException e) {
+			throw new ExceptionInInitializerError(e);
+		}
+	}
 
 	private static final Queue<AuthenticationEnum> AUTHENTICATIONS_KERBEROS_NTLM = asList(KERBEROS, NTLM)
 		.stream()
@@ -121,7 +144,7 @@ class WinRMInvocationHandlerTest {
 
 	private static final Object PROXY = new Object();
 	private static final Object[] ARGS = {};
-	private static final Object RESULT = new Object();
+	private static final ReceiveResponse RESULT = mock(ReceiveResponse.class);
 
 	/** to neutralize Utils.sleep */
 	private static final MockedStatic<Utils> MOCKED_UTILS = mockStatic(Utils.class);
@@ -213,14 +236,14 @@ class WinRMInvocationHandlerTest {
 		MOCKED_WIN_RM_INVOCATION_HANDLER.close();
 	}
 
-	@BeforeEach
-	void initMock() {
-		doReturn("Receive").when(METHOD).getName();
-	}
-
 	@AfterEach
 	void resetMocks() {
-		reset(METHOD);
+		reset(WIN_RM_WS);
+	}
+
+	private static void verifyReceiveInvoked(final int times) {
+		verify(WIN_RM_WS, times(times))
+			.receive(any(Receive.class), anyString(), anyInt(), anyString(), any(Locale.class), any(SelectorSetType.class));
 	}
 
 	@Test
@@ -288,14 +311,14 @@ class WinRMInvocationHandlerTest {
 			)
 				.doReturn(RESULT)
 				.when(winRMInvocationHandler)
-				.invokeMethod(METHOD, ARGS);
+				.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS);
 
 			mockedKerberosUtils
 				.when(() -> KerberosUtils.createCredentials("JohnDoe", "pwd".toCharArray(), null))
 				.thenReturn(KERBEROS_CREDENTIALS);
 
-			assertEquals(RESULT, winRMInvocationHandler.invoke(PROXY, METHOD, ARGS));
-			verify(winRMInvocationHandler, times(2)).invoke(PROXY, METHOD, ARGS);
+			assertEquals(RESULT, winRMInvocationHandler.invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS));
+			verify(winRMInvocationHandler, times(2)).invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS);
 		}
 
 		// check KERBEROS authentication failure like a ticket validity expiration with an exception and no more retry
@@ -313,7 +336,7 @@ class WinRMInvocationHandlerTest {
 			)
 				.doReturn(RESULT)
 				.when(winRMInvocationHandler)
-				.invokeMethod(METHOD, ARGS);
+				.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS);
 
 			doReturn(false).when(winRMInvocationHandler).continueToRetry();
 
@@ -321,8 +344,11 @@ class WinRMInvocationHandlerTest {
 				.when(() -> KerberosUtils.createCredentials("JohnDoe", "pwd".toCharArray(), null))
 				.thenThrow(KerberosCredentialsException.class);
 
-			assertThrows(KerberosCredentialsException.class, () -> winRMInvocationHandler.invoke(PROXY, METHOD, ARGS));
-			verify(winRMInvocationHandler, times(1)).invoke(PROXY, METHOD, ARGS);
+			assertThrows(
+				KerberosCredentialsException.class,
+				() -> winRMInvocationHandler.invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS)
+			);
+			verify(winRMInvocationHandler, times(1)).invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS);
 		}
 
 		// check KERBEROS authentication failure like a ticket validity expiration with an exception and a retry
@@ -340,7 +366,7 @@ class WinRMInvocationHandlerTest {
 			)
 				.doReturn(RESULT)
 				.when(winRMInvocationHandler)
-				.invokeMethod(METHOD, ARGS);
+				.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS);
 
 			doReturn(true).when(winRMInvocationHandler).continueToRetry();
 
@@ -348,8 +374,8 @@ class WinRMInvocationHandlerTest {
 				.when(() -> KerberosUtils.createCredentials("JohnDoe", "pwd".toCharArray(), null))
 				.thenThrow(KerberosCredentialsException.class);
 
-			assertEquals(RESULT, winRMInvocationHandler.invoke(PROXY, METHOD, ARGS));
-			verify(winRMInvocationHandler, times(2)).invoke(PROXY, METHOD, ARGS);
+			assertEquals(RESULT, winRMInvocationHandler.invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS));
+			verify(winRMInvocationHandler, times(2)).invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS);
 		}
 
 		// check retry
@@ -363,12 +389,12 @@ class WinRMInvocationHandlerTest {
 			doThrow(new RetryAuthenticationException(new SOAPFaultException(SOAPFactory.newInstance().createFault())))
 				.doReturn(RESULT)
 				.when(winRMInvocationHandler)
-				.invokeMethod(METHOD, ARGS);
+				.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS);
 
 			doReturn(true, false).when(winRMInvocationHandler).continueToRetry();
 
-			assertEquals(RESULT, winRMInvocationHandler.invoke(PROXY, METHOD, ARGS));
-			verify(winRMInvocationHandler, times(2)).invoke(PROXY, METHOD, ARGS);
+			assertEquals(RESULT, winRMInvocationHandler.invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS));
+			verify(winRMInvocationHandler, times(2)).invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS);
 		}
 
 		// check KO no retries KERBEROS over HTTP
@@ -381,16 +407,16 @@ class WinRMInvocationHandlerTest {
 
 			doThrow(new RetryAuthenticationException(new SOAPFaultException(SOAPFactory.newInstance().createFault())))
 				.when(winRMInvocationHandler)
-				.invokeMethod(METHOD, ARGS);
+				.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS);
 
 			doReturn(false).when(winRMInvocationHandler).continueToRetry();
 
 			final RuntimeException exception = assertThrows(
 				RuntimeException.class,
-				() -> winRMInvocationHandler.invoke(PROXY, METHOD, ARGS)
+				() -> winRMInvocationHandler.invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS)
 			);
 			assertEquals("KERBEROS with encryption over HTTP is not implemented.", exception.getMessage());
-			verify(winRMInvocationHandler, times(1)).invoke(PROXY, METHOD, ARGS);
+			verify(winRMInvocationHandler, times(1)).invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS);
 		}
 
 		// check KO no retries
@@ -407,12 +433,12 @@ class WinRMInvocationHandlerTest {
 				)
 			)
 				.when(winRMInvocationHandler)
-				.invokeMethod(METHOD, ARGS);
+				.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS);
 
 			doReturn(false).when(winRMInvocationHandler).continueToRetry();
 
-			assertThrows(RuntimeException.class, () -> winRMInvocationHandler.invoke(PROXY, METHOD, ARGS));
-			verify(winRMInvocationHandler, times(1)).invoke(PROXY, METHOD, ARGS);
+			assertThrows(RuntimeException.class, () -> winRMInvocationHandler.invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS));
+			verify(winRMInvocationHandler, times(1)).invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS);
 		}
 
 		// check OK without retry
@@ -421,10 +447,10 @@ class WinRMInvocationHandlerTest {
 				new WinRMInvocationHandler(WIN_RM_ENDPOINT, BUS, TIMEOUT, null, null, AUTHENTICATIONS)
 			);
 
-			doReturn(RESULT).when(winRMInvocationHandler).invokeMethod(METHOD, ARGS);
+			doReturn(RESULT).when(winRMInvocationHandler).invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS);
 
-			assertEquals(RESULT, winRMInvocationHandler.invoke(PROXY, METHOD, ARGS));
-			verify(winRMInvocationHandler, times(1)).invoke(PROXY, METHOD, ARGS);
+			assertEquals(RESULT, winRMInvocationHandler.invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS));
+			verify(winRMInvocationHandler, times(1)).invoke(PROXY, RECEIVE_METHOD, RECEIVE_ARGS);
 		}
 	}
 
@@ -495,13 +521,16 @@ class WinRMInvocationHandlerTest {
 			authentications
 		);
 
-		doThrow(new InvocationTargetException(new SOAPFaultException(SOAPFactory.newInstance().createFault())))
-			.when(METHOD)
-			.invoke(WIN_RM_WS, ARGS);
+		doThrow(new SOAPFaultException(SOAPFactory.newInstance().createFault()))
+			.when(WIN_RM_WS)
+			.receive(any(Receive.class), anyString(), anyInt(), anyString(), any(Locale.class), any(SelectorSetType.class));
 
-		assertThrows(RetryAuthenticationException.class, () -> winRMInvocationHandler.invokeMethod(METHOD, ARGS));
+		assertThrows(
+			RetryAuthenticationException.class,
+			() -> winRMInvocationHandler.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS)
+		);
 
-		verify(METHOD, times(1)).invoke(WIN_RM_WS, ARGS);
+		verifyReceiveInvoked(1);
 	}
 
 	@Test
@@ -515,13 +544,13 @@ class WinRMInvocationHandlerTest {
 			AUTHENTICATIONS
 		);
 
-		doThrow(new InvocationTargetException(new SOAPFaultException(SOAPFactory.newInstance().createFault())))
-			.when(METHOD)
-			.invoke(WIN_RM_WS, ARGS);
+		doThrow(new SOAPFaultException(SOAPFactory.newInstance().createFault()))
+			.when(WIN_RM_WS)
+			.receive(any(Receive.class), anyString(), anyInt(), anyString(), any(Locale.class), any(SelectorSetType.class));
 
-		assertThrows(SOAPFaultException.class, () -> winRMInvocationHandler.invokeMethod(METHOD, ARGS));
+		assertThrows(SOAPFaultException.class, () -> winRMInvocationHandler.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS));
 
-		verify(METHOD, times(1)).invoke(WIN_RM_WS, ARGS);
+		verifyReceiveInvoked(1);
 	}
 
 	@Test
@@ -535,16 +564,18 @@ class WinRMInvocationHandlerTest {
 			AUTHENTICATIONS
 		);
 
-		doThrow(new InvocationTargetException(new IllegalArgumentException())).when(METHOD).invoke(WIN_RM_WS, ARGS);
+		doThrow(new IllegalArgumentException())
+			.when(WIN_RM_WS)
+			.receive(any(Receive.class), anyString(), anyInt(), anyString(), any(Locale.class), any(SelectorSetType.class));
 
 		final IllegalStateException exception = assertThrows(
 			IllegalStateException.class,
-			() -> winRMInvocationHandler.invokeMethod(METHOD, ARGS)
+			() -> winRMInvocationHandler.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS)
 		);
 
-		assertEquals("Failure when calling Receive", exception.getMessage());
+		assertTrue(exception.getMessage().startsWith("Failure when calling receive"));
 
-		verify(METHOD, times(1)).invoke(WIN_RM_WS, ARGS);
+		verifyReceiveInvoked(1);
 	}
 
 	@Test
@@ -558,16 +589,18 @@ class WinRMInvocationHandlerTest {
 			AUTHENTICATIONS
 		);
 
-		doThrow(new InvocationTargetException(new WebServiceException())).when(METHOD).invoke(WIN_RM_WS, ARGS);
+		doThrow(new WebServiceException())
+			.when(WIN_RM_WS)
+			.receive(any(Receive.class), anyString(), anyInt(), anyString(), any(Locale.class), any(SelectorSetType.class));
 
 		final RuntimeException exception = assertThrows(
 			RuntimeException.class,
-			() -> winRMInvocationHandler.invokeMethod(METHOD, ARGS)
+			() -> winRMInvocationHandler.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS)
 		);
 
-		assertEquals("Exception occurred while making WinRM WebService call Receive", exception.getMessage());
+		assertTrue(exception.getMessage().startsWith("Exception occurred while making WinRM WebService call receive"));
 
-		verify(METHOD, times(1)).invoke(WIN_RM_WS, ARGS);
+		verifyReceiveInvoked(1);
 	}
 
 	@Test
@@ -583,22 +616,20 @@ class WinRMInvocationHandlerTest {
 			authentications
 		);
 
-		doThrow(
-			new InvocationTargetException(new WebServiceException(new IOException("Authorization loop detected on Conduit")))
-		)
-			.when(METHOD)
-			.invoke(WIN_RM_WS, ARGS);
+		doThrow(new WebServiceException(new IOException("Authorization loop detected on Conduit")))
+			.when(WIN_RM_WS)
+			.receive(any(Receive.class), anyString(), anyInt(), anyString(), any(Locale.class), any(SelectorSetType.class));
 
 		final RetryTgtExpirationException exception = assertThrows(
 			RetryTgtExpirationException.class,
-			() -> winRMInvocationHandler.invokeMethod(METHOD, ARGS)
+			() -> winRMInvocationHandler.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS)
 		);
 
 		final Throwable cause = exception.getCause();
 		assertTrue(cause instanceof RuntimeException);
 		assertEquals("Authentication error on http://host:5985/wsman with user name \"JohnDoe\"", cause.getMessage());
 
-		verify(METHOD, times(1)).invoke(WIN_RM_WS, ARGS);
+		verifyReceiveInvoked(1);
 	}
 
 	@Test
@@ -612,22 +643,20 @@ class WinRMInvocationHandlerTest {
 			AUTHENTICATIONS
 		);
 
-		doThrow(
-			new InvocationTargetException(new WebServiceException(new IOException("Authorization loop detected on Conduit")))
-		)
-			.when(METHOD)
-			.invoke(WIN_RM_WS, ARGS);
+		doThrow(new WebServiceException(new IOException("Authorization loop detected on Conduit")))
+			.when(WIN_RM_WS)
+			.receive(any(Receive.class), anyString(), anyInt(), anyString(), any(Locale.class), any(SelectorSetType.class));
 
 		final RetryAuthenticationException exception = assertThrows(
 			RetryAuthenticationException.class,
-			() -> winRMInvocationHandler.invokeMethod(METHOD, ARGS)
+			() -> winRMInvocationHandler.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS)
 		);
 
 		final Throwable cause = exception.getCause();
 		assertTrue(cause instanceof RuntimeException);
 		assertEquals("Authentication error on http://host:5985/wsman with user name \"JohnDoe\"", cause.getMessage());
 
-		verify(METHOD, times(1)).invoke(WIN_RM_WS, ARGS);
+		verifyReceiveInvoked(1);
 	}
 
 	@Test
@@ -641,21 +670,22 @@ class WinRMInvocationHandlerTest {
 			AUTHENTICATIONS
 		);
 
-		doThrow(new InvocationTargetException(new WebServiceException(new IOException())))
-			.doThrow(new InvocationTargetException(new WebServiceException(new IOException())))
-			.doThrow(new InvocationTargetException(new WebServiceException(new IOException())))
+		doThrow(new WebServiceException(new IOException()))
+			.doThrow(new WebServiceException(new IOException()))
+			.doThrow(new WebServiceException(new IOException()))
 			.doReturn(RESULT)
-			.when(METHOD)
-			.invoke(WIN_RM_WS, ARGS);
+			.when(WIN_RM_WS)
+			.receive(any(Receive.class), anyString(), anyInt(), anyString(), any(Locale.class), any(SelectorSetType.class));
 
 		final RuntimeException exception = assertThrows(
 			RuntimeException.class,
-			() -> winRMInvocationHandler.invokeMethod(METHOD, ARGS)
+			() -> winRMInvocationHandler.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS)
 		);
 
-		assertEquals("failed task \"Receive\" after 3 attempts", exception.getMessage());
+		assertTrue(exception.getMessage().startsWith("failed task \"receive"));
+		assertTrue(exception.getMessage().endsWith("after 3 attempts"));
 
-		verify(METHOD, times(3)).invoke(WIN_RM_WS, ARGS);
+		verifyReceiveInvoked(3);
 	}
 
 	@Test
@@ -669,11 +699,13 @@ class WinRMInvocationHandlerTest {
 			AUTHENTICATIONS
 		);
 
-		doReturn(RESULT).when(METHOD).invoke(WIN_RM_WS, ARGS);
+		doReturn(RESULT)
+			.when(WIN_RM_WS)
+			.receive(any(Receive.class), anyString(), anyInt(), anyString(), any(Locale.class), any(SelectorSetType.class));
 
-		assertEquals(RESULT, winRMInvocationHandler.invokeMethod(METHOD, ARGS));
+		assertEquals(RESULT, winRMInvocationHandler.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS));
 
-		verify(METHOD, times(1)).invoke(WIN_RM_WS, ARGS);
+		verifyReceiveInvoked(1);
 	}
 
 	@Test
@@ -687,14 +719,14 @@ class WinRMInvocationHandlerTest {
 			AUTHENTICATIONS
 		);
 
-		doThrow(new InvocationTargetException(new WebServiceException(new IOException())))
+		doThrow(new WebServiceException(new IOException()))
 			.doReturn(RESULT)
-			.when(METHOD)
-			.invoke(WIN_RM_WS, ARGS);
+			.when(WIN_RM_WS)
+			.receive(any(Receive.class), anyString(), anyInt(), anyString(), any(Locale.class), any(SelectorSetType.class));
 
-		assertEquals(RESULT, winRMInvocationHandler.invokeMethod(METHOD, ARGS));
+		assertEquals(RESULT, winRMInvocationHandler.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS));
 
-		verify(METHOD, times(2)).invoke(WIN_RM_WS, ARGS);
+		verifyReceiveInvoked(2);
 	}
 
 	@Test
@@ -708,15 +740,15 @@ class WinRMInvocationHandlerTest {
 			AUTHENTICATIONS
 		);
 
-		doThrow(new InvocationTargetException(new WebServiceException(new IOException())))
-			.doThrow(new InvocationTargetException(new WebServiceException(new IOException())))
+		doThrow(new WebServiceException(new IOException()))
+			.doThrow(new WebServiceException(new IOException()))
 			.doReturn(RESULT)
-			.when(METHOD)
-			.invoke(WIN_RM_WS, ARGS);
+			.when(WIN_RM_WS)
+			.receive(any(Receive.class), anyString(), anyInt(), anyString(), any(Locale.class), any(SelectorSetType.class));
 
-		assertEquals(RESULT, winRMInvocationHandler.invokeMethod(METHOD, ARGS));
+		assertEquals(RESULT, winRMInvocationHandler.invokeMethod(RECEIVE_METHOD, RECEIVE_ARGS));
 
-		verify(METHOD, times(3)).invoke(WIN_RM_WS, ARGS);
+		verifyReceiveInvoked(3);
 	}
 
 	@Test
@@ -751,11 +783,10 @@ class WinRMInvocationHandlerTest {
 	@Test
 	void testCreateCallInfos() {
 		assertEquals(EMPTY, createCallInfos(null, null));
-		assertEquals(EMPTY, createCallInfos(mock(Method.class), null));
-		assertEquals("Receive", createCallInfos(METHOD, null));
+		assertEquals("receive", createCallInfos(RECEIVE_METHOD, null));
 		assertEquals(EMPTY, createCallInfos(null, ARGS));
 
 		final Object[] args = { "arg1", 2, true };
-		assertEquals("Receive arg1 2 true", createCallInfos(METHOD, args));
+		assertEquals("receive arg1 2 true", createCallInfos(RECEIVE_METHOD, args));
 	}
 }
