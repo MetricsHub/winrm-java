@@ -403,6 +403,14 @@ public class WinRMInvocationHandler implements InvocationHandler {
 		client.getOutInterceptors().add(new SignAndEncryptOutInterceptor());
 
 		// this is different to endpoint properties
+		// Shutdown any existing factory before replacing to prevent thread leaks during authentication retries
+		final Object existingFactory = client
+			.getEndpoint()
+			.getEndpointInfo()
+			.getProperty(HTTPConduitFactory.class.getName());
+		if (existingFactory instanceof AsyncHttpEncryptionAwareConduitFactory) {
+			((AsyncHttpEncryptionAwareConduitFactory) existingFactory).shutdown();
+		}
 		client
 			.getEndpoint()
 			.getEndpointInfo()

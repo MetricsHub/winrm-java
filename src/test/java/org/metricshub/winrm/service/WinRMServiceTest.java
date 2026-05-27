@@ -31,6 +31,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import org.apache.cxf.Bus;
+import org.apache.cxf.endpoint.Client;
+import org.apache.cxf.endpoint.Endpoint;
+import org.apache.cxf.service.model.EndpointInfo;
+import org.apache.cxf.transport.http.HTTPConduitFactory;
+import org.apache.cxf.transport.http.asyncclient.AsyncHTTPConduitFactory;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -267,5 +272,74 @@ class WinRMServiceTest {
 
 			assertEquals(emptyList(), winRMService.executeWql(wqlQuery, timeout));
 		}
+	}
+
+	@Test
+	void testCloseShutdownsConduitFactories() throws Exception {
+		// Use a unique endpoint to avoid interference with other test stubs
+		final WinRMEndpoint endpointForFactoryTest = new WinRMEndpoint(
+			null,
+			"factory-test-host",
+			null,
+			"user",
+			"pwd".toCharArray(),
+			null
+		);
+
+		// Set up a mock factory that will be stored in the client's endpoint info
+		final AsyncHTTPConduitFactory mockFactory = mock(AsyncHTTPConduitFactory.class);
+
+		// Set up mock endpoint info containing the factory
+		final EndpointInfo mockEndpointInfo = mock(EndpointInfo.class);
+		doReturn(mockFactory).when(mockEndpointInfo).getProperty(HTTPConduitFactory.class.getName());
+
+		// Set up mock endpoint
+		final Endpoint mockEndpoint = mock(Endpoint.class);
+		doReturn(mockEndpointInfo).when(mockEndpoint).getEndpointInfo();
+
+		// Set up mock client
+		final Client mockClient = mock(Client.class);
+		doReturn(mockEndpoint).when(mockClient).getEndpoint();
+
+		// Set up mock invocation handlers that expose the configured client
+		final WinRMInvocationHandler cmdHandler = mock(WinRMInvocationHandler.class);
+		doReturn(mockClient).when(cmdHandler).getClient();
+
+		final WinRMInvocationHandler wqlHandler = mock(WinRMInvocationHandler.class);
+		doReturn(mockClient).when(wqlHandler).getClient();
+
+		// Override the default stubs for this specific endpoint (registered later, so they take precedence)
+		MOCKED_WIN_RM_SERVICE
+			.when(() ->
+				WinRMService.createWinRMInvocationHandlerInstance(
+					eq(endpointForFactoryTest),
+					any(Bus.class),
+					anyLong(),
+					isNull(),
+					isNull(),
+					anyList()
+				)
+			)
+			.thenReturn(cmdHandler);
+
+		MOCKED_WIN_RM_SERVICE
+			.when(() ->
+				WinRMService.createWinRMInvocationHandlerInstance(
+					eq(endpointForFactoryTest),
+					any(Bus.class),
+					anyLong(),
+					anyString(),
+					isNull(),
+					anyList()
+				)
+			)
+			.thenReturn(wqlHandler);
+
+		// Create the service and immediately close it
+		final WinRMService winRMService = createInstance(endpointForFactoryTest, 30000L, null, singletonList(NTLM));
+		winRMService.close();
+
+		// Verify that shutdown() was called on the factory for both the cmd and wql clients
+		verify(mockFactory, times(2)).shutdown();
 	}
 }

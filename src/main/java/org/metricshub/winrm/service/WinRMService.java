@@ -56,6 +56,7 @@ import org.apache.cxf.Bus;
 import org.apache.cxf.Bus.BusState;
 import org.apache.cxf.BusFactory;
 import org.apache.cxf.endpoint.Client;
+import org.apache.cxf.transport.http.HTTPConduitFactory;
 import org.apache.cxf.transport.http.asyncclient.AsyncHTTPConduit;
 import org.apache.cxf.transport.http.asyncclient.AsyncHTTPConduitFactory;
 import org.apache.cxf.transport.http.asyncclient.AsyncHTTPConduitFactory.UseAsyncPolicy;
@@ -352,16 +353,32 @@ public class WinRMService implements WindowsRemoteExecutor {
 			}
 
 			if (cmdClient != null) {
+				shutdownConduitFactory(cmdClient);
 				cmdClient.destroy();
 			}
 
 			if (wqlClient != null) {
+				shutdownConduitFactory(wqlClient);
 				wqlClient.destroy();
 			}
 
 			if (bus != null && bus.getState() != BusState.SHUTDOWN) {
 				bus.shutdown(true);
 			}
+		}
+	}
+
+	/**
+	 * Retrieves the {@link AsyncHTTPConduitFactory} registered on the given client's endpoint and calls
+	 * {@link AsyncHTTPConduitFactory#shutdown()} on it to stop any background threads (e.g. the idle-connection
+	 * reaper thread). This must be done before destroying the client to prevent thread leaks.
+	 *
+	 * @param client the CXF {@link Client} whose conduit factory should be shut down
+	 */
+	private static void shutdownConduitFactory(final Client client) {
+		final Object factory = client.getEndpoint().getEndpointInfo().getProperty(HTTPConduitFactory.class.getName());
+		if (factory instanceof AsyncHTTPConduitFactory) {
+			((AsyncHTTPConduitFactory) factory).shutdown();
 		}
 	}
 
