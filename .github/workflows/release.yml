@@ -18,7 +18,7 @@ on:
 
 jobs:
   release:
-    uses: metricshub/workflows/.github/workflows/maven-central-release.yml@v5
+    uses: metricshub/workflows/.github/workflows/maven-central-release.yml@v6
     with:
       releaseVersion: ${{ inputs.releaseVersion }}
       developmentVersion: ${{ inputs.developmentVersion }}
