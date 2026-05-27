@@ -10,7 +10,7 @@ on:
 
 jobs:
   deploy:
-    uses: metricshub/workflows/.github/workflows/maven-central-deploy.yml@v5
+    uses: metricshub/workflows/.github/workflows/maven-central-deploy.yml@v6
     with:
       jdkVersion: "17"
     secrets: inherit
