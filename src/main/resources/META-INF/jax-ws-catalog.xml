@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OASIS XML Catalog auto-discovered by Apache CXF's OASISCatalogManager from every JAR
+  on the classpath at path META-INF/jax-ws-catalog.xml.
+
+  Without this catalog, Apache CXF's WSDL loader fetches the absolute schema URLs
+  referenced by xs:import in wsdl/WinRM.wsdl directly from schemas.dmtf.org and
+  www.w3.org over the network at every WinRMService.createInstance() call. On
+  offline / air-gapped / restricted-egress hosts those fetches block for ~75s
+  each (OS TCP timeout) before failing with:
+
+      javax.wsdl.WSDLException: WSDLException
+      (at /wsdl:definitions/wsdl:types/xs:schema[1]):
+       faultCode=PARSER_ERROR: Problem parsing
+       'http://schemas.dmtf.org/wbem/wsman/1/dsp8034_1.0.xsd'.:
+      java.net.ConnectException: Connection timed out
+
+  Relative <system uri="..."> values resolve against this catalog's URL inside
+  the JAR, so "../xsd/X.xsd" -> "xsd/X.xsd" at the JAR root.
+-->
+<catalog xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog" prefer="system">
+    <system systemId="http://schemas.dmtf.org/wbem/wsman/1/dsp8033_1.0.xsd"
+            uri="../xsd/dsp8033_1.0.xsd"/>
+    <system systemId="http://schemas.dmtf.org/wbem/wsman/1/dsp8034_1.0.xsd"
+            uri="../xsd/dsp8034_1.0.xsd"/>
+    <system systemId="http://www.w3.org/2001/xml.xsd"
+            uri="../xsd/xml.xsd"/>
+    <system systemId="http://www.w3.org/2006/03/addressing/ws-addr.xsd"
+            uri="../xsd/ws-addr.xsd"/>
+</catalog>
