@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.InputStream;
+import java.net.URI;
 import org.apache.cxf.Bus;
 import org.apache.cxf.BusFactory;
 import org.apache.cxf.catalog.OASISCatalogManager;
@@ -24,14 +26,20 @@ class CatalogResolutionTest {
 
 	@Test
 	void catalogResolvesWsdlImportUrlsToClasspathResources() throws Exception {
-		final Bus bus = BusFactory.getDefaultBus(true);
-		final OASISCatalogManager catalog = OASISCatalogManager.getCatalogManager(bus);
-		assertNotNull(catalog, "CXF OASISCatalogManager must be available");
+		// Dedicated Bus so the test neither leaks CXF resources nor mutates the
+		// JVM-wide default Bus shared with other tests.
+		final Bus bus = BusFactory.newInstance().createBus();
+		try {
+			final OASISCatalogManager catalog = OASISCatalogManager.getCatalogManager(bus);
+			assertNotNull(catalog, "CXF OASISCatalogManager must be available");
 
-		assertResolvesToClasspath(catalog, "http://schemas.dmtf.org/wbem/wsman/1/dsp8033_1.0.xsd", "dsp8033_1.0.xsd");
-		assertResolvesToClasspath(catalog, "http://schemas.dmtf.org/wbem/wsman/1/dsp8034_1.0.xsd", "dsp8034_1.0.xsd");
-		assertResolvesToClasspath(catalog, "http://www.w3.org/2001/xml.xsd", "xml.xsd");
-		assertResolvesToClasspath(catalog, "http://www.w3.org/2006/03/addressing/ws-addr.xsd", "ws-addr.xsd");
+			assertResolvesToClasspath(catalog, "http://schemas.dmtf.org/wbem/wsman/1/dsp8033_1.0.xsd", "dsp8033_1.0.xsd");
+			assertResolvesToClasspath(catalog, "http://schemas.dmtf.org/wbem/wsman/1/dsp8034_1.0.xsd", "dsp8034_1.0.xsd");
+			assertResolvesToClasspath(catalog, "http://www.w3.org/2001/xml.xsd", "xml.xsd");
+			assertResolvesToClasspath(catalog, "http://www.w3.org/2006/03/addressing/ws-addr.xsd", "ws-addr.xsd");
+		} finally {
+			bus.shutdown(true);
+		}
 	}
 
 	private static void assertResolvesToClasspath(
@@ -47,5 +55,10 @@ class CatalogResolutionTest {
 			"catalog returned a network URL for " + systemId + " -> " + resolved
 		);
 		assertTrue(resolved.endsWith(expectedSuffix), "resolved URI does not end with " + expectedSuffix + ": " + resolved);
+		// The mapping must point at a resource that actually exists and is readable,
+		// not just a well-formed URI.
+		try (InputStream stream = new URI(resolved).toURL().openStream()) {
+			assertTrue(stream.read() != -1, "resolved URI is empty: " + resolved);
+		}
 	}
 }
