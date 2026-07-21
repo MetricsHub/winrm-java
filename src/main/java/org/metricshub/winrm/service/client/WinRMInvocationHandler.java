@@ -50,6 +50,7 @@ import org.apache.cxf.endpoint.Client;
 import org.apache.cxf.frontend.ClientProxy;
 import org.apache.cxf.jaxws.JaxWsProxyFactoryBean;
 import org.apache.cxf.message.Message;
+import org.apache.cxf.service.model.EndpointInfo;
 import org.apache.cxf.service.model.ServiceInfo;
 import org.apache.cxf.transport.http.HTTPConduitFactory;
 import org.apache.cxf.transport.http.asyncclient.AsyncHTTPConduit;
@@ -403,18 +404,18 @@ public class WinRMInvocationHandler implements InvocationHandler {
 		client.getOutInterceptors().add(new SignAndEncryptOutInterceptor());
 
 		// this is different to endpoint properties
-		// Shutdown any existing factory before replacing to prevent thread leaks during authentication retries
-		final Object existingFactory = client
-			.getEndpoint()
-			.getEndpointInfo()
-			.getProperty(HTTPConduitFactory.class.getName());
-		if (existingFactory instanceof AsyncHttpEncryptionAwareConduitFactory) {
-			((AsyncHttpEncryptionAwareConduitFactory) existingFactory).shutdown();
+		// Register the conduit factory only once: on authentication retries this method is re-invoked on the
+		// same client, whose cached conduit keeps using the factory it was created with. Replacing the property
+		// would orphan factory instances, and shutting down the in-use factory would silently downgrade the
+		// conduit to the synchronous transport (AsyncHTTPConduit.setupConnection checks factory.isShutdown()).
+		// Reusing the factory also guarantees WinRMService.close() shuts down the instance that owns the
+		// background threads.
+		final EndpointInfo endpointInfo = client.getEndpoint().getEndpointInfo();
+		if (
+			!(endpointInfo.getProperty(HTTPConduitFactory.class.getName()) instanceof AsyncHttpEncryptionAwareConduitFactory)
+		) {
+			endpointInfo.setProperty(HTTPConduitFactory.class.getName(), new AsyncHttpEncryptionAwareConduitFactory());
 		}
-		client
-			.getEndpoint()
-			.getEndpointInfo()
-			.setProperty(HTTPConduitFactory.class.getName(), new AsyncHttpEncryptionAwareConduitFactory());
 
 		final ServiceInfo serviceInfo = client.getEndpoint().getEndpointInfo().getService();
 		serviceInfo.setProperty("soap.force.doclit.bare", true);

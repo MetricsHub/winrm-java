@@ -336,7 +336,10 @@ class WinRMServiceTest {
 			.thenReturn(wqlHandler);
 
 		// Create the service and immediately close it
-		final WinRMService winRMService = createInstance(endpointForFactoryTest, 30000L, null, singletonList(NTLM));
+		// (null ticketCache and authentications: the class-level createInstance stub calling the real
+		// method only matches isNull() for both)
+		final WinRMService winRMService = createInstance(endpointForFactoryTest, 30000L, null, null);
+		assertNotNull(winRMService);
 		winRMService.close();
 
 		// Verify that shutdown() was called on the factory for both the cmd and wql clients

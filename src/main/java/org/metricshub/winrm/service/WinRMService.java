@@ -375,7 +375,7 @@ public class WinRMService implements WindowsRemoteExecutor {
 	 *
 	 * @param client the CXF {@link Client} whose conduit factory should be shut down
 	 */
-	private static void shutdownConduitFactory(final Client client) {
+	private void shutdownConduitFactory(final Client client) {
 		final Object factory = client.getEndpoint().getEndpointInfo().getProperty(HTTPConduitFactory.class.getName());
 		if (factory instanceof AsyncHTTPConduitFactory) {
 			((AsyncHTTPConduitFactory) factory).shutdown();
