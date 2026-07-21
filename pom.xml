@@ -85,7 +85,7 @@
 			<dependency>
 				<groupId>org.junit</groupId>
 				<artifactId>junit-bom</artifactId>
-				<version>5.12.1</version>
+				<version>6.0.0</version>
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
@@ -106,17 +106,17 @@
 		<dependency>
 			<groupId>jakarta.xml.bind</groupId>
 			<artifactId>jakarta.xml.bind-api</artifactId>
-			<version>4.0.2</version>
+			<version>4.0.5</version>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.cxf</groupId>
 			<artifactId>cxf-rt-frontend-jaxws</artifactId>
-			<version>4.1.1</version>
+			<version>4.2.1</version>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.cxf</groupId>
 			<artifactId>cxf-rt-transports-http-hc</artifactId>
-			<version>4.1.1</version>
+			<version>4.2.1</version>
 		</dependency>
 		<dependency>
 			<groupId>com.hierynomus</groupId>
@@ -149,7 +149,7 @@
 			<plugin>
 				<groupId>org.apache.cxf</groupId>
 				<artifactId>cxf-codegen-plugin</artifactId>
-				<version>4.1.1</version>
+				<version>4.2.1</version>
 				<executions>
 					<execution>
 						<id>generate-cxf-stubs</id>
@@ -184,7 +184,7 @@
 			<plugin>
 				<groupId>com.hubspot.maven.plugins</groupId>
 				<artifactId>prettier-maven-plugin</artifactId>
-				<version>0.21</version>
+				<version>0.22</version>
 				<configuration>
 					<prettierJavaVersion>2.5.0</prettierJavaVersion>
 					<ignoreConfigFile>false</ignoreConfigFile>
