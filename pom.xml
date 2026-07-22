@@ -204,6 +204,200 @@
 				</executions>
 			</plugin>
 
+			<!-- Shaded artifact (classifier "shaded"): all dependencies relocated under
+			     org.metricshub.winrm.shaded.* so embedding winrm-java cannot clash with, or leak
+			     ServiceLoader/JAXP registrations into, the host application's classpath.
+			     Exceptions kept as regular external dependencies:
+			     - org.slf4j (logging binding belongs to the host)
+			     - org.bouncycastle (signed JCE provider; relocation would break it) -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-shade-plugin</artifactId>
+				<version>3.6.0</version>
+				<executions>
+					<execution>
+						<phase>package</phase>
+						<goals>
+							<goal>shade</goal>
+						</goals>
+						<configuration>
+							<shadedArtifactAttached>true</shadedArtifactAttached>
+							<shadedClassifierName>shaded</shadedClassifierName>
+							<createDependencyReducedPom>false</createDependencyReducedPom>
+							<artifactSet>
+								<excludes>
+									<!-- jcl-over-slf4j (same groupId) stays IN: it backs the relocated
+									     org.apache.commons.logging used by the shaded Apache HttpClient -->
+									<exclude>org.slf4j:slf4j-api</exclude>
+									<exclude>org.bouncycastle:*</exclude>
+									<exclude>org.jspecify:*</exclude>
+									<exclude>org.apiguardian:*</exclude>
+								</excludes>
+							</artifactSet>
+							<relocations>
+								<relocation>
+									<pattern>org.apache.cxf</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.org.apache.cxf</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>org.apache.neethi</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.org.apache.neethi</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>org.apache.ws.commons.schema</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.org.apache.ws.commons.schema</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>org.apache.commons.logging</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.org.apache.commons.logging</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>org.apache.commons.codec</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.org.apache.commons.codec</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>org.apache.http</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.org.apache.http</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>org.apache.xml.resolver</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.org.apache.xml.resolver</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>javax.wsdl</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.javax.wsdl</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>com.ibm.wsdl</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.com.ibm.wsdl</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>com.ctc.wstx</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.com.ctc.wstx</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>org.codehaus.stax2</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.org.codehaus.stax2</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>com.sun.xml</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.com.sun.xml</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>com.sun.istack</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.com.sun.istack</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>com.oracle.webservices</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.com.oracle.webservices</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>org.glassfish</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.org.glassfish</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>org.jvnet</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.org.jvnet</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>jakarta.activation</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.jakarta.activation</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>jakarta.annotation</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.jakarta.annotation</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>jakarta.mail</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.jakarta.mail</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>jakarta.jws</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.jakarta.jws</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>jakarta.xml.bind</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.jakarta.xml.bind</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>jakarta.xml.soap</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.jakarta.xml.soap</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>jakarta.xml.ws</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.jakarta.xml.ws</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>org.eclipse.angus</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.org.eclipse.angus</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>com.hierynomus</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.com.hierynomus</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>net.engio</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.net.engio</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>org.objectweb.asm</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.org.objectweb.asm</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>com.oracle.xmlns.webservices</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.com.oracle.xmlns.webservices</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>org.xmlsoap.schemas</pattern>
+									<shadedPattern>org.metricshub.winrm.shaded.org.xmlsoap.schemas</shadedPattern>
+								</relocation>
+							</relocations>
+							<filters>
+								<filter>
+									<artifact>*:*</artifact>
+									<excludes>
+										<exclude>module-info.class</exclude>
+										<exclude>META-INF/versions/*/module-info.class</exclude>
+										<exclude>META-INF/*.SF</exclude>
+										<exclude>META-INF/*.DSA</exclude>
+										<exclude>META-INF/*.RSA</exclude>
+										<exclude>META-INF/DEPENDENCIES</exclude>
+										<!-- Do not claim the JVM-wide default StAX implementation in host applications -->
+										<exclude>META-INF/services/javax.xml.stream.*</exclude>
+										<!-- Do not register into host servlet containers (jaxws-rt leftover) -->
+										<exclude>META-INF/services/jakarta.servlet.*</exclude>
+										<!-- Spring/Blueprint integration is not used -->
+										<exclude>META-INF/spring.*</exclude>
+										<exclude>OSGI-INF/**</exclude>
+										<!-- Replaced by the pre-relocated merged copy (IncludeResourceTransformer below) -->
+										<exclude>META-INF/cxf/bus-extensions.txt</exclude>
+									</excludes>
+								</filter>
+							</filters>
+							<transformers>
+								<!-- Renames and rewrites META-INF/services files to the relocated names -->
+								<transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+								<!-- CXF discovers its features from this file; class names inside are plain
+								     text so relocation does not rewrite them. This is the merged content of
+								     all cxf-* jars with the relocation applied (see src/main/shade). -->
+								<transformer implementation="org.apache.maven.plugins.shade.resource.IncludeResourceTransformer">
+									<resource>META-INF/cxf/bus-extensions.txt</resource>
+									<file>src/main/shade/bus-extensions.txt</file>
+								</transformer>
+								<transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+									<manifestEntries>
+										<Multi-Release>true</Multi-Release>
+									</manifestEntries>
+								</transformer>
+								<transformer implementation="org.apache.maven.plugins.shade.resource.ApacheNoticeResourceTransformer">
+									<addHeader>false</addHeader>
+								</transformer>
+							</transformers>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+
 		</plugins>
 	</build>
 

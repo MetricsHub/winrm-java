@@ -21,6 +21,45 @@ This is a simple Maven project. Build with:
 mvn verify
 ```
 
+## Shaded artifact
+
+Besides the regular thin JAR, the build attaches a **shaded** artifact (classifier `shaded`) in which all
+dependencies (Apache CXF, HttpClient, JAXB, SAAJ, smbj, etc.) are relocated under
+`org.metricshub.winrm.shaded.*` and their `META-INF/services` registrations are renamed accordingly.
+Use it to embed winrm-java in applications where its dependency tree could otherwise clash with — or leak
+`ServiceLoader`/JAXP registrations into — the host classpath (e.g., the shaded JAR deliberately does *not*
+register Woodstox as the JVM-wide StAX implementation).
+
+Only two dependencies are intentionally left unshaded and must be provided by the consumer:
+`org.slf4j:slf4j-api` (so the host controls logging) and `org.bouncycastle:bcprov-jdk18on`
+(a signed JCE provider that must not be repackaged).
+
+```xml
+<dependency>
+	<groupId>org.metricshub</groupId>
+	<artifactId>winrm-java</artifactId>
+	<version>${winrm-java.version}</version>
+	<classifier>shaded</classifier>
+	<exclusions>
+		<!-- The shaded JAR embeds everything except slf4j-api and BouncyCastle -->
+		<exclusion>
+			<groupId>*</groupId>
+			<artifactId>*</artifactId>
+		</exclusion>
+	</exclusions>
+</dependency>
+<dependency>
+	<groupId>org.slf4j</groupId>
+	<artifactId>slf4j-api</artifactId>
+	<version>2.0.17</version>
+</dependency>
+<dependency>
+	<groupId>org.bouncycastle</groupId>
+	<artifactId>bcprov-jdk18on</artifactId>
+	<version>1.79</version>
+</dependency>
+```
+
 ## Release instructions
 
 The artifact is deployed to Sonatype's [Maven Central](https://central.sonatype.com/).
