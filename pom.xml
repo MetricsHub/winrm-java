@@ -232,6 +232,24 @@
 									<exclude>org.bouncycastle:*</exclude>
 									<exclude>org.jspecify:*</exclude>
 									<exclude>org.apiguardian:*</exclude>
+									<!-- Metro (jaxws-rt) is a second, unused JAX-WS runtime: CXF is the
+									     implementation here and winrm-java only uses the jakarta.xml.ws API.
+									     Dropping it and its satellites saves ~6.5 MB. saaj-impl and its real
+									     dependencies (stax-ex, mimepull, angus-activation) are kept. -->
+									<exclude>com.sun.xml.ws:*</exclude>
+									<exclude>com.sun.xml.bind:*</exclude>
+									<exclude>com.sun.xml.fastinfoset:*</exclude>
+									<exclude>com.sun.xml.stream.buffer:*</exclude>
+									<exclude>org.glassfish.gmbal:*</exclude>
+									<exclude>org.glassfish.ha:*</exclude>
+									<exclude>org.glassfish.external:*</exclude>
+									<!-- Woodstox stays IN (relocated): CXF requires it for secure StAX parsing
+									     and instantiates it by class name, so dropping its javax.xml.stream
+									     service files (see filters) hides it from the host JVM without
+									     breaking CXF. -->
+									<!-- jakarta.mail is only used for MTOM/attachments, which WinRM never uses -->
+									<exclude>jakarta.mail:*</exclude>
+									<exclude>org.eclipse.angus:angus-mail</exclude>
 								</excludes>
 							</artifactSet>
 							<relocations>
