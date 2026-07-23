@@ -26,9 +26,10 @@ import java.nio.file.Paths;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
+import org.metricshub.winrm.WindowsRemoteExecutor;
 import org.metricshub.winrm.WindowsRemoteProcessUtils;
 import org.metricshub.winrm.service.WinRMEndpoint;
-import org.metricshub.winrm.service.WinRMService;
+import org.metricshub.winrm.service.WinRMExecutorFactory;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 import org.metricshub.winrm.shares.SmbTempShare;
 import org.mockito.MockedStatic;
@@ -162,17 +163,17 @@ class WinRMCommandExecutorTest {
 			final MockedStatic<WindowsRemoteProcessUtils> mockedWindowsRemoteProcessUtils = mockStatic(
 				WindowsRemoteProcessUtils.class
 			);
-			final MockedStatic<WinRMService> mockedWinRMService = mockStatic(WinRMService.class)
+			final MockedStatic<WinRMExecutorFactory> mockedFactory = mockStatic(WinRMExecutorFactory.class)
 		) {
 			mockedWindowsRemoteProcessUtils.when(() -> getWindowsEncodingCharset(any(), anyLong())).thenReturn(UTF_8);
 
-			final WinRMService winRMService = mock(WinRMService.class);
+			final WindowsRemoteExecutor executor = mock(WindowsRemoteExecutor.class);
 
-			mockedWinRMService
-				.when(() -> WinRMService.createInstance(any(WinRMEndpoint.class), anyLong(), isNull(), isNull()))
-				.thenReturn(winRMService);
+			mockedFactory
+				.when(() -> WinRMExecutorFactory.createInstance(any(WinRMEndpoint.class), anyLong(), isNull(), isNull()))
+				.thenReturn(executor);
 
-			doReturn(expected).when(winRMService).executeCommand(eq(command), isNull(), eq(UTF_8), anyLong());
+			doReturn(expected).when(executor).executeCommand(eq(command), isNull(), eq(UTF_8), anyLong());
 
 			assertEquals(
 				expected,
@@ -199,7 +200,7 @@ class WinRMCommandExecutorTest {
 				.thenReturn("launch remote/localFile");
 
 			final SmbTempShare smbTempShare = mock(SmbTempShare.class);
-			final WinRMService winRMService = mock(WinRMService.class);
+			final WindowsRemoteExecutor winRMService = mock(WindowsRemoteExecutor.class);
 
 			mockedSmbTempShare
 				.when(() -> SmbTempShare.createInstance(any(WinRMEndpoint.class), anyLong(), isNull(), isNull()))

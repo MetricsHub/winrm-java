@@ -8,7 +8,7 @@
 	</parent>
 
 	<artifactId>winrm-java</artifactId>
-	<version>1.1.03-SNAPSHOT</version>
+	<version>2.0.00-SNAPSHOT</version>
 
 	<name>WinRM Java Client</name>
 	<description>WinRM Java Client</description>
@@ -104,34 +104,9 @@
 			<scope>test</scope>
 		</dependency>
 		<dependency>
-			<groupId>jakarta.xml.bind</groupId>
-			<artifactId>jakarta.xml.bind-api</artifactId>
-			<version>4.0.5</version>
-		</dependency>
-		<dependency>
-			<groupId>org.apache.cxf</groupId>
-			<artifactId>cxf-rt-frontend-jaxws</artifactId>
-			<version>4.2.1</version>
-		</dependency>
-		<dependency>
-			<groupId>org.apache.cxf</groupId>
-			<artifactId>cxf-rt-transports-http-hc</artifactId>
-			<version>4.2.1</version>
-		</dependency>
-		<dependency>
 			<groupId>com.hierynomus</groupId>
 			<artifactId>smbj</artifactId>
 			<version>0.14.0</version>
-		</dependency>
-		<dependency>
-			<groupId>jakarta.xml.ws</groupId>
-			<artifactId>jakarta.xml.ws-api</artifactId>
-			<version>4.0.2</version>
-		</dependency>
-		<dependency>
-			<groupId>com.sun.xml.ws</groupId>
-			<artifactId>jaxws-rt</artifactId>
-			<version>4.0.3</version>
 		</dependency>
 		<dependency>
 			<groupId>org.mockito</groupId>
@@ -146,40 +121,6 @@
 		<!-- Actual build plugins -->
 		<plugins>
 
-			<plugin>
-				<groupId>org.apache.cxf</groupId>
-				<artifactId>cxf-codegen-plugin</artifactId>
-				<version>4.2.1</version>
-				<executions>
-					<execution>
-						<id>generate-cxf-stubs</id>
-						<phase>generate-sources</phase>
-						<goals>
-							<goal>wsdl2java</goal>
-						</goals>
-						<configuration>
-							<sourceRoot>${project.build.directory}/generated-sources/cxf</sourceRoot>
-							<wsdlOptions>
-								<wsdlOption>
-									<wsdl>${project.basedir}/src/main/resources/wsdl/WinRM.wsdl</wsdl>
-
-									<bindingFiles>
-										<bindingFile>
-											${project.basedir}/src/main/resources/jaxws/bindings.xml</bindingFile>
-									</bindingFiles>
-
-									<extraargs>
-										<extraarg>-validate=basic</extraarg> <!-- enables basic validation -->
-										<extraarg>-keep</extraarg> <!-- Keeps the generated sources -->
-									</extraargs>
-
-								</wsdlOption>
-							</wsdlOptions>
-						</configuration>
-					</execution>
-				</executions>
-			</plugin>
-			
 			<!-- Prettier -->
 			<plugin>
 				<groupId>com.hubspot.maven.plugins</groupId>

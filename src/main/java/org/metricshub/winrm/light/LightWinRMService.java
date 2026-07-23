@@ -1,0 +1,251 @@
+package org.metricshub.winrm.light;
+
+/*-
+ * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
+ * WinRM Java Client
+ * ჻჻჻჻჻჻
+ * Copyright 2023 - 2026 MetricsHub
+ * ჻჻჻჻჻჻
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
+ */
+
+import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import javax.net.ssl.SSLSocketFactory;
+import org.metricshub.winrm.Utils;
+import org.metricshub.winrm.WinRMHttpProtocolEnum;
+import org.metricshub.winrm.WindowsRemoteCommandResult;
+import org.metricshub.winrm.WindowsRemoteExecutor;
+import org.metricshub.winrm.WmiHelper;
+import org.metricshub.winrm.exceptions.WinRMException;
+import org.metricshub.winrm.exceptions.WindowsRemoteException;
+import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
+import org.metricshub.winrm.service.WinRMEndpoint;
+import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
+
+/**
+ * Dependency-free {@link WindowsRemoteExecutor} backed by {@link WsmanClient}. A drop-in
+ * replacement for the CXF-based {@code WinRMService} that shipped before 2.0.0: same public
+ * behaviour, no Apache CXF / JAX-WS / JAXB stack, and immune by construction to JAXP
+ * {@code ServiceLoader} poisoning (it uses the JDK-default XML factories).
+ *
+ * <p>Supports NTLM over HTTP (with message encryption) and over HTTPS (plaintext SOAP inside TLS,
+ * validating the server certificate by default; see {@link LightTls}), and Kerberos over HTTPS
+ * (SPNEGO via the JDK GSS-API; see {@link KerberosAuthScheme}). A multi-scheme request such as
+ * {@code [KERBEROS, NTLM]} is tried in order with fallback.
+ */
+public final class LightWinRMService implements WindowsRemoteExecutor {
+
+	private final WinRMEndpoint winRMEndpoint;
+	private final WsmanClient client;
+	private final AtomicBoolean closed = new AtomicBoolean(false);
+
+	private LightWinRMService(final WinRMEndpoint winRMEndpoint, final WsmanClient client) {
+		this.winRMEndpoint = winRMEndpoint;
+		this.client = client;
+	}
+
+	/**
+	 * Create a light WinRM executor.
+	 *
+	 * @param winRMEndpoint  endpoint with credentials (mandatory)
+	 * @param timeout        timeout in milliseconds (must be &gt; 0)
+	 * @param ticketCache    Kerberos ticket cache path (used by the Kerberos scheme; {@code null} logs
+	 *                       in with the password)
+	 * @param authentications requested authentication schemes, tried in order (NTLM and/or Kerberos);
+	 *                        {@code null}/empty means NTLM only
+	 * @return a new {@code LightWinRMService}
+	 * @throws WinRMException on invalid arguments or an unsupported authentication request
+	 */
+	public static LightWinRMService createInstance(
+		final WinRMEndpoint winRMEndpoint,
+		final long timeout,
+		final java.nio.file.Path ticketCache,
+		final List<AuthenticationEnum> authentications
+	) throws WinRMException {
+		Utils.checkNonNull(winRMEndpoint, "winRMEndpoint");
+		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
+
+		// HTTPS wraps the transport in TLS and exchanges plaintext SOAP; HTTP uses NTLM message sealing.
+		// TLS validates by default (platform trust store + hostname verification); see LightTls.
+		final boolean https = winRMEndpoint.getProtocol() == WinRMHttpProtocolEnum.HTTPS;
+		final SSLSocketFactory sslSocketFactory = https ? LightTls.socketFactory() : null;
+
+		final AuthScheme authScheme = resolveAuthScheme(winRMEndpoint, authentications, https, ticketCache);
+
+		// Use the endpoint's own validated host/port rather than re-parsing the URL: URI.getHost()/getPort()
+		// return null/-1 for names URI cannot classify (underscores, Unicode) that WinRMEndpoint accepts,
+		// which would otherwise make the default backend unable to reach hosts the CXF backend could.
+		final WsmanClient client = new WsmanClient(
+			winRMEndpoint.getHostname(),
+			winRMEndpoint.getPort(),
+			timeout,
+			sslSocketFactory,
+			https && LightTls.verifyHostname(),
+			authScheme,
+			winRMEndpoint.getRawUsername()
+		);
+		return new LightWinRMService(winRMEndpoint, client);
+	}
+
+	/**
+	 * Resolve the requested authentication schemes into a single {@link AuthScheme}, honoring the
+	 * caller's order. {@code null}/empty means NTLM only. A single scheme is used directly; several
+	 * become an ordered {@link FallbackAuthScheme} (e.g. Kerberos then NTLM). Kerberos requires HTTPS
+	 * (no message encryption over plain HTTP, matching the CXF backend), so it is dropped from the
+	 * candidate list over HTTP — a fallback list then uses its remaining schemes, and a Kerberos-only
+	 * request over HTTP fails toward the escape hatch.
+	 */
+	private static AuthScheme resolveAuthScheme(
+		final WinRMEndpoint winRMEndpoint,
+		final List<AuthenticationEnum> authentications,
+		final boolean https,
+		final java.nio.file.Path ticketCache
+	) throws WinRMException {
+		final List<AuthenticationEnum> requested = authentications == null || authentications.isEmpty()
+			? List.of(AuthenticationEnum.NTLM)
+			: authentications;
+
+		final String domain = winRMEndpoint.getDomain();
+		final String username = winRMEndpoint.getUsername();
+		final String password = new String(winRMEndpoint.getPassword());
+
+		final List<AuthScheme> schemes = new ArrayList<>();
+		for (final AuthenticationEnum auth : requested) {
+			if (auth == AuthenticationEnum.NTLM) {
+				schemes.add(new NtlmAuthScheme(domain, username, password, https));
+			} else if (auth == AuthenticationEnum.KERBEROS) {
+				if (https) {
+					// The SPN is HTTP/<hostname>, so the caller must connect by the FQDN the KDC knows.
+					schemes.add(new KerberosAuthScheme(winRMEndpoint.getHostname(), username, password, ticketCache));
+				}
+				// else: Kerberos is unavailable over plain HTTP — leave it out of the candidate list.
+			} else {
+				throw new WinRMException(
+					"The light WinRM backend supports only NTLM and Kerberos (requested: " + requested + ")."
+				);
+			}
+		}
+
+		if (schemes.isEmpty()) {
+			// e.g. Kerberos requested over plain HTTP with no other scheme to fall back to.
+			throw new WinRMException(
+				"Kerberos over WinRM requires HTTPS (endpoint was " +
+				winRMEndpoint.getEndpoint() +
+				"): there is no Kerberos message encryption over plain HTTP. Use HTTPS, or add NTLM to the authentication list."
+			);
+		}
+		return schemes.size() == 1 ? schemes.get(0) : new FallbackAuthScheme(schemes);
+	}
+
+	@Override
+	public List<Map<String, Object>> executeWql(final String wqlQuery, final long timeout)
+		throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
+		checkNotClosed();
+		Utils.checkNonNull(wqlQuery, "wqlQuery");
+		if (!WmiHelper.isValidWql(wqlQuery)) {
+			throw new WqlQuerySyntaxException(wqlQuery);
+		}
+		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
+
+		// Enforce the caller's timeout as a wall-clock deadline (throwing TimeoutException), matching
+		// the CXF WinRMService and bounding the WSMan Pull loop.
+		try {
+			return Utils.execute(
+				() -> {
+					final List<Map<String, String>> rows = client.wql(winRMEndpoint.getNamespace(), wqlQuery);
+					final List<Map<String, Object>> result = new ArrayList<>(rows.size());
+					for (final Map<String, String> row : rows) {
+						result.add(new LinkedHashMap<>(row));
+					}
+					return result;
+				},
+				timeout
+			);
+		} catch (final InterruptedException | ExecutionException e) {
+			if (e.getCause() != null) {
+				throw new WinRMException(e.getCause(), e.getCause().getMessage());
+			}
+			throw new WinRMException(e);
+		}
+	}
+
+	@Override
+	public WindowsRemoteCommandResult executeCommand(
+		final String command,
+		final String workingDirectory,
+		final Charset charset,
+		final long timeout
+	) throws WindowsRemoteException, TimeoutException {
+		checkNotClosed();
+		Utils.checkNonNull(command, "command");
+		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
+
+		// Enforce the caller's timeout as a wall-clock deadline (throwing TimeoutException), matching
+		// the CXF WinRMService and bounding the WSMan Receive loop.
+		try {
+			return Utils.execute(
+				() -> {
+					final long start = Utils.getCurrentTimeMillis();
+					final WsmanClient.CommandOutput output = client.executeCommand(command, workingDirectory, charset);
+					final float executionTime = (Utils.getCurrentTimeMillis() - start) / 1000.0f;
+					return new WindowsRemoteCommandResult(output.stdout, output.stderr, executionTime, output.exitCode);
+				},
+				timeout
+			);
+		} catch (final InterruptedException | ExecutionException e) {
+			if (e.getCause() != null) {
+				throw new WinRMException(e.getCause(), e.getCause().getMessage());
+			}
+			throw new WinRMException(e);
+		}
+	}
+
+	@Override
+	public String getHostname() {
+		return winRMEndpoint.getHostname();
+	}
+
+	@Override
+	public String getUsername() {
+		return winRMEndpoint.getRawUsername();
+	}
+
+	@Override
+	public char[] getPassword() {
+		return winRMEndpoint.getPassword();
+	}
+
+	@Override
+	public void close() {
+		// Idempotent: releases the underlying connection exactly once, and marks the executor closed so
+		// a later operation is rejected rather than silently reviving it with a fresh handshake.
+		if (closed.compareAndSet(false, true)) {
+			client.close();
+		}
+	}
+
+	private void checkNotClosed() {
+		// Same message as the CXF backend's checkConnectedFirst() — part of the exception surface.
+		if (closed.get()) {
+			throw new IllegalStateException("This instance has been closed and a new one must be created.");
+		}
+	}
+}

@@ -33,9 +33,10 @@ import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.metricshub.winrm.ShareRemoteDirectoryConsumer;
+import org.metricshub.winrm.WindowsRemoteExecutor;
 import org.metricshub.winrm.WindowsTempShare;
 import org.metricshub.winrm.service.WinRMEndpoint;
-import org.metricshub.winrm.service.WinRMService;
+import org.metricshub.winrm.service.WinRMExecutorFactory;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 import org.mockito.MockedStatic;
 
@@ -63,19 +64,19 @@ class SmbTempShareTest {
 		assertThrows(IllegalArgumentException.class, () -> createInstance(winRMEndpoint, 0L, ticketCache, authentications));
 
 		try (
-			final MockedStatic<WinRMService> mockedWinRMService = mockStatic(WinRMService.class);
+			final MockedStatic<WinRMExecutorFactory> mockedFactory = mockStatic(WinRMExecutorFactory.class);
 			final MockedStatic<SmbTempShare> mockedSmbTempShare = mockStatic(SmbTempShare.class);
 			final MockedStatic<WindowsTempShare> mockedWindowsTempShare = mockStatic(WindowsTempShare.class);
 			final MockedStatic<SmbConfig> mockedSmbConfig = mockStatic(SmbConfig.class)
 		) {
-			final WinRMService winRMService = mock(WinRMService.class);
-			mockedWinRMService
-				.when(() -> WinRMService.createInstance(winRMEndpoint, timeout, null, null))
-				.thenReturn(winRMService);
+			final WindowsRemoteExecutor executor = mock(WindowsRemoteExecutor.class);
+			mockedFactory
+				.when(() -> WinRMExecutorFactory.createInstance(winRMEndpoint, timeout, null, null))
+				.thenReturn(executor);
 
 			final WindowsTempShare windowsTempShare = mock(WindowsTempShare.class);
 			mockedWindowsTempShare
-				.when(() -> getOrCreateShare(eq(winRMService), anyLong(), any(ShareRemoteDirectoryConsumer.class)))
+				.when(() -> getOrCreateShare(eq(executor), anyLong(), any(ShareRemoteDirectoryConsumer.class)))
 				.thenReturn(windowsTempShare);
 			doReturn("\\\\2001-db8--85b-3c51-f5ff-ffdb.ipv6-literal.net\\SEN_ShareFor_PC-TEST$")
 				.when(windowsTempShare)
@@ -112,14 +113,14 @@ class SmbTempShareTest {
 			final SmbTempShare smbTempShare1 = createInstance(winRMEndpoint, timeout, null, null);
 			assertNotNull(smbTempShare1);
 			assertEquals(1, smbTempShare1.getUseCount());
-			assertEquals(winRMService, smbTempShare1.getWindowsRemoteExecutor());
+			assertEquals(executor, smbTempShare1.getWindowsRemoteExecutor());
 			assertTrue(smbTempShare1.isConnected());
 
 			final SmbTempShare smbTempShare2 = createInstance(winRMEndpoint, timeout, null, null);
 			assertNotNull(smbTempShare2);
 			assertEquals(2, smbTempShare1.getUseCount());
 			assertEquals(2, smbTempShare2.getUseCount());
-			assertEquals(winRMService, smbTempShare2.getWindowsRemoteExecutor());
+			assertEquals(executor, smbTempShare2.getWindowsRemoteExecutor());
 			assertTrue(smbTempShare1.isConnected());
 			assertTrue(smbTempShare2.isConnected());
 

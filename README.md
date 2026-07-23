@@ -13,6 +13,30 @@ The Windows Remote Management (WinRM) Java Client is a library that enables to:
 * Connect to a remote Windows server using one of the two authentication types (NTLM, KERBEROS)
 * Execute WMI Query Language (WQL) queries which uses HTTP/HTTPS protocols.
 
+> ## ⚠️ Upgrading from 1.x
+>
+> Version 2.0.0 **removed the legacy Apache CXF backend**: the dependency-free **light** client is
+> the only implementation (same public API — calling code is unaffected). Two consequences:
+>
+> * Unlike the CXF-based client, which silently trusted every TLS certificate, the light client
+>   **validates the server certificate and verifies the hostname by default**.
+>   **WinRM-over-HTTPS connections to hosts with self-signed or otherwise untrusted certificates
+>   will fail** during the TLS handshake unless you install the server certificate (or its issuing
+>   CA) into a Java trust store (e.g. `-Djavax.net.ssl.trustStore=...`) or disable TLS validation
+>   with `-Dorg.metricshub.winrm.tls.insecure=true` (**insecure — for testing only**).
+> * Setting `-Dorg.metricshub.winrm.backend=cxf` now fails with a clear error instead of selecting
+>   the removed backend. Remove the property (or stay on winrm-java 1.x).
+
+## The WinRM client
+
+The client is dependency-free (no Apache CXF / JAX-WS / JAXB — the only runtime dependency is
+`smbj`, used for copying files to remote shares) and immune by construction to JAXP
+`ServiceLoader` conflicts (it uses the JDK-default XML factories). It supports **NTLM over HTTP
+(with message encryption) and HTTPS** and **Kerberos (SPNEGO) over HTTPS**. Over HTTPS it
+validates the certificate and verifies the hostname by default (see the upgrade warning above);
+`-Dorg.metricshub.winrm.tls.insecure=true` trusts all certificates (insecure, testing only).
+Kerberos uses the ambient Kerberos configuration (`krb5.conf` / `-Djava.security.krb5.*`).
+
 ## Build instructions
 
 This is a simple Maven project. Build with:
@@ -20,6 +44,30 @@ This is a simple Maven project. Build with:
 ```bash
 mvn verify
 ```
+
+### Protocol tests
+
+The build includes in-process protocol tests (`WsmanProtocolTest`) that exercise the client's
+full WSMan path — NTLM handshake, message encryption, `multipart/encrypted` framing, WQL
+Enumerate/Pull paging, the command shell lifecycle, and fault mapping — against a fake WSMan
+server, so no Windows host is needed in CI.
+
+### Live run against a real host
+
+`WinRMLiveTest` runs a WQL query and a command against a **real** WinRM host (the successor of
+the pre-2.0.0 CXF-vs-light differential harness). It is skipped unless `winrm.live.host` is set:
+
+```bash
+mvn test -Dtest=WinRMLiveTest \
+  -Dwinrm.live.host=myhost.example.com \
+  -Dwinrm.live.protocol=https \
+  -Dwinrm.live.username='MYDOMAIN\myuser' \
+  -Dwinrm.live.password-file=/path/to/password.txt
+```
+
+Optional properties: `winrm.live.port`, `winrm.live.password` (inline), `winrm.live.namespace`,
+`winrm.live.wql`, `winrm.live.command`, and `winrm.live.tls.insecure=true` (skip TLS validation
+for hosts with self-signed certificates).
 
 ## Release instructions
 
