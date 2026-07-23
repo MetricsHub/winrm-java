@@ -29,7 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.xml.XMLConstants;
@@ -79,10 +79,12 @@ final class WsmanClient implements AutoCloseable {
 	private String pendingAuthorization;
 	private String shellId;
 
-	// True while a SOAP request is on the wire. close() consults this to avoid racing an abandoned
-	// worker (e.g. a Receive left blocked on the socket after a command timeout) on the shared
-	// socket and stateful RC4 session.
-	private final AtomicBoolean requestInFlight = new AtomicBoolean(false);
+	// A single NTLM connection is a serial channel: one socket, stateful RC4 ciphers with sequence
+	// numbers, and a single shellId. Concurrent callers (e.g. a cached SmbTempShare shared across
+	// threads) MUST NOT interleave, or they read each other's responses and desync the cipher streams.
+	// Every high-level operation (wql/executeCommand) runs while holding this lock; close() only
+	// tries it, so it can still hard-close the transport to unblock an abandoned, timed-out worker.
+	private final ReentrantLock operationLock = new ReentrantLock();
 
 	WsmanClient(
 		final String host,
@@ -118,24 +120,31 @@ final class WsmanClient implements AutoCloseable {
 
 	/** Run a WQL query and return the rows as ordered property maps. */
 	List<Map<String, String>> wql(final String namespace, final String query) throws Exception {
-		// WMI namespaces are case-insensitive, but preserve the caller's case to match the CXF backend.
-		final String ns = namespace.replace('\\', '/');
-		final List<Map<String, String>> rows = new ArrayList<>();
+		// Serialize the whole enumeration (Enumerate + all Pulls) against any other operation sharing
+		// this connection; see operationLock.
+		operationLock.lock();
+		try {
+			// WMI namespaces are case-insensitive, but preserve the caller's case to match the CXF backend.
+			final String ns = namespace.replace('\\', '/');
+			final List<Map<String, String>> rows = new ArrayList<>();
 
-		Document doc = expectOk(Envelopes.enumerateWql(url, ns, query, timeoutMs), "Enumerate");
-		collectItems(doc, rows);
-
-		// Pull until the server signals EndOfSequence (matching the CXF backend). The aggregate
-		// timeout in LightWinRMService bounds a misbehaving server that never ends the sequence.
-		boolean endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
-		String context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
-		while (!endOfSequence && context != null && !context.isEmpty()) {
-			doc = expectOk(Envelopes.pull(url, ns, context, timeoutMs), "Pull");
+			Document doc = expectOk(Envelopes.enumerateWql(url, ns, query, timeoutMs), "Enumerate");
 			collectItems(doc, rows);
-			endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
-			context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
+
+			// Pull until the server signals EndOfSequence (matching the CXF backend). The aggregate
+			// timeout in LightWinRMService bounds a misbehaving server that never ends the sequence.
+			boolean endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
+			String context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
+			while (!endOfSequence && context != null && !context.isEmpty()) {
+				doc = expectOk(Envelopes.pull(url, ns, context, timeoutMs), "Pull");
+				collectItems(doc, rows);
+				endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
+				context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
+			}
+			return rows;
+		} finally {
+			operationLock.unlock();
 		}
-		return rows;
 	}
 
 	/** The result of running a command in the remote shell. */
@@ -155,15 +164,22 @@ final class WsmanClient implements AutoCloseable {
 	/** Execute a command in the remote command shell, creating the shell on first use. */
 	CommandOutput executeCommand(final String commandLine, final String workingDirectory, final Charset charset)
 		throws Exception {
-		if (shellId == null) {
-			createShell(workingDirectory);
-		}
-		final Charset cs = charset != null ? charset : StandardCharsets.UTF_8;
-		final String commandId = startCommand(commandLine);
+		// Serialize the whole shell lifecycle (Create + Command + Receive loop + Signal) against any
+		// other operation sharing this connection and the shellId field; see operationLock.
+		operationLock.lock();
 		try {
-			return receiveLoop(commandId, cs);
+			if (shellId == null) {
+				createShell(workingDirectory);
+			}
+			final Charset cs = charset != null ? charset : StandardCharsets.UTF_8;
+			final String commandId = startCommand(commandLine);
+			try {
+				return receiveLoop(commandId, cs);
+			} finally {
+				terminate(commandId);
+			}
 		} finally {
-			terminate(commandId);
+			operationLock.unlock();
 		}
 	}
 
@@ -229,40 +245,39 @@ final class WsmanClient implements AutoCloseable {
 		return resp.document;
 	}
 
-	/** Send one SOAP request (authenticating the connection on first use) and decrypt the response. */
+	/**
+	 * Send one SOAP request (authenticating the connection on first use) and decrypt the response.
+	 * The caller must hold {@link #operationLock}; every path here is reached from a locked
+	 * wql/executeCommand/close, so requests never interleave on the stateful NTLM connection.
+	 */
 	private Decoded request(final String soap) throws Exception {
-		requestInFlight.set(true);
-		try {
-			// If the connection was dropped (e.g. the server sent "Connection: close"), the NTLM session
-			// bound to it is dead — re-handshake on the fresh connection rather than sending unauthenticated.
-			if (session.isAuthenticated() && !transport.isConnected()) {
-				session.reset();
-			}
-			if (!session.isAuthenticated()) {
-				authenticate();
-			}
-			// The Type 3 authorization accompanies the first encrypted payload; later requests on the
-			// already-authenticated connection carry no Authorization header.
-			final String authorization = pendingAuthorization;
-			pendingAuthorization = null;
-
-			final byte[] encrypted = NtlmCrypto.encryptAndSign(session, soap.getBytes(StandardCharsets.UTF_8));
-			final HttpTransport.Response resp = transport.post(
-				"/wsman",
-				encrypted,
-				NtlmCrypto.ENCRYPTED_CONTENT_TYPE,
-				authorization
-			);
-
-			// 200 = success, 500 = SOAP fault (both bodies are encrypted). Anything else is a protocol
-			// or authentication failure whose body is not a usable WSMan response.
-			if (resp.status != 200 && resp.status != 500) {
-				throw new IllegalStateException("WSMan request failed: HTTP " + resp.status);
-			}
-			return new Decoded(resp.status, decryptResponse(resp));
-		} finally {
-			requestInFlight.set(false);
+		// If the connection was dropped (e.g. the server sent "Connection: close"), the NTLM session
+		// bound to it is dead — re-handshake on the fresh connection rather than sending unauthenticated.
+		if (session.isAuthenticated() && !transport.isConnected()) {
+			session.reset();
 		}
+		if (!session.isAuthenticated()) {
+			authenticate();
+		}
+		// The Type 3 authorization accompanies the first encrypted payload; later requests on the
+		// already-authenticated connection carry no Authorization header.
+		final String authorization = pendingAuthorization;
+		pendingAuthorization = null;
+
+		final byte[] encrypted = NtlmCrypto.encryptAndSign(session, soap.getBytes(StandardCharsets.UTF_8));
+		final HttpTransport.Response resp = transport.post(
+			"/wsman",
+			encrypted,
+			NtlmCrypto.ENCRYPTED_CONTENT_TYPE,
+			authorization
+		);
+
+		// 200 = success, 500 = SOAP fault (both bodies are encrypted). Anything else is a protocol
+		// or authentication failure whose body is not a usable WSMan response.
+		if (resp.status != 200 && resp.status != 500) {
+			throw new IllegalStateException("WSMan request failed: HTTP " + resp.status);
+		}
+		return new Decoded(resp.status, decryptResponse(resp));
 	}
 
 	private void authenticate() throws Exception {
@@ -460,22 +475,27 @@ final class WsmanClient implements AutoCloseable {
 
 	@Override
 	public void close() {
-		final String shell = shellId;
-		shellId = null;
-		// If a request is still in flight, another thread is blocked on this socket — e.g. a command
-		// that exceeded its timeout, where Utils.execute abandons the worker mid-Receive while
-		// try-with-resources calls close() here. Issuing a graceful shell Delete now would start a
-		// second SOAP exchange over the SAME socket and stateful RC4 session, racing the worker
-		// (cipher-sequence corruption, crossed responses, or a stall until the socket read timeout).
-		// In that case, just hard-close the transport below: it unblocks the worker's read, and the
-		// abandoned shell is reaped by the server's IdleTimeout.
-		if (shell != null && !requestInFlight.get()) {
-			try {
-				request(Envelopes.deleteShell(url, shell, timeoutMs));
-			} catch (final Exception ignore) {
-				// best-effort shell cleanup
+		// Only attempt a graceful shell Delete if no operation is currently using the connection: a
+		// blocking tryLock (never a lock()) keeps close() from waiting on an abandoned, timed-out worker
+		// still holding operationLock while blocked on a socket read. When we cannot acquire the lock,
+		// or a request would otherwise race the worker, we skip the Delete and just hard-close the
+		// transport below — which unblocks that worker's read; the shell is reaped by the server IdleTimeout.
+		final boolean locked = operationLock.tryLock();
+		try {
+			final String shell = shellId;
+			shellId = null;
+			if (locked && shell != null) {
+				try {
+					request(Envelopes.deleteShell(url, shell, timeoutMs));
+				} catch (final Exception ignore) {
+					// best-effort shell cleanup
+				}
 			}
+		} finally {
+			if (locked) {
+				operationLock.unlock();
+			}
+			transport.close();
 		}
-		transport.close();
 	}
 }
