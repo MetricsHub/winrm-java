@@ -421,12 +421,18 @@ final class WsmanClient implements AutoCloseable {
 		try {
 			final String shell = shellId;
 			shellId = null;
-			if (locked && shell != null) {
-				try {
-					request(Envelopes.deleteShell(url, shell, timeoutMs));
-				} catch (final Exception ignore) {
-					// best-effort shell cleanup
+			if (locked) {
+				if (shell != null) {
+					try {
+						request(Envelopes.deleteShell(url, shell, timeoutMs));
+					} catch (final Exception ignore) {
+						// best-effort shell cleanup
+					}
 				}
+				// Release the connection-bound auth state — notably the Kerberos GSSContext, whose only
+				// disposal path is reset(). Skipped when not locked: another (timed-out) worker still owns
+				// the auth scheme, and the transport hard-close below unblocks it.
+				auth.reset();
 			}
 		} finally {
 			if (locked) {

@@ -46,11 +46,10 @@ final class FallbackAuthScheme implements AuthScheme {
 
 	@Override
 	public String authenticate(final HttpTransport transport) throws Exception {
-		// Re-authenticating after a dropped connection: reuse the scheme that already succeeded rather
-		// than restarting the fallback from the top.
-		if (active != null) {
-			return active.authenticate(transport);
-		}
+		// Run the candidates from startIndex. After a dropped connection startIndex still points at the
+		// scheme that last succeeded, so it is retried first; but if that re-authentication now fails
+		// (e.g. an expired TGT or a briefly unavailable KDC) we fall through to the remaining candidates
+		// rather than abandoning the whole fallback list.
 		Exception lastFailure = null;
 		for (int i = startIndex; i < candidates.size(); i++) {
 			final AuthScheme candidate = candidates.get(i);

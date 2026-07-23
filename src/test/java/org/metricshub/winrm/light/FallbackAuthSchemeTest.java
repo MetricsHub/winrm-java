@@ -11,23 +11,24 @@ import org.junit.jupiter.api.Test;
 /** Verifies the ordered-fallback state machine without a network. */
 class FallbackAuthSchemeTest {
 
-	/** A stand-in AuthScheme whose handshake can be made to fail client-side. */
+	/** A stand-in AuthScheme whose handshake can be made to fail on/after a chosen call. */
 	private static final class FakeScheme implements AuthScheme {
 
 		private final String name;
-		private final boolean failHandshake;
+		private final int failFromCall; // fail on this 1-based authenticate() call onward; MAX_VALUE = never
 		private boolean authenticated;
 		private int authenticateCalls;
 
-		FakeScheme(final String name, final boolean failHandshake) {
+		FakeScheme(final String name, final int failFromCall) {
 			this.name = name;
-			this.failHandshake = failHandshake;
+			this.failFromCall = failFromCall;
 		}
 
 		@Override
 		public String authenticate(final HttpTransport transport) throws Exception {
 			authenticateCalls++;
-			if (failHandshake) {
+			if (authenticateCalls >= failFromCall) {
+				authenticated = false;
 				throw new IllegalStateException(name + " handshake failed");
 			}
 			authenticated = true;
@@ -60,6 +61,9 @@ class FallbackAuthSchemeTest {
 		}
 	}
 
+	private static final int NEVER = Integer.MAX_VALUE;
+	private static final int ALWAYS = 1;
+
 	// Never connects — the fake schemes ignore it, and FallbackAuthScheme only calls close() on it.
 	private static HttpTransport dummyTransport() {
 		return new HttpTransport("localhost", 1, 1000);
@@ -67,8 +71,8 @@ class FallbackAuthSchemeTest {
 
 	@Test
 	void clientSideFailureFallsBackToNextScheme() throws Exception {
-		final FakeScheme kerberos = new FakeScheme("kerberos", true); // fails during the handshake
-		final FakeScheme ntlm = new FakeScheme("ntlm", false);
+		final FakeScheme kerberos = new FakeScheme("kerberos", ALWAYS); // fails during the handshake
+		final FakeScheme ntlm = new FakeScheme("ntlm", NEVER);
 		final FallbackAuthScheme fallback = new FallbackAuthScheme(List.of(kerberos, ntlm));
 
 		assertEquals("Negotiate ntlm", fallback.authenticate(dummyTransport()));
@@ -80,8 +84,8 @@ class FallbackAuthSchemeTest {
 	@Test
 	void advanceMovesPastAServerRejectedScheme() throws Exception {
 		// Both handshakes succeed client-side; the first is "rejected server-side" via advance().
-		final FakeScheme kerberos = new FakeScheme("kerberos", false);
-		final FakeScheme ntlm = new FakeScheme("ntlm", false);
+		final FakeScheme kerberos = new FakeScheme("kerberos", NEVER);
+		final FakeScheme ntlm = new FakeScheme("ntlm", NEVER);
 		final FallbackAuthScheme fallback = new FallbackAuthScheme(List.of(kerberos, ntlm));
 		final HttpTransport transport = dummyTransport();
 
@@ -93,9 +97,24 @@ class FallbackAuthSchemeTest {
 	}
 
 	@Test
+	void reAuthFailureOfActiveSchemeFallsThrough() throws Exception {
+		// Kerberos succeeds initially, then fails on the second handshake (e.g. TGT expired on reconnect).
+		final FakeScheme kerberos = new FakeScheme("kerberos", 2);
+		final FakeScheme ntlm = new FakeScheme("ntlm", NEVER);
+		final FallbackAuthScheme fallback = new FallbackAuthScheme(List.of(kerberos, ntlm));
+		final HttpTransport transport = dummyTransport();
+
+		assertEquals("Negotiate kerberos", fallback.authenticate(transport)); // picks kerberos
+		fallback.reset(); // simulate a dropped connection
+		// Re-auth of kerberos now fails, so it must fall through to ntlm rather than throwing.
+		assertEquals("Negotiate ntlm", fallback.authenticate(transport));
+		assertEquals(2, kerberos.authenticateCalls);
+	}
+
+	@Test
 	void allSchemesFailingThrows() {
 		final FallbackAuthScheme fallback = new FallbackAuthScheme(
-			List.of(new FakeScheme("kerberos", true), new FakeScheme("ntlm", true))
+			List.of(new FakeScheme("kerberos", ALWAYS), new FakeScheme("ntlm", ALWAYS))
 		);
 		assertThrows(IllegalStateException.class, () -> fallback.authenticate(dummyTransport()));
 	}
