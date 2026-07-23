@@ -27,8 +27,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * client's own crypto primitives with a mirrored {@link WinRMSession} — then serves scripted
  * SOAP response bodies. This exercises the client's full protocol path (transport, handshake
  * orchestration, sealing, multipart framing, decryption, XML handling) without a Windows host.
- *
- * <p>The NTLMv2 verification is real: a client that derives a wrong hash (e.g. a domain-case
+ * <p>
+ * The NTLMv2 verification is real: a client that derives a wrong hash (e.g. a domain-case
  * regression) fails authentication here just like against a real host.
  */
 final class FakeWsmanServer implements AutoCloseable {
@@ -49,21 +49,26 @@ final class FakeWsmanServer implements AutoCloseable {
 
 	// Fixed 8-byte server challenge — "recorded exchange" determinism.
 	private static final byte[] SERVER_CHALLENGE = {
-		0x01,
-		0x23,
-		0x45,
-		0x67,
-		(byte) 0x89,
-		(byte) 0xab,
-		(byte) 0xcd,
-		(byte) 0xef
+			0x01,
+			0x23,
+			0x45,
+			0x67,
+			(byte) 0x89,
+			(byte) 0xab,
+			(byte) 0xcd,
+			(byte) 0xef
 	};
 
 	// Type 2 flags: UNICODE | SIGN | SEAL | EXTENDED_SESSIONSECURITY | TARGETINFO | 128 | KEY_EXCH —
 	// what a real WinRM host negotiates for encrypted HTTP, and what drives the client down the
 	// NTLMv2 + explicit-key-exchange + extended-session-security path.
-	private static final int TYPE2_FLAGS =
-		0x00000001 | 0x00000010 | 0x00000020 | 0x00080000 | 0x00800000 | 0x20000000 | 0x40000000;
+	private static final int TYPE2_FLAGS = 0x00000001
+		| 0x00000010
+		| 0x00000020
+		| 0x00080000
+		| 0x00800000
+		| 0x20000000
+		| 0x40000000;
 
 	private final String expectedDomain;
 	private final String expectedUser;
@@ -193,13 +198,12 @@ final class FakeWsmanServer implements AutoCloseable {
 		}
 		if (next == null) {
 			// Loud, decryptable failure so an over-consuming test fails on an assertion, not a hang.
-			next =
-				new Scripted(
-					500,
-					"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\"><s:Body><s:Fault>" +
+			next = new Scripted(
+				500,
+				"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\"><s:Body><s:Fault>" +
 					"<s:Reason><s:Text xml:lang=\"en-US\">FakeWsmanServer: no scripted response left</s:Text></s:Reason>" +
 					"</s:Fault></s:Body></s:Envelope>"
-				);
+			);
 		}
 		final byte[] sealed = NtlmCrypto.encryptAndSign(session, next.soapBody.getBytes(StandardCharsets.UTF_8));
 		respond(out, next.status, null, NtlmCrypto.ENCRYPTED_CONTENT_TYPE, sealed);
@@ -220,7 +224,8 @@ final class FakeWsmanServer implements AutoCloseable {
 		final byte[] targetInfo = concat(
 			avPair(2, "FAKE"), // NetBIOS domain
 			avPair(1, "FAKESRV"), // NetBIOS computer
-			new byte[] { 0, 0, 0, 0 } // terminator
+			new byte[]
+			{ 0, 0, 0, 0 } // terminator
 		);
 		final ByteArrayOutputStream msg = new ByteArrayOutputStream();
 		writeBytes(msg, "NTLMSSP\0".getBytes(StandardCharsets.US_ASCII));

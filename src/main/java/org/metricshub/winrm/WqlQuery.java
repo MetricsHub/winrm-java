@@ -68,7 +68,6 @@ public class WqlQuery {
 
 	/**
 	 * Parses the specified WQL query and returns a new instance of WqlQuery
-	 *
 	 * Supported WQL syntaxes:
 	 * <ul>
 	 * <li>SELECT * FROM Class
@@ -79,6 +78,7 @@ public class WqlQuery {
 	 * <li>SELECT * FROM ASSOCIATORS OF { objectId } WHERE condition
 	 * <li>SELECT PropA, PropB FROM ASSOCIATORS OF { objectId } WHERE condition
 	 * </ul>
+	 *
 	 * @param wql The WQL query to parse
 	 * @return a new WqlQuery instance
 	 * @throws WqlQuerySyntaxException when the specified WQL is invalid and cannot be parsed
@@ -115,6 +115,7 @@ public class WqlQuery {
 
 	/**
 	 * Note: All properties are converted to lower case
+	 *
 	 * @param propertiesFragment Comma-separated list of properties
 	 * @return a cleaned-up array of the properties
 	 */
@@ -127,12 +128,9 @@ public class WqlQuery {
 
 	/**
 	 * Build a Map of subproperties to retrieve inside properties
-	 *
 	 * Example:
-	 *
 	 * Input:
 	 * <code>PropA, PropB.Sub1, PropB.Sub2</code>
-	 *
 	 * Output:
 	 * <ul>
 	 * <li>PropA => emptySet()
@@ -180,18 +178,17 @@ public class WqlQuery {
 
 	/**
 	 * Build a strict WQL query from the "dirty" one we have
-	 *
 	 * By <em>strict</em> we mean a syntax that can be executed by the WMI provider. <br>
 	 * By <em>dirty</em> we mean the extra sugar-coated syntax we're allowing in Metricshub products,
 	 * like subproperties, and <code>SELECT prop FROM ASSOCIATORS OF...</code>
-	 *
 	 * Examples:
 	 * <ul>
 	 * <li><code>SELECT PropA.Name FROM Win32_Class</code><br>
-	 *  => <b>SELECT PropA FROM Win32_Class</b>
+	 * => <b>SELECT PropA FROM Win32_Class</b>
 	 * <li><code>SELECT Temperature FROM ASSOCIATORS OF { Win32_Class.Id=1 }</code><br>
-	 *  => <b>ASSOCIATORS OF { Win32_Class.Id=1 }</b>
+	 * => <b>ASSOCIATORS OF { Win32_Class.Id=1 }</b>
 	 * </ul>
+	 *
 	 * @param associatorsFragment The extracted ASSOCIATORS OF... fragment
 	 * @param subPropertiesMap The map built with {@link WqlQuery#buildSupPropertiesMap(String[])}
 	 * @param classFragment The extracted class fragment
@@ -210,12 +207,11 @@ public class WqlQuery {
 			if (subPropertiesMap.keySet().isEmpty()) {
 				cleanWql = "SELECT * FROM " + classFragment;
 			} else {
-				cleanWql =
-					String.format(
-						"SELECT %s FROM %s",
-						subPropertiesMap.keySet().stream().collect(Collectors.joining(",")),
-						classFragment
-					);
+				cleanWql = String.format(
+					"SELECT %s FROM %s",
+					subPropertiesMap.keySet().stream().collect(Collectors.joining(",")),
+					classFragment
+				);
 			}
 		} else {
 			cleanWql = associatorsFragment;

@@ -22,7 +22,6 @@ package org.metricshub.winrm.light;
 
 /**
  * NTLM message generation, base class
- *
  * Code from io.cloudsoft.winrm4j.client.ntlm.forks.httpclient.NTLMEngineImpl
  * release 0.12.3 @link https://github.com/cloudsoft/winrm4j
  * io.cloudsoft.winrm4j.client.ntlm.forks.httpclient is a fork of apache-httpclient 4.5.13
@@ -83,21 +82,22 @@ class NTLMMessage {
 		if (src.length < index + 4) {
 			return 0;
 		}
-		return (
-			(src[index] & 0xff) |
-			((src[index + 1] & 0xff) << 8) |
-			((src[index + 2] & 0xff) << 16) |
-			((src[index + 3] & 0xff) << 24)
-		);
+		return ((src[index] & 0xff)
+			|
+			((src[index + 1] & 0xff) << 8)
+			|
+			((src[index + 2] & 0xff) << 16)
+			|
+			((src[index + 3] & 0xff) << 24));
 	}
 
 	/**
 	 * Prepares the object to create a response of the given length.
 	 *
 	 * @param maxlength
-	 *			the maximum length of the response to prepare,
-	 *			including the type and the signature (which this method
-	 *			adds).
+	 *        the maximum length of the response to prepare,
+	 *        including the type and the signature (which this method
+	 *        adds).
 	 */
 	void prepareResponse(final int maxlength, final int messageType) {
 		messageContents = new byte[maxlength];
@@ -110,7 +110,7 @@ class NTLMMessage {
 	 * Adds the given byte to the response.
 	 *
 	 * @param b
-	 *			the byte to add.
+	 *        the byte to add.
 	 */
 	private void addByte(final byte b) {
 		messageContents[currentOutputPosition] = b;
@@ -121,7 +121,7 @@ class NTLMMessage {
 	 * Adds the given bytes to the response.
 	 *
 	 * @param bytes
-	 *			the bytes to add.
+	 *        the bytes to add.
 	 */
 	void addBytes(final byte[] bytes) {
 		if (bytes == null) {

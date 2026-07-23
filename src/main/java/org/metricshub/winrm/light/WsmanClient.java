@@ -350,10 +350,9 @@ final class WsmanClient implements AutoCloseable {
 	 * backend does.
 	 */
 	static boolean hasEnumerationElement(final Document doc, final String localName) {
-		return (
-			doc.getElementsByTagNameNS(WS_ENUMERATION_NS, localName).getLength() > 0 ||
-			doc.getElementsByTagNameNS(WSMAN_NS, localName).getLength() > 0
-		);
+		return (doc.getElementsByTagNameNS(WS_ENUMERATION_NS, localName).getLength() > 0
+			||
+			doc.getElementsByTagNameNS(WSMAN_NS, localName).getLength() > 0);
 	}
 
 	/** First text content of an element matched by both namespace and local name. */

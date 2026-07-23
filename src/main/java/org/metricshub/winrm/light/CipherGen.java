@@ -189,10 +189,9 @@ public class CipherGen {
 	 * client challenge.
 	 *
 	 * @param targetInformation
-	 *			The target information block from the Type 2 message.
+	 *        The target information block from the Type 2 message.
 	 * @param clientChallenge
-	 *			The random 8-byte client challenge.
-	 *
+	 *        The random 8-byte client challenge.
 	 * @return The blob, used in the calculation of the NTLMv2 Response.
 	 */
 	private static byte[] createBlob(
@@ -205,12 +204,12 @@ public class CipherGen {
 		final byte[] unknown1 = new byte[] { (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00 };
 		final byte[] unknown2 = new byte[] { (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00 };
 		final byte[] blob = new byte[blobSignature.length +
-		reserved.length +
-		timestamp.length +
-		8 +
-		unknown1.length +
-		targetInformation.length +
-		unknown2.length];
+			reserved.length +
+			timestamp.length +
+			8 +
+			unknown1.length +
+			targetInformation.length +
+			unknown2.length];
 		int offset = 0;
 		System.arraycopy(blobSignature, 0, blob, offset, blobSignature.length);
 		offset += blobSignature.length;
@@ -261,8 +260,8 @@ public class CipherGen {
 	 * @param challenge
 	 * @param clientChallenge
 	 * @return The NTLM2 Session Response. This is placed in the NTLM response
-	 *		 field of the Type 3 message; the LM response field contains the
-	 *		 client challenge, null-padded to 24 bytes.
+	 *         field of the Type 3 message; the LM response field contains the
+	 *         client challenge, null-padded to 24 bytes.
 	 */
 	private static byte[] ntlm2SessionResponse(
 		final byte[] ntlmHash,
@@ -289,10 +288,9 @@ public class CipherGen {
 	 * Creates the LM Response from the given hash and Type 2 challenge.
 	 *
 	 * @param hash
-	 *			The LM or NTLM Hash.
+	 *        The LM or NTLM Hash.
 	 * @param challenge
-	 *			The server challenge from the Type 2 message.
-	 *
+	 *        The server challenge from the Type 2 message.
 	 * @return The response (either LM or NTLM, depending on the provided hash).
 	 */
 	private static byte[] lmResponse(final byte[] hash, final byte[] challenge) throws NtlmException {
@@ -323,10 +321,9 @@ public class CipherGen {
 	 * Creates the LM Hash of the user's password.
 	 *
 	 * @param password
-	 *			The password.
-	 *
+	 *        The password.
 	 * @return The LM Hash of the given password, used in the calculation of the
-	 *		 LM Response.
+	 *         LM Response.
 	 */
 	private static byte[] lmHash(final String password) throws NtlmException {
 		try {
@@ -356,13 +353,12 @@ public class CipherGen {
 	 * Creates a DES encryption key from the given key material.
 	 *
 	 * @param bytes
-	 *			A byte array containing the DES key material.
+	 *        A byte array containing the DES key material.
 	 * @param offset
-	 *			The offset in the given byte array at which the 7-byte key
-	 *			material starts.
-	 *
+	 *        The offset in the given byte array at which the 7-byte key
+	 *        material starts.
 	 * @return A DES encryption key created from the key material starting at
-	 *		 the specified offset in the given byte array.
+	 *         the specified offset in the given byte array.
 	 */
 	private static Key createDESKey(final byte[] bytes, final int offset) {
 		final byte[] keyBytes = new byte[7];
@@ -384,13 +380,13 @@ public class CipherGen {
 	 * Applies odd parity to the given byte array.
 	 *
 	 * @param bytes
-	 *			The data whose parity bits are to be adjusted for odd parity.
+	 *        The data whose parity bits are to be adjusted for odd parity.
 	 */
 	private static void oddParity(final byte[] bytes) {
 		for (int i = 0; i < bytes.length; i++) {
 			final byte b = bytes[i];
-			final boolean needsParity =
-				(((b >>> 7) ^ (b >>> 6) ^ (b >>> 5) ^ (b >>> 4) ^ (b >>> 3) ^ (b >>> 2) ^ (b >>> 1)) & 0x01) == 0;
+			final boolean needsParity = (((b >>> 7) ^ (b >>> 6) ^ (b >>> 5) ^ (b >>> 4) ^ (b >>> 3) ^ (b >>> 2) ^ (b >>> 1))
+				& 0x01) == 0;
 			if (needsParity) {
 				bytes[i] |= (byte) 0x01;
 			} else {
@@ -484,10 +480,9 @@ public class CipherGen {
 	 * Creates the NTLM Hash of the user's password.
 	 *
 	 * @param password
-	 *			The password.
-	 *
+	 *        The password.
 	 * @return The NTLM Hash of the given password, used in the calculation of
-	 *		 the NTLM Response and the NTLMv2 and LMv2 Hashes.
+	 *         the NTLM Response and the NTLMv2 and LMv2 Hashes.
 	 */
 	private static byte[] ntlmHash(final String password) throws NtlmException {
 		if (NTLMEngineUtils.UNICODE_LITTLE_UNMARKED == null) {
@@ -503,7 +498,7 @@ public class CipherGen {
 	 * Creates the LMv2 Hash of the user's password.
 	 *
 	 * @return The LMv2 Hash, used in the calculation of the NTLMv2 and LMv2
-	 *		 Responses.
+	 *         Responses.
 	 */
 	private static byte[] lmv2Hash(final String domain, final String user, final byte[] ntlmHash) throws NtlmException {
 		if (NTLMEngineUtils.UNICODE_LITTLE_UNMARKED == null) {
@@ -522,7 +517,7 @@ public class CipherGen {
 	 * Creates the NTLMv2 Hash of the user's password.
 	 *
 	 * @return The NTLMv2 Hash, used in the calculation of the NTLMv2 and LMv2
-	 *		 Responses.
+	 *         Responses.
 	 */
 	private static byte[] ntlmv2Hash(final String domain, final String user, final byte[] ntlmHash) throws NtlmException {
 		if (NTLMEngineUtils.UNICODE_LITTLE_UNMARKED == null) {
@@ -542,14 +537,13 @@ public class CipherGen {
 	 * challenge.
 	 *
 	 * @param hash
-	 *			The NTLMv2 Hash.
+	 *        The NTLMv2 Hash.
 	 * @param clientData
-	 *			The client data (blob or client challenge).
+	 *        The client data (blob or client challenge).
 	 * @param challenge
-	 *			The server challenge from the Type 2 message.
-	 *
+	 *        The server challenge from the Type 2 message.
 	 * @return The response (either NTLMv2 or LMv2, depending on the client
-	 *		 data).
+	 *         data).
 	 */
 	private static byte[] lmv2Response(final byte[] hash, final byte[] challenge, final byte[] clientData) {
 		final HMACMD5 hmacMD5 = new HMACMD5(hash);

@@ -29,8 +29,8 @@ import javax.net.ssl.X509TrustManager;
 
 /**
  * TLS setup for the light backend's HTTPS transport.
- *
- * <p>Unlike the legacy CXF path (which trusts every certificate), the light backend validates by
+ * <p>
+ * Unlike the legacy CXF path (which trusts every certificate), the light backend validates by
  * default: it uses the JDK default {@link SSLSocketFactory}, so the platform trust store (and any
  * {@code -Djavax.net.ssl.trustStore}) applies and the server hostname is verified during the
  * handshake. Setting the system property {@value #INSECURE_PROPERTY} to {@code true} opts out —

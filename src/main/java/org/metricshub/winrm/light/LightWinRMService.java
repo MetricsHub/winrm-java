@@ -45,8 +45,8 @@ import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
  * replacement for the CXF-based {@code WinRMService} that shipped before 2.0.0: same public
  * behaviour, no Apache CXF / JAX-WS / JAXB stack, and immune by construction to JAXP
  * {@code ServiceLoader} poisoning (it uses the JDK-default XML factories).
- *
- * <p>Supports NTLM over HTTP (with message encryption) and over HTTPS (plaintext SOAP inside TLS,
+ * <p>
+ * Supports NTLM over HTTP (with message encryption) and over HTTPS (plaintext SOAP inside TLS,
  * validating the server certificate by default; see {@link LightTls}), and Kerberos over HTTPS
  * (SPNEGO via the JDK GSS-API; see {@link KerberosAuthScheme}). A multi-scheme request such as
  * {@code [KERBEROS, NTLM]} is tried in order with fallback.
@@ -65,12 +65,12 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	/**
 	 * Create a light WinRM executor.
 	 *
-	 * @param winRMEndpoint  endpoint with credentials (mandatory)
-	 * @param timeout        timeout in milliseconds (must be &gt; 0)
-	 * @param ticketCache    Kerberos ticket cache path (used by the Kerberos scheme; {@code null} logs
-	 *                       in with the password)
+	 * @param winRMEndpoint endpoint with credentials (mandatory)
+	 * @param timeout timeout in milliseconds (must be &gt; 0)
+	 * @param ticketCache Kerberos ticket cache path (used by the Kerberos scheme; {@code null} logs
+	 *        in with the password)
 	 * @param authentications requested authentication schemes, tried in order (NTLM and/or Kerberos);
-	 *                        {@code null}/empty means NTLM only
+	 *        {@code null}/empty means NTLM only
 	 * @return a new {@code LightWinRMService}
 	 * @throws WinRMException on invalid arguments or an unsupported authentication request
 	 */
@@ -148,8 +148,8 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			// e.g. Kerberos requested over plain HTTP with no other scheme to fall back to.
 			throw new WinRMException(
 				"Kerberos over WinRM requires HTTPS (endpoint was " +
-				winRMEndpoint.getEndpoint() +
-				"): there is no Kerberos message encryption over plain HTTP. Use HTTPS, or add NTLM to the authentication list."
+					winRMEndpoint.getEndpoint() +
+					"): there is no Kerberos message encryption over plain HTTP. Use HTTPS, or add NTLM to the authentication list."
 			);
 		}
 		return schemes.size() == 1 ? schemes.get(0) : new FallbackAuthScheme(schemes);

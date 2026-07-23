@@ -35,8 +35,7 @@ class WinRMExecutorFactoryTest {
 				30000L,
 				null,
 				List.of(AuthenticationEnum.NTLM)
-			)
-		) {
+			)) {
 			assertInstanceOf(LightWinRMService.class, executor);
 			assertEquals("testhost", executor.getHostname());
 		}
@@ -52,8 +51,7 @@ class WinRMExecutorFactoryTest {
 				30000L,
 				null,
 				List.of(AuthenticationEnum.NTLM)
-			)
-		) {
+			)) {
 			assertInstanceOf(LightWinRMService.class, executor);
 		}
 	}
@@ -65,13 +63,12 @@ class WinRMExecutorFactoryTest {
 		System.setProperty(WinRMExecutorFactory.BACKEND_PROPERTY, "cxf");
 		final WinRMException e = assertThrows(
 			WinRMException.class,
-			() ->
-				WinRMExecutorFactory.createInstance(
-					endpoint(WinRMHttpProtocolEnum.HTTP),
-					30000L,
-					null,
-					List.of(AuthenticationEnum.NTLM)
-				)
+			() -> WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTP),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.NTLM)
+			)
 		);
 		assertTrue(e.getMessage().contains("removed in winrm-java 2.0.0"), e.getMessage());
 	}
@@ -86,8 +83,7 @@ class WinRMExecutorFactoryTest {
 				30000L,
 				null,
 				List.of(AuthenticationEnum.NTLM)
-			)
-		) {
+			)) {
 			assertInstanceOf(LightWinRMService.class, executor);
 		}
 	}
@@ -101,8 +97,7 @@ class WinRMExecutorFactoryTest {
 				30000L,
 				null,
 				List.of(AuthenticationEnum.NTLM)
-			)
-		) {
+			)) {
 			assertInstanceOf(LightWinRMService.class, executor);
 		}
 	}
@@ -114,13 +109,12 @@ class WinRMExecutorFactoryTest {
 		System.setProperty(WinRMExecutorFactory.BACKEND_PROPERTY, "light");
 		assertThrows(
 			WinRMException.class,
-			() ->
-				WinRMExecutorFactory.createInstance(
-					endpoint(WinRMHttpProtocolEnum.HTTP),
-					30000L,
-					null,
-					List.of(AuthenticationEnum.KERBEROS)
-				)
+			() -> WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTP),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.KERBEROS)
+			)
 		);
 	}
 
@@ -135,8 +129,7 @@ class WinRMExecutorFactoryTest {
 				30000L,
 				null,
 				List.of(AuthenticationEnum.KERBEROS, AuthenticationEnum.NTLM)
-			)
-		) {
+			)) {
 			assertInstanceOf(LightWinRMService.class, executor);
 		}
 	}
@@ -152,8 +145,7 @@ class WinRMExecutorFactoryTest {
 				30000L,
 				null,
 				List.of(AuthenticationEnum.KERBEROS)
-			)
-		) {
+			)) {
 			assertInstanceOf(LightWinRMService.class, executor);
 		}
 	}
@@ -165,13 +157,12 @@ class WinRMExecutorFactoryTest {
 		System.setProperty(WinRMExecutorFactory.BACKEND_PROPERTY, "cxff");
 		assertThrows(
 			WinRMException.class,
-			() ->
-				WinRMExecutorFactory.createInstance(
-					endpoint(WinRMHttpProtocolEnum.HTTP),
-					30000L,
-					null,
-					List.of(AuthenticationEnum.NTLM)
-				)
+			() -> WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTP),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.NTLM)
+			)
 		);
 	}
 

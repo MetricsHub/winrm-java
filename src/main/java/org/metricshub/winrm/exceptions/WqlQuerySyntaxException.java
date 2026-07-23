@@ -22,7 +22,6 @@ package org.metricshub.winrm.exceptions;
 
 /**
  * Exception for a syntax error in the WQL Query parameter.
- *
  */
 public class WqlQuerySyntaxException extends Exception {
 

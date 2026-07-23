@@ -22,7 +22,6 @@ package org.metricshub.winrm.light;
 
 /**
  * Type 2 message class
- *
  * Code from io.cloudsoft.winrm4j.client.ntlm.forks.httpclient.NTLMEngineImpl
  * release 0.12.3 @link https://github.com/cloudsoft/winrm4j
  * io.cloudsoft.winrm4j.client.ntlm.forks.httpclient is a fork of apache-httpclient 4.5.13

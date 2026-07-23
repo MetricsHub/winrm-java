@@ -93,9 +93,7 @@ public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
 	 * @param timeout Timeout in milliseconds (throws an IllegalArgumentException if negative or zero)
 	 * @param ticketCache The Ticket Cache path
 	 * @param authentications List of authentications. only NTLM if absent
-	 *
 	 * @return SmbTempShare instance
-	 *
 	 * @throws IOException If an I/O error occurred
 	 * @throws WinRMException For any problem encountered
 	 * @throws TimeoutException To notify userName of timeout.
@@ -124,8 +122,8 @@ public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
 						try {
 							// Honour the backend toggle: SMB file transfer is always smbj, but the WinRM command
 							// orchestration follows the selected backend (so "light" does not fall back to CXF).
-							windowsRemoteExecutor =
-								WinRMExecutorFactory.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
+							windowsRemoteExecutor = WinRMExecutorFactory
+								.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
 
 							final WindowsTempShare windowsTempShare = getOrCreateShare(
 								windowsRemoteExecutor,
@@ -291,10 +289,8 @@ public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
 	 * @param remotePath The remote path.
 	 * @param shareName The Share Name.
 	 * @param timeout Timeout in milliseconds.
-	 *
 	 * @throws TimeoutException To notify userName of timeout.
 	 * @throws WindowsRemoteException For any problem encountered
-	 *
 	 */
 	private static void shareRemoteDirectory(
 		final WindowsRemoteExecutor windowsRemoteExecutor,

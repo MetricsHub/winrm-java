@@ -66,7 +66,8 @@ public class ByteArrayUtils {
 						final byte c = array[rowOffset + index];
 						builder.append((c >= 20 && c < 127) ? (char) c : '.');
 
-						if (index % 8 == 7) builder.append(" ");
+						if (index % 8 == 7)
+							builder.append(" ");
 					}
 				}
 			}

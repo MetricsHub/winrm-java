@@ -35,14 +35,14 @@ final class WinRMSession {
 
 	// Protocol-defined constants: they MUST encode to the same bytes on every JVM, so pin US-ASCII
 	// rather than relying on the platform default charset (which could differ, e.g. UTF-16).
-	private static final byte[] CLIENT_SIGNING =
-		"session key to client-to-server signing key magic constant\0".getBytes(StandardCharsets.US_ASCII);
-	private static final byte[] SERVER_SIGNING =
-		"session key to server-to-client signing key magic constant\0".getBytes(StandardCharsets.US_ASCII);
-	private static final byte[] CLIENT_SEALING =
-		"session key to client-to-server sealing key magic constant\0".getBytes(StandardCharsets.US_ASCII);
-	private static final byte[] SERVER_SEALING =
-		"session key to server-to-client sealing key magic constant\0".getBytes(StandardCharsets.US_ASCII);
+	private static final byte[] CLIENT_SIGNING = "session key to client-to-server signing key magic constant\0"
+		.getBytes(StandardCharsets.US_ASCII);
+	private static final byte[] SERVER_SIGNING = "session key to server-to-client signing key magic constant\0"
+		.getBytes(StandardCharsets.US_ASCII);
+	private static final byte[] CLIENT_SEALING = "session key to client-to-server sealing key magic constant\0"
+		.getBytes(StandardCharsets.US_ASCII);
+	private static final byte[] SERVER_SEALING = "session key to server-to-client sealing key magic constant\0"
+		.getBytes(StandardCharsets.US_ASCII);
 
 	private final String domain;
 	private final String workstation;

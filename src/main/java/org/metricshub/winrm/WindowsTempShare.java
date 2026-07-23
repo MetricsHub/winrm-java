@@ -34,7 +34,7 @@ public class WindowsTempShare {
 	/** The UNC path of the share. */
 	private final String uncSharePath;
 
-	/** The remote path.*/
+	/** The remote path. */
 	private final String remotePath;
 
 	/** The WindowsRemoteExecutor instance */
@@ -44,7 +44,7 @@ public class WindowsTempShare {
 	 * Constructor of WindowsTempShare
 	 *
 	 * @param windowsRemoteExecutor the WindowsRemoteExecutor instance
-	 * connected to the remote host (mandatory)
+	 *        connected to the remote host (mandatory)
 	 * @param shareNameOrUnc The name of the share, or its full UNC path (mandatory)
 	 * @param remotePath The path on the remote system of the directory being shared
 	 */
@@ -75,9 +75,7 @@ public class WindowsTempShare {
 	 * @param windowsRemoteExecutor WindowsRemoteExecutor instance. (mandatory)
 	 * @param timeout Timeout in milliseconds. (throws an IllegalArgumentException if negative or zero)
 	 * @param shareRemoteDirectory ShareRemoteDirectoryConsumer function (mandatory)
-	 *
 	 * @return The remote path.
-	 *
 	 * @throws TimeoutException To notify userName of timeout.
 	 * @throws WindowsRemoteException For any problem encountered.
 	 */
@@ -130,15 +128,11 @@ public class WindowsTempShare {
 	 *
 	 * @param windowsRemoteExecutor WindowsRemoteExecutor instance. (mandatory)
 	 * @param timeout Timeout in milliseconds. (throws an IllegalArgumentException if negative or zero)
-	 *
 	 * @return The Windows directory.
-	 *
 	 * @throws WindowsRemoteException For any problem encountered.
 	 * @throws TimeoutException To notify userName of timeout.
-	 *
 	 * @see <a href="https://docs.microsoft.com/en-us/windows/win32/cimwin32prov/win32-operatingsystem">
-	 * Win32_OperatingSystem class</a>
-	 *
+	 *      Win32_OperatingSystem class</a>
 	 */
 	public static String getWindowsDirectory(final WindowsRemoteExecutor windowsRemoteExecutor, final long timeout)
 		throws WindowsRemoteException, TimeoutException {
@@ -154,8 +148,8 @@ public class WindowsTempShare {
 				.map(row -> (String) row.get("WindowsDirectory"))
 				.filter(Objects::nonNull)
 				.findFirst()
-				.orElseThrow(() ->
-					new WindowsRemoteException(
+				.orElseThrow(
+					() -> new WindowsRemoteException(
 						String.format("Couldn't identify the Windows root directory on %s.", windowsRemoteExecutor.getHostname())
 					)
 				);
@@ -171,7 +165,6 @@ public class WindowsTempShare {
 	 * @param remotePath The remote path to create
 	 * @param timeout Timeout in milliseconds
 	 * @param start start time in milliseconds.
-	 *
 	 * @throws WindowsRemoteException For any problem encountered.
 	 * @throws TimeoutException To notify userName of timeout.
 	 */
@@ -188,12 +181,10 @@ public class WindowsTempShare {
 
 	/**
 	 * Build a UNC path from hostname and share name.
-	 *
 	 * Note: This method ensures compatibility with IPv6 hosts
 	 *
 	 * @param hostname Host to connect to. (mandatory)
 	 * @param share The share
-	 *
 	 * @return The UNC path to the share (\\unc(host)\share)
 	 */
 	static String buildUncPath(final String hostname, final String share) {
@@ -208,7 +199,6 @@ public class WindowsTempShare {
 	 * Create the Windows command for a directory creation.
 	 *
 	 * @param remotePath The remote path to create. (mandatory)
-	 *
 	 * @return The command to execute.
 	 */
 	static String buildCreateRemoteDirectoryCommand(final String remotePath) {
@@ -219,7 +209,6 @@ public class WindowsTempShare {
 
 	/**
 	 * @param path Root path of the temporary directory that will be used in a cluster. (mandatory)
-	 *
 	 * @return Path to the temporary directory
 	 */
 	static String buildPathOnCluster(final String path) {
@@ -233,7 +222,6 @@ public class WindowsTempShare {
 	 *
 	 * @param folder The folder name. (mandatory)
 	 * @param shareName The Share Name. (mandatory)
-	 *
 	 * @return The remote directory path. (folder\Temp\shareName)
 	 */
 	static String buildRemotePath(final String folder, final String shareName) {
@@ -254,15 +242,12 @@ public class WindowsTempShare {
 
 	/**
 	 * Retrieve an "Admin Share" (like D$, E$, etc.) that is exposed by a cluster.
-	 *
 	 * If the targeted system is not a cluster, returns an empty optional.
 	 *
 	 * @param windowsRemoteExecutor WindowsRemoteExecutor instance.
 	 * @param timeout Timeout in milliseconds.
 	 * @param start start time in milliseconds.
-	 *
 	 * @return An optional Map<String, Object> with 2 entries: "Name" and "Path"
-	 *
 	 * @throws TimeoutException To notify userName of timeout.
 	 * @throws WindowsRemoteException For any problem encountered.
 	 */
@@ -275,17 +260,17 @@ public class WindowsTempShare {
 			final Optional<WindowsTempShare> clusterShare = windowsRemoteExecutor
 				.executeWql(
 					"SELECT Name,Path FROM Win32_ClusterShare WHERE " +
-					"ServerName <> '*' AND (Type = 2147483648 OR Type = 3221225472) AND Name LIKE '%\\\\_$'",
+						"ServerName <> '*' AND (Type = 2147483648 OR Type = 3221225472) AND Name LIKE '%\\\\_$'",
 					timeout
 				)
 				.stream()
 				.limit(1)
 				.map(row -> // We return a TempShare instance pointing to a subdirectory in this share
-					new WindowsTempShare(
-						windowsRemoteExecutor,
-						buildPathOnCluster((String) row.get("Name")),
-						buildPathOnCluster((String) row.get("Path"))
-					)
+				new WindowsTempShare(
+					windowsRemoteExecutor,
+					buildPathOnCluster((String) row.get("Name")),
+					buildPathOnCluster((String) row.get("Path"))
+				)
 				)
 				.findFirst();
 
@@ -306,9 +291,7 @@ public class WindowsTempShare {
 	 * @param windowsRemoteExecutor WindowsRemoteExecutor instance
 	 * @param shareName The share name
 	 * @param timeout Timeout in milliseconds
-	 *
 	 * @return An optional TempShare instance
-	 *
 	 * @throws TimeoutException To notify userName of timeout
 	 * @throws WindowsRemoteException For any problem encountered
 	 */
@@ -336,9 +319,7 @@ public class WindowsTempShare {
 	 * @param shareName The Share Name.
 	 * @param timeout Timeout in milliseconds.
 	 * @param shareRemoteDirectory shareRemoteDirectory function
-	 *
 	 * @return A TempShare instance
-	 *
 	 * @throws WindowsRemoteException For any problem encountered.
 	 * @throws TimeoutException To notify userName of timeout.
 	 */

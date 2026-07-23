@@ -47,13 +47,13 @@ public final class WinRMExecutorFactory {
 	/**
 	 * Create a {@link WindowsRemoteExecutor} (light backend).
 	 *
-	 * @param winRMEndpoint   endpoint with credentials (mandatory)
-	 * @param timeout         timeout in milliseconds (must be &gt; 0)
-	 * @param ticketCache     Kerberos ticket cache path (may be {@code null})
+	 * @param winRMEndpoint endpoint with credentials (mandatory)
+	 * @param timeout timeout in milliseconds (must be &gt; 0)
+	 * @param ticketCache Kerberos ticket cache path (may be {@code null})
 	 * @param authentications requested authentication schemes (may be {@code null})
 	 * @return a light-backed executor
 	 * @throws WinRMException for any problem creating the executor, or when {@value #BACKEND_PROPERTY}
-	 *                        requests the removed CXF backend or an unknown value
+	 *         requests the removed CXF backend or an unknown value
 	 */
 	public static WindowsRemoteExecutor createInstance(
 		final WinRMEndpoint winRMEndpoint,
@@ -70,8 +70,8 @@ public final class WinRMExecutorFactory {
 			// switched to another implementation.
 			throw new WinRMException(
 				"The CXF WinRM backend was removed in winrm-java 2.0.0; remove the " +
-				BACKEND_PROPERTY +
-				" system property to use the light backend (or stay on winrm-java 1.x)."
+					BACKEND_PROPERTY +
+					" system property to use the light backend (or stay on winrm-java 1.x)."
 			);
 		}
 		throw new WinRMException(

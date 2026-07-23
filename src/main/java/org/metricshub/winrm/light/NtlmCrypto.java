@@ -33,8 +33,7 @@ import java.util.zip.CRC32;
  */
 final class NtlmCrypto {
 
-	static final String ENCRYPTED_CONTENT_TYPE =
-		"multipart/encrypted;protocol=\"application/HTTP-SPNEGO-session-encrypted\";boundary=\"Encrypted Boundary\"";
+	static final String ENCRYPTED_CONTENT_TYPE = "multipart/encrypted;protocol=\"application/HTTP-SPNEGO-session-encrypted\";boundary=\"Encrypted Boundary\"";
 
 	private static final String BOUNDARY_CR = "--Encrypted Boundary\r\n";
 	private static final String BOUNDARY_END = "--Encrypted Boundary--\r\n";
@@ -94,9 +93,9 @@ final class NtlmCrypto {
 		if (!Arrays.equals(checksum, expectedChecksum)) {
 			throw new IllegalStateException(
 				"Checksum mismatch\n" +
-				ByteArrayUtils.formatHexDump(checksum) +
-				"--\n" +
-				ByteArrayUtils.formatHexDump(expectedChecksum)
+					ByteArrayUtils.formatHexDump(checksum) +
+					"--\n" +
+					ByteArrayUtils.formatHexDump(expectedChecksum)
 			);
 		}
 		if (expectedSeqNum != seqNum) {
@@ -107,7 +106,7 @@ final class NtlmCrypto {
 
 	/**
 	 * @param outgoing true to sign an outgoing message (client signing key + client sealing stream),
-	 *                 false to verify an incoming one (server signing key + server sealing stream).
+	 *        false to verify an incoming one (server signing key + server sealing stream).
 	 */
 	private static void calculateSignature(
 		final WinRMSession session,
@@ -182,7 +181,7 @@ final class NtlmCrypto {
 		void skipUntil(final String s) {
 			final byte[] expected = s.getBytes(StandardCharsets.US_ASCII);
 			int next = index;
-			outer:while (true) {
+			outer: while (true) {
 				for (int i = 0; i < expected.length; i++) {
 					if (next + i >= bytes.length) {
 						throw new IllegalStateException("Encrypted-response framing terminated early looking for delimiter");

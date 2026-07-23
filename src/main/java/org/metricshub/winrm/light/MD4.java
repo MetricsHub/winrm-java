@@ -26,7 +26,6 @@ package org.metricshub.winrm.light;
  * Code correctness was verified by looking at MD4.java from the jcifs
  * library (http://jcifs.samba.org). It was massaged extensively to the
  * final form found here by Karl Wright (kwright@metacarta.com).
- *
  * Code from io.cloudsoft.winrm4j.client.ntlm.forks.httpclient.NTLMEngineImpl
  * release 0.12.3 @link https://github.com/cloudsoft/winrm4j
  * io.cloudsoft.winrm4j.client.ntlm.forks.httpclient is a fork of apache-httpclient 4.5.13
@@ -106,8 +105,7 @@ public class MD4 {
 		final int[] d = new int[16];
 
 		for (int i = 0; i < 16; i++) {
-			d[i] =
-				(dataBuffer[i * 4] & 0xff) +
+			d[i] = (dataBuffer[i * 4] & 0xff) +
 				((dataBuffer[i * 4 + 1] & 0xff) << 8) +
 				((dataBuffer[i * 4 + 2] & 0xff) << 16) +
 				((dataBuffer[i * 4 + 3] & 0xff) << 24);

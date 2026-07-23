@@ -74,20 +74,23 @@ public abstract class WmiHelper {
 	 */
 	public static boolean isLocalNetworkResource(final String networkResource) {
 		Utils.checkNonNull(networkResource, "networkResource");
-		return (
-			!networkResource.startsWith("\\\\") ||
-			networkResource.startsWith("\\\\localhost\\") ||
-			networkResource.startsWith("\\\\127.0.0.1\\") ||
-			networkResource.startsWith("\\\\0:0:0:0:0:0:0:1\\") ||
-			networkResource.startsWith("\\\\::1\\") ||
-			networkResource.startsWith("\\\\0000:0000:0000:0000:0000:0000:0000:0001\\") ||
-			networkResource.toLowerCase().startsWith("\\\\" + Utils.getComputerName().toLowerCase() + "\\")
-		);
+		return (!networkResource.startsWith("\\\\")
+			||
+			networkResource.startsWith("\\\\localhost\\")
+			||
+			networkResource.startsWith("\\\\127.0.0.1\\")
+			||
+			networkResource.startsWith("\\\\0:0:0:0:0:0:0:1\\")
+			||
+			networkResource.startsWith("\\\\::1\\")
+			||
+			networkResource.startsWith("\\\\0000:0000:0000:0000:0000:0000:0000:0001\\")
+			||
+			networkResource.toLowerCase().startsWith("\\\\" + Utils.getComputerName().toLowerCase() + "\\"));
 	}
 
 	/**
 	 * Extract the exact name of the properties from a WMI result.
-	 *
 	 * The interest is to retrieve the exact case of the property names, instead of
 	 * the lowercase that we have at this stage.
 	 *
@@ -106,10 +109,8 @@ public abstract class WmiHelper {
 
 	/**
 	 * Extract the exact name of the properties from a WMI result.
-	 *
 	 * The interest is to retrieve the exact case of the property names, instead of
 	 * the lowercase that we have at this stage.
-	 *
 	 * Note: The exact case cannot be retrieved if result is empty, in which case all
 	 * names are reported in lower case
 	 *

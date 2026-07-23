@@ -53,7 +53,7 @@ class SmbTempShareTest {
 		final Path ticketCache = get("path");
 		final List<AuthenticationEnum> authentications = singletonList(NTLM);
 
-		//check arguments
+		// check arguments
 		assertThrows(IllegalArgumentException.class, () -> createInstance(null, timeout, ticketCache, authentications));
 
 		assertThrows(
@@ -67,8 +67,7 @@ class SmbTempShareTest {
 			final MockedStatic<WinRMExecutorFactory> mockedFactory = mockStatic(WinRMExecutorFactory.class);
 			final MockedStatic<SmbTempShare> mockedSmbTempShare = mockStatic(SmbTempShare.class);
 			final MockedStatic<WindowsTempShare> mockedWindowsTempShare = mockStatic(WindowsTempShare.class);
-			final MockedStatic<SmbConfig> mockedSmbConfig = mockStatic(SmbConfig.class)
-		) {
+			final MockedStatic<SmbConfig> mockedSmbConfig = mockStatic(SmbConfig.class)) {
 			final WindowsRemoteExecutor executor = mock(WindowsRemoteExecutor.class);
 			mockedFactory
 				.when(() -> WinRMExecutorFactory.createInstance(winRMEndpoint, timeout, null, null))

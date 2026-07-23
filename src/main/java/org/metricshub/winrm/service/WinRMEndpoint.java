@@ -139,7 +139,6 @@ public class WinRMEndpoint {
 	 * @param protocol The HTTP protocol
 	 * @param hostname The host name
 	 * @param port The port
-	 *
 	 * @return the endpoint URL in form of protocol://hostname:port (with protocol in HTTP or HTTPS).
 	 */
 	public static String buildEndpointUrl(
@@ -153,15 +152,15 @@ public class WinRMEndpoint {
 	}
 
 	/**
-	 *	Get the endpoint port:
-	 *<ul>
+	 * Get the endpoint port:
+	 * <ul>
 	 * <li>The port if provided</li>
 	 * <li>5986 if the protocol is HTTPS</li>
 	 * <li>5985 otherwise</li>
-	 *</ul>
+	 * </ul>
+	 *
 	 * @param protocol The HTTP protocol
 	 * @param port The port
-	 *
 	 * @return The endpoint port
 	 */
 	public static int getEndpointPort(final WinRMHttpProtocolEnum protocol, final Integer port) {
@@ -174,8 +173,8 @@ public class WinRMEndpoint {
 	/**
 	 * Get the namespace and replace '\' by '/' if necessary
 	 * default: {@value WmiHelper#DEFAULT_NAMESPACE} if null
-	 * @param namespace the provided namespace
 	 *
+	 * @param namespace the provided namespace
 	 * @return
 	 */
 	public static String buildNamespace(final String namespace) {
@@ -190,7 +189,6 @@ public class WinRMEndpoint {
 	 * Build the WSMan URL endpoint.
 	 *
 	 * @param endpoint the endpoint in form of protocol://hostname:port (with protocol in HTTP or HTTPS).
-	 *
 	 * @return The external form of the endpoint URL
 	 */
 	private static String buildWSManEndpoint(final String endpoint) {
@@ -222,12 +220,13 @@ public class WinRMEndpoint {
 			return false;
 		}
 		final WinRMEndpoint other = (WinRMEndpoint) obj;
-		return (
-			Objects.equals(endpoint, other.endpoint) &&
-			Objects.equals(namespace, other.namespace) &&
-			Arrays.equals(password, other.password) &&
-			Objects.equals(rawUsername, other.rawUsername)
-		);
+		return (Objects.equals(endpoint, other.endpoint)
+			&&
+			Objects.equals(namespace, other.namespace)
+			&&
+			Arrays.equals(password, other.password)
+			&&
+			Objects.equals(rawUsername, other.rawUsername));
 	}
 
 	@Override

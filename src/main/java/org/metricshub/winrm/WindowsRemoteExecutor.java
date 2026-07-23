@@ -29,14 +29,14 @@ import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
 
 public interface WindowsRemoteExecutor extends AutoCloseable {
 	/**
-	 * <p>Execute a WQL query and process its result.</p>
+	 * <p>
+	 * Execute a WQL query and process its result.
+	 * </p>
 	 *
 	 * @param wqlQuery the WQL query (required)
 	 * @param timeout Timeout in milliseconds (throws an IllegalArgumentException if negative or zero)
-	 *
 	 * @return a list of result rows. A result row is a Map(LinkedHashMap to preserve the query order) of
-	 * properties/values.
-	 *
+	 *         properties/values.
 	 * @throws TimeoutException to notify userName of timeout.
 	 * @throws WqlQuerySyntaxException if WQL query syntax is invalid
 	 * @throws WindowsRemoteException For any problem encountered
@@ -51,9 +51,7 @@ public interface WindowsRemoteExecutor extends AutoCloseable {
 	 * @param workingDirectory Path of the directory for the spawned process on the remote system (can be null)
 	 * @param charset The charset
 	 * @param timeout Timeout in milliseconds
-	 *
 	 * @return The command result
-	 *
 	 * @throws WindowsRemoteException For any problem encountered
 	 * @throws TimeoutException To notify userName of timeout.
 	 */
@@ -66,18 +64,21 @@ public interface WindowsRemoteExecutor extends AutoCloseable {
 
 	/**
 	 * Get the hostname.
+	 *
 	 * @return
 	 */
 	public String getHostname();
 
 	/**
 	 * Get the username.
+	 *
 	 * @return
 	 */
 	public String getUsername();
 
 	/**
 	 * Get the password.
+	 *
 	 * @return
 	 */
 	public char[] getPassword();

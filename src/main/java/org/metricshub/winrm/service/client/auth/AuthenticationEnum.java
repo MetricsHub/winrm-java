@@ -38,7 +38,6 @@ public enum AuthenticationEnum {
 	 * Get the value of the enum Name regardless the cardinality.
 	 *
 	 * @param name The enum value name
-	 *
 	 * @return An optional with the enum value if found empty otherwise
 	 */
 	public static Optional<AuthenticationEnum> getValueOf(final String name) {

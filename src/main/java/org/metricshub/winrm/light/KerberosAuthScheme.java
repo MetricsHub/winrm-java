@@ -45,11 +45,11 @@ import org.ietf.jgss.Oid;
  * obtains a TGT via JAAS ({@code Krb5LoginModule}) from a username+password (or a ticket cache),
  * then a service ticket for {@code HTTP/<host>} and emits the AP-REQ under the {@code Negotiate}
  * header.
- *
- * <p>HTTPS only. Like the CXF backend (which never implemented Kerberos message encryption over
+ * <p>
+ * HTTPS only. Like the CXF backend (which never implemented Kerberos message encryption over
  * HTTP), the SOAP travels plaintext inside TLS, so {@link #wrap}/{@link #unwrap} are pass-throughs.
- *
- * <p>Realm and KDC resolution is left to the ambient Kerberos configuration (a {@code krb5.conf} or
+ * <p>
+ * Realm and KDC resolution is left to the ambient Kerberos configuration (a {@code krb5.conf} or
  * the {@code java.security.krb5.*} system properties), exactly as the CXF path did — the library
  * sets none itself.
  */
@@ -69,11 +69,11 @@ final class KerberosAuthScheme implements AuthScheme {
 
 	/**
 	 * @param servicePrincipalHost the host whose {@code HTTP/<host>} SPN to target — must be the FQDN
-	 *                             the KDC knows (never an IP)
-	 * @param username             the account name (without any {@code DOMAIN\} prefix)
-	 * @param password             the account password (unused when {@code ticketCache} is set)
-	 * @param ticketCache          a Kerberos credential cache to reuse, or {@code null} to log in with
-	 *                             the password
+	 *        the KDC knows (never an IP)
+	 * @param username the account name (without any {@code DOMAIN\} prefix)
+	 * @param password the account password (unused when {@code ticketCache} is set)
+	 * @param ticketCache a Kerberos credential cache to reuse, or {@code null} to log in with
+	 *        the password
 	 */
 	KerberosAuthScheme(
 		final String servicePrincipalHost,
@@ -182,11 +182,11 @@ final class KerberosAuthScheme implements AuthScheme {
 					options.put("doNotPrompt", "false");
 				}
 				return new AppConfigurationEntry[] {
-					new AppConfigurationEntry(
-						"com.sun.security.auth.module.Krb5LoginModule",
-						AppConfigurationEntry.LoginModuleControlFlag.REQUIRED,
-						options
-					)
+						new AppConfigurationEntry(
+							"com.sun.security.auth.module.Krb5LoginModule",
+							AppConfigurationEntry.LoginModuleControlFlag.REQUIRED,
+							options
+						)
 				};
 			}
 		};

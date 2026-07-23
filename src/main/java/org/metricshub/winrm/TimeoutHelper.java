@@ -24,7 +24,6 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * for stagged timeout handling.
- *
  */
 public class TimeoutHelper {
 
@@ -49,7 +48,8 @@ public class TimeoutHelper {
 
 	/**
 	 * Sub to make the thread sleep in a stepped delay.
-	 * <p>Delay:
+	 * <p>
+	 * Delay:
 	 * <ul>
 	 * <li>50 milliseconds for time from start &lt; 500 milliseconds</li>
 	 * <li>100 milliseconds for time from start between 500 milliseconds and 1 second</li>
@@ -62,9 +62,7 @@ public class TimeoutHelper {
 	 * @param timeout Timeout in milliseconds
 	 * @param start start time in milliseconds
 	 * @param message The timeout error message
-	 *
 	 * @throws TimeoutException when times out
-	 *
 	 */
 	public static void stagedSleep(final long timeout, final long start, final String message) throws TimeoutException {
 		// Check we still have some time on our hands

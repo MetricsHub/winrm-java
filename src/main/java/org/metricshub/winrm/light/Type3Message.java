@@ -26,7 +26,6 @@ import java.util.Random;
 
 /**
  * Type 3 message assembly class
- *
  * Code from io.cloudsoft.winrm4j.client.ntlm.forks.httpclient.NTLMEngineImpl
  * release 0.12.3 @link https://github.com/cloudsoft/winrm4j
  * io.cloudsoft.winrm4j.client.ntlm.forks.httpclient is a fork of apache-httpclient 4.5.13
@@ -56,7 +55,8 @@ public class Type3Message extends NTLMMessage {
 	private final byte[] sessionKey;
 	private final byte[] exportedSessionKey;
 
-	/** More primitive constructor: don't include cert or previous messages.
+	/**
+	 * More primitive constructor: don't include cert or previous messages.
 	 */
 	Type3Message(
 		final String domain,
@@ -85,7 +85,7 @@ public class Type3Message extends NTLMMessage {
 
 		byte[] responseTargetInformation = targetInformation;
 
-		// Create a cipher generator class.  Use domain BEFORE it gets modified!
+		// Create a cipher generator class. Use domain BEFORE it gets modified!
 		final CipherGen gen = new CipherGen(
 			random,
 			currentTime,
@@ -103,9 +103,9 @@ public class Type3Message extends NTLMMessage {
 		try {
 			// This conditional may not work on Windows Server 2008 R2 and above, where it has not yet
 			// been tested
-			if (
-				((type2Flags & NTLMEngineUtils.FLAG_TARGETINFO_PRESENT) != 0) && targetInformation != null && target != null
-			) {
+			if (((type2Flags & NTLMEngineUtils.FLAG_TARGETINFO_PRESENT) != 0)
+				&& targetInformation != null
+				&& target != null) {
 				// NTLMv2
 				ntResp = gen.getNTLMv2Response();
 				lmResp = gen.getLMv2Response();
@@ -250,31 +250,26 @@ public class Type3Message extends NTLMMessage {
 		// Flags.
 		addULong(
 			/*
-				//FLAG_WORKSTATION_PRESENT |
-				//FLAG_DOMAIN_PRESENT |
-
-				// Required flags
-				(type2Flags & FLAG_REQUEST_LAN_MANAGER_KEY) |
-				(type2Flags & FLAG_REQUEST_NTLMv1) |
-				(type2Flags & FLAG_REQUEST_NTLM2_SESSION) |
-
-				// Protocol version request
-				FLAG_REQUEST_VERSION |
-
-				// Recommended privacy settings
-				(type2Flags & FLAG_REQUEST_ALWAYS_SIGN) |
-				(type2Flags & FLAG_REQUEST_SEAL) |
-				(type2Flags & FLAG_REQUEST_SIGN) |
-
-				// These must be set according to documentation, based on use of SEAL above
-				(type2Flags & FLAG_REQUEST_128BIT_KEY_EXCH) |
-				(type2Flags & FLAG_REQUEST_56BIT_ENCRYPTION) |
-				(type2Flags & FLAG_REQUEST_EXPLICIT_KEY_EXCH) |
-
-				(type2Flags & FLAG_TARGETINFO_PRESENT) |
-				(type2Flags & FLAG_REQUEST_UNICODE_ENCODING) |
-				(type2Flags & FLAG_REQUEST_TARGET)
-					*/
+			 * //FLAG_WORKSTATION_PRESENT |
+			 * //FLAG_DOMAIN_PRESENT |
+			 * // Required flags
+			 * (type2Flags & FLAG_REQUEST_LAN_MANAGER_KEY) |
+			 * (type2Flags & FLAG_REQUEST_NTLMv1) |
+			 * (type2Flags & FLAG_REQUEST_NTLM2_SESSION) |
+			 * // Protocol version request
+			 * FLAG_REQUEST_VERSION |
+			 * // Recommended privacy settings
+			 * (type2Flags & FLAG_REQUEST_ALWAYS_SIGN) |
+			 * (type2Flags & FLAG_REQUEST_SEAL) |
+			 * (type2Flags & FLAG_REQUEST_SIGN) |
+			 * // These must be set according to documentation, based on use of SEAL above
+			 * (type2Flags & FLAG_REQUEST_128BIT_KEY_EXCH) |
+			 * (type2Flags & FLAG_REQUEST_56BIT_ENCRYPTION) |
+			 * (type2Flags & FLAG_REQUEST_EXPLICIT_KEY_EXCH) |
+			 * (type2Flags & FLAG_TARGETINFO_PRESENT) |
+			 * (type2Flags & FLAG_REQUEST_UNICODE_ENCODING) |
+			 * (type2Flags & FLAG_REQUEST_TARGET)
+			 */
 			type2Flags
 		);
 

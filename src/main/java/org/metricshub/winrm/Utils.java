@@ -107,6 +107,7 @@ public class Utils {
 
 	/**
 	 * Get the current time in Milliseconds.
+	 *
 	 * @return the current time in Milliseconds.
 	 */
 	public static long getCurrentTimeMillis() {
@@ -133,7 +134,6 @@ public class Utils {
 	 * @param callable
 	 * @param timeout
 	 * @return {@link T} result returned by the callable
-	 *
 	 * @throws InterruptedException
 	 * @throws ExecutionException
 	 * @throws TimeoutException

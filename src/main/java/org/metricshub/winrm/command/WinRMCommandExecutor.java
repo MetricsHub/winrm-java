@@ -46,22 +46,17 @@ public class WinRMCommandExecutor {
 	/**
 	 * Execute a command on a remote Windows system and return an object with
 	 * the output of the command.
-	 *
 	 * You can specify local files to be copied to the remote system before executing the command.
 	 * If the command contains references to these local files, it will be updated to reference the
 	 * path on the remote system where the files have been copied.
-	 *
 	 * Example:
-	 *
 	 * <code>
 	 * 		WinRemoteCommandExecutor.execute(
 	 * 		"CSCRIPT c:\\MyScript.vbs", null, "remote-srv", null, null, null, 30000, Arrays.asList("c:\\MyScript.vbs"), false);
 	 * </code>
-	 *
 	 * This will copy <b>c:\\MyScript.vbs</b> to <b>remote-srv</b>, typically in
 	 * <b>C:\\Windows\\Temp\\SEN_ShareFor_MYHOST</b> and the command that is executed will therefore
 	 * become:
-	 *
 	 * <code>CSCRIPT "C:\\Windows\\Temp\\SEN_ShareFor_MYHOST\\MyScript.vbs"</code>
 	 *
 	 * @param command The command to execute. (Mandatory)
@@ -75,9 +70,7 @@ public class WinRMCommandExecutor {
 	 * @param localFileToCopyList List of local files to copy to the remote before the execution
 	 * @param ticketCache The Ticket Cache path
 	 * @param authentications List of authentications. only NTLM if absent
-	 *
 	 * @return an instance of WindowsRemoteCommandResult with the result of the command
-	 *
 	 * @throws IOException If an I/O error occurs.
 	 * @throws TimeoutException To notify userName of timeout
 	 * @throws WindowsRemoteException For any problem encountered on remote
@@ -109,8 +102,7 @@ public class WinRMCommandExecutor {
 					timeout,
 					ticketCache,
 					authentications
-				)
-			) {
+				)) {
 				final Charset charset = WindowsRemoteProcessUtils.getWindowsEncodingCharset(
 					winRMService,
 					TimeoutHelper.getRemainingTime(timeout, start, "No time left to retrieve the code set")
@@ -128,8 +120,7 @@ public class WinRMCommandExecutor {
 				timeout,
 				ticketCache,
 				authentications
-			)
-		) {
+			)) {
 			smbTempShare.checkConnectedFirst();
 
 			final List<String> localFiles = localFileToCopyList
