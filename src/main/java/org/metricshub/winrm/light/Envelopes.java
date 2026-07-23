@@ -20,6 +20,10 @@ package org.metricshub.winrm.light;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
+import java.math.BigDecimal;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -160,6 +164,16 @@ final class Envelopes {
 		);
 	}
 
+	/**
+	 * Format the WSMan OperationTimeout exactly like the CXF backend: {@code PT#.###S} with ROOT
+	 * locale symbols (always a {@code .} decimal separator, up to millisecond precision, no trailing
+	 * zeros) — e.g. 30000 ms → {@code PT30S}, 1500 ms → {@code PT1.5S}, 1234 ms → {@code PT1.234S}.
+	 */
+	private static String operationTimeout(final long timeoutMs) {
+		final BigDecimal seconds = BigDecimal.valueOf(timeoutMs).divide(BigDecimal.valueOf(1000));
+		return new DecimalFormat("PT#.###S", new DecimalFormatSymbols(Locale.ROOT)).format(seconds);
+	}
+
 	private static String header(
 		final String url,
 		final String resourceUri,
@@ -168,7 +182,6 @@ final class Envelopes {
 		final String selectorSet,
 		final String optionSet
 	) {
-		final long seconds = Math.max(1, timeoutMs / 1000);
 		return (
 			"<s:Header>" +
 			"<wsa:To>" +
@@ -192,9 +205,9 @@ final class Envelopes {
 			"<wsman:Locale xml:lang=\"en-US\" s:mustUnderstand=\"false\"/>" +
 			(selectorSet == null ? "" : selectorSet) +
 			(optionSet == null ? "" : optionSet) +
-			"<wsman:OperationTimeout>PT" +
-			seconds +
-			"S</wsman:OperationTimeout>" +
+			"<wsman:OperationTimeout>" +
+			operationTimeout(timeoutMs) +
+			"</wsman:OperationTimeout>" +
 			"</s:Header>"
 		);
 	}

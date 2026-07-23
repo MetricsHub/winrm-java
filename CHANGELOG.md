@@ -34,6 +34,13 @@ connectivity, do one of:
 - The **light** backend is now the default; the CXF backend is opt-in via
   `org.metricshub.winrm.backend=cxf`.
 - HTTPS connections validate certificates and verify hostnames by default (see the upgrade warning).
+- The light backend's exception surface now matches the CXF backend (feature parity, #106):
+  authentication rejections raise the same `Authentication error on <endpoint> with user name "<user>"`
+  message, operations on a closed executor raise the same `IllegalStateException` message, the WSMan
+  `OperationTimeout` header uses the same `PT#.###S` millisecond-precision format, and the
+  `EndOfSequence` / `Items` enumeration markers are recognized in both their WS-Enumeration and WSMan
+  namespace variants. WSMan fault exceptions additionally carry the detailed `WSManFault` message
+  (including the provider-level detail, e.g. WMI `WBEM_E_*` mnemonics) alongside the SOAP reason text.
 
 ### Deprecated
 

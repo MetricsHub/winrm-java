@@ -56,8 +56,13 @@ final class WsmanClient implements AutoCloseable {
 	// or "EnumerationContext" inside <Items> cannot be mistaken for the enumeration control element.
 	private static final String WS_ENUMERATION_NS = "http://schemas.xmlsoap.org/ws/2004/09/enumeration";
 
+	// WinRM also emits the Items / EndOfSequence markers in its own WSMan namespace (the wsman:Items /
+	// wsman:EndOfSequence variants); the CXF backend accepts both, so the light backend must too.
+	private static final String WSMAN_NS = "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd";
+
 	private final long timeoutMs;
 	private final String url;
+	private final String rawUsername;
 	private final AuthScheme auth;
 	private final HttpTransport transport;
 
@@ -77,11 +82,13 @@ final class WsmanClient implements AutoCloseable {
 		final long timeoutMs,
 		final SSLSocketFactory sslSocketFactory,
 		final boolean verifyHostname,
-		final AuthScheme auth
+		final AuthScheme auth,
+		final String rawUsername
 	) {
 		this.timeoutMs = timeoutMs;
 		// A non-null socket factory selects HTTPS: TLS wraps the transport and the SOAP travels plaintext.
 		this.url = (sslSocketFactory != null ? "https" : "http") + "://" + host + ":" + port + "/wsman";
+		this.rawUsername = rawUsername;
 		this.auth = auth;
 		this.transport = new HttpTransport(host, port, toSocketTimeoutMillis(timeoutMs), sslSocketFactory, verifyHostname);
 	}
@@ -282,7 +289,11 @@ final class WsmanClient implements AutoCloseable {
 				if (auth.advance()) {
 					continue;
 				}
-				throw new IllegalStateException("WSMan request failed: authentication rejected (HTTP 401)");
+				// Same message format as the CXF backend's credential-rejection path — callers (and their
+				// operators) match on it.
+				throw new IllegalStateException(
+					String.format("Authentication error on %s with user name \"%s\"", url, rawUsername)
+				);
 			}
 
 			// 200 = success, 500 = SOAP fault. Anything else is a protocol failure whose body is not a
@@ -296,7 +307,7 @@ final class WsmanClient implements AutoCloseable {
 
 	// --- XML helpers --------------------------------------------------------
 
-	private static Document parse(final byte[] xml) throws Exception {
+	static Document parse(final byte[] xml) throws Exception {
 		final DocumentBuilderFactory factory = DocumentBuilderFactory.newDefaultInstance();
 		factory.setNamespaceAware(true);
 		// Harden against XXE: a malicious/compromised WinRM endpoint must not be able to make us
@@ -332,9 +343,17 @@ final class WsmanClient implements AutoCloseable {
 		return nodes.getLength() > 0 ? nodes.item(0).getTextContent() : null;
 	}
 
-	/** Whether the document contains the given WS-Enumeration control element (namespace-scoped). */
-	private static boolean hasEnumerationElement(final Document doc, final String localName) {
-		return doc.getElementsByTagNameNS(WS_ENUMERATION_NS, localName).getLength() > 0;
+	/**
+	 * Whether the document contains the given enumeration control element (namespace-scoped).
+	 * WinRM emits these markers either in the WS-Enumeration namespace or in its own WSMan namespace
+	 * (e.g. {@code wsen:EndOfSequence} vs {@code wsman:EndOfSequence}); accept both, like the CXF
+	 * backend does.
+	 */
+	static boolean hasEnumerationElement(final Document doc, final String localName) {
+		return (
+			doc.getElementsByTagNameNS(WS_ENUMERATION_NS, localName).getLength() > 0 ||
+			doc.getElementsByTagNameNS(WSMAN_NS, localName).getLength() > 0
+		);
 	}
 
 	/** First text content of an element matched by both namespace and local name. */
@@ -343,8 +362,15 @@ final class WsmanClient implements AutoCloseable {
 		return nodes.getLength() > 0 ? nodes.item(0).getTextContent() : null;
 	}
 
-	private static void collectItems(final Document doc, final List<Map<String, String>> rows) {
-		final NodeList items = doc.getElementsByTagNameNS("*", "Items");
+	static void collectItems(final Document doc, final List<Map<String, String>> rows) {
+		// The Items wrapper comes in the WS-Enumeration namespace (EnumerateResponse) or the WSMan
+		// namespace (PullResponse) depending on the operation; accept both, like the CXF backend, and
+		// nothing else — a WMI property or class named "Items" must not be mistaken for the wrapper.
+		collectItems(doc.getElementsByTagNameNS(WS_ENUMERATION_NS, "Items"), rows);
+		collectItems(doc.getElementsByTagNameNS(WSMAN_NS, "Items"), rows);
+	}
+
+	private static void collectItems(final NodeList items, final List<Map<String, String>> rows) {
 		for (int i = 0; i < items.getLength(); i++) {
 			final NodeList instances = items.item(i).getChildNodes();
 			for (int j = 0; j < instances.getLength(); j++) {
@@ -406,15 +432,50 @@ final class WsmanClient implements AutoCloseable {
 		return faults.getLength() > 0 ? ((Element) faults.item(0)).getAttribute("Code") : null;
 	}
 
+	/**
+	 * The detailed WSManFault Message text, or null. This is where WinRM puts the provider-level
+	 * detail — notably the WMI error mnemonics (WBEM_E_INVALID_CLASS, WBEM_E_INVALID_NAMESPACE,
+	 * WBEM_E_NOT_FOUND, ...) that callers match on to tell a bad query from a broken connection.
+	 * {@code getTextContent()} also flattens any nested ProviderFault detail into the message.
+	 */
+	private static String wsmanFaultMessage(final Document doc) {
+		final NodeList faults = doc.getElementsByTagNameNS("*", "WSManFault");
+		if (faults.getLength() == 0) {
+			return null;
+		}
+		final NodeList messages = ((Element) faults.item(0)).getElementsByTagNameNS("*", "Message");
+		return messages.getLength() > 0 ? messages.item(0).getTextContent() : null;
+	}
+
+	static String faultSummary(final int status, final Document doc) {
+		final String reason = trimToNull(text(doc, "Text"));
+		final String detail = trimToNull(wsmanFaultMessage(doc));
+		final String code = wsmanFaultCode(doc);
+		final StringBuilder summary = new StringBuilder("HTTP ").append(status);
+		if (code != null && !code.isEmpty()) {
+			summary.append(" (WSManFault ").append(code).append(')');
+		}
+		if (reason != null) {
+			summary.append(": ").append(reason);
+		}
+		// Append the detailed fault message when it adds anything beyond the Reason text: the WMI
+		// mnemonics it carries are part of the exception-message contract inherited from CXF.
+		if (detail != null && (reason == null || !reason.contains(detail))) {
+			summary.append(reason == null ? ": " : " - ").append(detail);
+		}
+		return summary.toString();
+	}
+
 	private static String faultSummary(final Decoded resp) {
-		final String reason = text(resp.document, "Text");
-		final String code = wsmanFaultCode(resp.document);
-		return (
-			"HTTP " +
-			resp.status +
-			(code == null ? "" : " (WSManFault " + code + ")") +
-			(reason == null ? "" : ": " + reason.trim())
-		);
+		return faultSummary(resp.status, resp.document);
+	}
+
+	private static String trimToNull(final String s) {
+		if (s == null) {
+			return null;
+		}
+		final String trimmed = s.trim();
+		return trimmed.isEmpty() ? null : trimmed;
 	}
 
 	@Override

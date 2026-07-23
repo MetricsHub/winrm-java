@@ -185,9 +185,11 @@ class WinRMExecutorFactoryTest {
 			List.of(AuthenticationEnum.NTLM)
 		);
 		executor.close();
-		assertThrows(
+		final IllegalStateException e = assertThrows(
 			IllegalStateException.class,
 			() -> executor.executeWql("SELECT Name FROM Win32_OperatingSystem", 30000L)
 		);
+		// Same message as the CXF backend (part of the exception-surface parity, issue #106).
+		assertEquals("This instance has been closed and a new one must be created.", e.getMessage());
 	}
 }

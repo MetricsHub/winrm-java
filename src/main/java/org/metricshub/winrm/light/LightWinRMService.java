@@ -99,7 +99,8 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			timeout,
 			sslSocketFactory,
 			https && LightTls.verifyHostname(),
-			authScheme
+			authScheme,
+			winRMEndpoint.getRawUsername()
 		);
 		return new LightWinRMService(winRMEndpoint, client);
 	}
@@ -242,8 +243,9 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	}
 
 	private void checkNotClosed() {
+		// Same message as the CXF backend's checkConnectedFirst() — part of the exception surface.
 		if (closed.get()) {
-			throw new IllegalStateException("This WinRM executor has been closed; create a new one.");
+			throw new IllegalStateException("This instance has been closed and a new one must be created.");
 		}
 	}
 }
