@@ -106,7 +106,9 @@ class WinRMExecutorFactoryTest {
 	}
 
 	@Test
-	void lightBackendRejectsKerberosOnly() {
+	void kerberosOnlyOverHttpRejected() {
+		// Kerberos requires HTTPS (no message encryption over plain HTTP, matching CXF) and there is no
+		// other scheme to fall back to, so a Kerberos-only request over HTTP is rejected.
 		System.setProperty(WinRMExecutorFactory.BACKEND_PROPERTY, "light");
 		assertThrows(
 			WinRMException.class,
@@ -121,20 +123,37 @@ class WinRMExecutorFactoryTest {
 	}
 
 	@Test
-	void lightBackendRejectsMixedKerberosNtlm() {
-		// A fallback list like [KERBEROS, NTLM] must be rejected, not silently downgraded to NTLM: the
-		// light backend cannot honour the preferred Kerberos scheme, so it points at the CXF escape hatch.
+	void mixedKerberosNtlmFallsBackToNtlmOverHttp() throws Exception {
+		// Ordered fallback: [KERBEROS, NTLM] over HTTP cannot use Kerberos (HTTPS-only), so it falls back
+		// to NTLM and constructs successfully. Building the client opens no connection, so this is offline.
 		System.setProperty(WinRMExecutorFactory.BACKEND_PROPERTY, "light");
-		assertThrows(
-			WinRMException.class,
-			() ->
-				WinRMExecutorFactory.createInstance(
-					endpoint(WinRMHttpProtocolEnum.HTTP),
-					30000L,
-					null,
-					List.of(AuthenticationEnum.KERBEROS, AuthenticationEnum.NTLM)
-				)
-		);
+		try (
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTP),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.KERBEROS, AuthenticationEnum.NTLM)
+			)
+		) {
+			assertInstanceOf(LightWinRMService.class, executor);
+		}
+	}
+
+	@Test
+	void kerberosOverHttpsAccepted() throws Exception {
+		// Kerberos is supported over HTTPS; the login/handshake happen on the first operation, so
+		// constructing the executor stays offline.
+		System.setProperty(WinRMExecutorFactory.BACKEND_PROPERTY, "light");
+		try (
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTPS),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.KERBEROS)
+			)
+		) {
+			assertInstanceOf(LightWinRMService.class, executor);
+		}
 	}
 
 	@Test

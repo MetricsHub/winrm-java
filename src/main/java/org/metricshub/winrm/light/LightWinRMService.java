@@ -47,8 +47,9 @@ import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
  * (it uses the JDK-default XML factories).
  *
  * <p>Supports NTLM over HTTP (with message encryption) and over HTTPS (plaintext SOAP inside TLS,
- * validating the server certificate by default; see {@link LightTls}). Kerberos is still handled by
- * the CXF backend until light support lands.
+ * validating the server certificate by default; see {@link LightTls}), and Kerberos over HTTPS
+ * (SPNEGO via the JDK GSS-API; see {@link KerberosAuthScheme}). A multi-scheme request such as
+ * {@code [KERBEROS, NTLM]} is tried in order with fallback.
  */
 public final class LightWinRMService implements WindowsRemoteExecutor {
 
@@ -66,8 +67,10 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	 *
 	 * @param winRMEndpoint  endpoint with credentials (mandatory)
 	 * @param timeout        timeout in milliseconds (must be &gt; 0)
-	 * @param ticketCache    Kerberos ticket cache path (unused by the light backend)
-	 * @param authentications requested authentication schemes; the light backend supports NTLM
+	 * @param ticketCache    Kerberos ticket cache path (used by the Kerberos scheme; {@code null} logs
+	 *                       in with the password)
+	 * @param authentications requested authentication schemes, tried in order (NTLM and/or Kerberos);
+	 *                        {@code null}/empty means NTLM only
 	 * @return a new {@code LightWinRMService}
 	 * @throws WinRMException on invalid arguments or an unsupported authentication request
 	 */
@@ -80,33 +83,12 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		Utils.checkNonNull(winRMEndpoint, "winRMEndpoint");
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
 
-		// Reject any list that requests a scheme the light backend cannot honour, even when NTLM is also
-		// present. The authentications list is an ordered fallback: accepting e.g. [KERBEROS, NTLM] would
-		// silently ignore the preferred Kerberos (and ticketCache) and downgrade to NTLM, which is weaker
-		// and fails against NTLM-disabled servers. Fail loudly toward the escape hatch instead.
-		if (authentications != null) {
-			for (final AuthenticationEnum requested : authentications) {
-				if (requested != AuthenticationEnum.NTLM) {
-					throw new WinRMException(
-						"The light WinRM backend currently supports only NTLM authentication (requested: " +
-						authentications +
-						"). Select the CXF backend with -Dorg.metricshub.winrm.backend=cxf until light support lands."
-					);
-				}
-			}
-		}
-
 		// HTTPS wraps the transport in TLS and exchanges plaintext SOAP; HTTP uses NTLM message sealing.
 		// TLS validates by default (platform trust store + hostname verification); see LightTls.
 		final boolean https = winRMEndpoint.getProtocol() == WinRMHttpProtocolEnum.HTTPS;
 		final SSLSocketFactory sslSocketFactory = https ? LightTls.socketFactory() : null;
 
-		final AuthScheme authScheme = new NtlmAuthScheme(
-			winRMEndpoint.getDomain(),
-			winRMEndpoint.getUsername(),
-			new String(winRMEndpoint.getPassword()),
-			https
-		);
+		final AuthScheme authScheme = resolveAuthScheme(winRMEndpoint, authentications, https, ticketCache);
 
 		// Use the endpoint's own validated host/port rather than re-parsing the URL: URI.getHost()/getPort()
 		// return null/-1 for names URI cannot classify (underscores, Unicode) that WinRMEndpoint accepts,
@@ -120,6 +102,56 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			authScheme
 		);
 		return new LightWinRMService(winRMEndpoint, client);
+	}
+
+	/**
+	 * Resolve the requested authentication schemes into a single {@link AuthScheme}, honoring the
+	 * caller's order. {@code null}/empty means NTLM only. A single scheme is used directly; several
+	 * become an ordered {@link FallbackAuthScheme} (e.g. Kerberos then NTLM). Kerberos requires HTTPS
+	 * (no message encryption over plain HTTP, matching the CXF backend), so it is dropped from the
+	 * candidate list over HTTP — a fallback list then uses its remaining schemes, and a Kerberos-only
+	 * request over HTTP fails toward the escape hatch.
+	 */
+	private static AuthScheme resolveAuthScheme(
+		final WinRMEndpoint winRMEndpoint,
+		final List<AuthenticationEnum> authentications,
+		final boolean https,
+		final java.nio.file.Path ticketCache
+	) throws WinRMException {
+		final List<AuthenticationEnum> requested = authentications == null || authentications.isEmpty()
+			? List.of(AuthenticationEnum.NTLM)
+			: authentications;
+
+		final String domain = winRMEndpoint.getDomain();
+		final String username = winRMEndpoint.getUsername();
+		final String password = new String(winRMEndpoint.getPassword());
+
+		final List<AuthScheme> schemes = new ArrayList<>();
+		for (final AuthenticationEnum auth : requested) {
+			if (auth == AuthenticationEnum.NTLM) {
+				schemes.add(new NtlmAuthScheme(domain, username, password, https));
+			} else if (auth == AuthenticationEnum.KERBEROS) {
+				if (https) {
+					// The SPN is HTTP/<hostname>, so the caller must connect by the FQDN the KDC knows.
+					schemes.add(new KerberosAuthScheme(winRMEndpoint.getHostname(), username, password, ticketCache));
+				}
+				// else: Kerberos is unavailable over plain HTTP — leave it out of the candidate list.
+			} else {
+				throw new WinRMException(
+					"The light WinRM backend supports only NTLM and Kerberos (requested: " + requested + ")."
+				);
+			}
+		}
+
+		if (schemes.isEmpty()) {
+			// e.g. Kerberos requested over plain HTTP with no other scheme to fall back to.
+			throw new WinRMException(
+				"Kerberos over the light backend requires HTTPS (endpoint was " +
+				winRMEndpoint.getEndpoint() +
+				"). Use HTTPS, or select the CXF backend with -Dorg.metricshub.winrm.backend=cxf."
+			);
+		}
+		return schemes.size() == 1 ? schemes.get(0) : new FallbackAuthScheme(schemes);
 	}
 
 	@Override
