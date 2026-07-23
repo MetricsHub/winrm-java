@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -65,6 +66,11 @@ final class WsmanClient implements AutoCloseable {
 
 	private String pendingAuthorization;
 	private String shellId;
+
+	// True while a SOAP request is on the wire. close() consults this to avoid racing an abandoned
+	// worker (e.g. a Receive left blocked on the socket after a command timeout) on the shared
+	// socket and stateful RC4 session.
+	private final AtomicBoolean requestInFlight = new AtomicBoolean(false);
 
 	WsmanClient(
 		final String host,
@@ -213,33 +219,38 @@ final class WsmanClient implements AutoCloseable {
 
 	/** Send one SOAP request (authenticating the connection on first use) and decrypt the response. */
 	private Decoded request(final String soap) throws Exception {
-		// If the connection was dropped (e.g. the server sent "Connection: close"), the NTLM session
-		// bound to it is dead — re-handshake on the fresh connection rather than sending unauthenticated.
-		if (session.isAuthenticated() && !transport.isConnected()) {
-			session.reset();
-		}
-		if (!session.isAuthenticated()) {
-			authenticate();
-		}
-		// The Type 3 authorization accompanies the first encrypted payload; later requests on the
-		// already-authenticated connection carry no Authorization header.
-		final String authorization = pendingAuthorization;
-		pendingAuthorization = null;
+		requestInFlight.set(true);
+		try {
+			// If the connection was dropped (e.g. the server sent "Connection: close"), the NTLM session
+			// bound to it is dead — re-handshake on the fresh connection rather than sending unauthenticated.
+			if (session.isAuthenticated() && !transport.isConnected()) {
+				session.reset();
+			}
+			if (!session.isAuthenticated()) {
+				authenticate();
+			}
+			// The Type 3 authorization accompanies the first encrypted payload; later requests on the
+			// already-authenticated connection carry no Authorization header.
+			final String authorization = pendingAuthorization;
+			pendingAuthorization = null;
 
-		final byte[] encrypted = NtlmCrypto.encryptAndSign(session, soap.getBytes(StandardCharsets.UTF_8));
-		final HttpTransport.Response resp = transport.post(
-			"/wsman",
-			encrypted,
-			NtlmCrypto.ENCRYPTED_CONTENT_TYPE,
-			authorization
-		);
+			final byte[] encrypted = NtlmCrypto.encryptAndSign(session, soap.getBytes(StandardCharsets.UTF_8));
+			final HttpTransport.Response resp = transport.post(
+				"/wsman",
+				encrypted,
+				NtlmCrypto.ENCRYPTED_CONTENT_TYPE,
+				authorization
+			);
 
-		// 200 = success, 500 = SOAP fault (both bodies are encrypted). Anything else is a protocol
-		// or authentication failure whose body is not a usable WSMan response.
-		if (resp.status != 200 && resp.status != 500) {
-			throw new IllegalStateException("WSMan request failed: HTTP " + resp.status);
+			// 200 = success, 500 = SOAP fault (both bodies are encrypted). Anything else is a protocol
+			// or authentication failure whose body is not a usable WSMan response.
+			if (resp.status != 200 && resp.status != 500) {
+				throw new IllegalStateException("WSMan request failed: HTTP " + resp.status);
+			}
+			return new Decoded(resp.status, decryptResponse(resp));
+		} finally {
+			requestInFlight.set(false);
 		}
-		return new Decoded(resp.status, decryptResponse(resp));
 	}
 
 	private void authenticate() throws Exception {
@@ -281,10 +292,17 @@ final class WsmanClient implements AutoCloseable {
 
 	private Document decryptResponse(final HttpTransport.Response resp) throws Exception {
 		final String contentType = resp.firstHeader("content-type");
-		final byte[] plain = contentType != null && contentType.startsWith("multipart/encrypted")
-			? NtlmCrypto.decrypt(session, resp.body)
-			: resp.body;
-		return parse(plain);
+		// Once the NTLM session is authenticated, the seal is the ONLY thing protecting response
+		// integrity over plaintext HTTP. A non-encrypted body (from a proxy, a misconfigured server,
+		// or an on-path attacker returning a forged HTTP 200/500) has not passed the HMAC check, so it
+		// must never be parsed as a trusted WSMan response. request() only reaches here after the
+		// handshake, so an encrypted content type is always required.
+		if (contentType == null || !contentType.startsWith("multipart/encrypted")) {
+			throw new IllegalStateException(
+				"Refusing to parse an unencrypted WSMan response after authentication (Content-Type: " + contentType + ")"
+			);
+		}
+		return parse(NtlmCrypto.decrypt(session, resp.body));
 	}
 
 	// --- XML helpers --------------------------------------------------------
@@ -402,17 +420,22 @@ final class WsmanClient implements AutoCloseable {
 
 	@Override
 	public void close() {
-		try {
-			if (shellId != null) {
-				try {
-					request(Envelopes.deleteShell(url, shellId, timeoutMs));
-				} catch (final Exception ignore) {
-					// best-effort shell cleanup
-				}
-				shellId = null;
+		final String shell = shellId;
+		shellId = null;
+		// If a request is still in flight, another thread is blocked on this socket — e.g. a command
+		// that exceeded its timeout, where Utils.execute abandons the worker mid-Receive while
+		// try-with-resources calls close() here. Issuing a graceful shell Delete now would start a
+		// second SOAP exchange over the SAME socket and stateful RC4 session, racing the worker
+		// (cipher-sequence corruption, crossed responses, or a stall until the socket read timeout).
+		// In that case, just hard-close the transport below: it unblocks the worker's read, and the
+		// abandoned shell is reaped by the server's IdleTimeout.
+		if (shell != null && !requestInFlight.get()) {
+			try {
+				request(Envelopes.deleteShell(url, shell, timeoutMs));
+			} catch (final Exception ignore) {
+				// best-effort shell cleanup
 			}
-		} finally {
-			transport.close();
 		}
+		transport.close();
 	}
 }

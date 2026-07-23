@@ -241,14 +241,19 @@ final class HttpTransport implements AutoCloseable {
 
 	@Override
 	public void close() {
-		try {
-			if (socket != null) {
-				socket.close();
+		// Read the field into a local before closing so a concurrent close() (the main thread closing
+		// the socket to unblock a worker blocked in a socket read) cannot NPE on a check-then-use race.
+		// Closing an already-closed Socket is a no-op; closing an open one unblocks any pending read.
+		final Socket doomed = socket;
+		socket = null;
+		out = null;
+		in = null;
+		if (doomed != null) {
+			try {
+				doomed.close();
+			} catch (final IOException ignore) {
+				// best effort
 			}
-		} catch (final IOException ignore) {
-			// best effort
-		} finally {
-			socket = null;
 		}
 	}
 }
