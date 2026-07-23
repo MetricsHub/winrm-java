@@ -21,6 +21,7 @@ package org.metricshub.winrm.light;
  */
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -195,8 +196,11 @@ final class WsmanClient implements AutoCloseable {
 	}
 
 	private CommandOutput receiveLoop(final String commandId, final Charset charset) throws Exception {
-		final StringBuilder stdout = new StringBuilder();
-		final StringBuilder stderr = new StringBuilder();
+		// Accumulate the raw stream BYTES and decode once at the end: a multibyte character (e.g. UTF-8)
+		// can be split across Stream elements or Receive responses, and decoding each chunk independently
+		// would corrupt the boundary bytes into replacement characters.
+		final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+		final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
 		while (true) {
 			final Decoded resp = request(Envelopes.receive(url, shellId, commandId, timeoutMs));
 			if (resp.status != 200) {
@@ -207,10 +211,14 @@ final class WsmanClient implements AutoCloseable {
 				}
 				throw new IllegalStateException("Receive failed: " + faultSummary(resp));
 			}
-			collectStreams(resp.document, stdout, stderr, charset);
+			collectStreams(resp.document, stdout, stderr);
 			final Integer exitCode = doneExitCode(resp.document);
 			if (exitCode != null) {
-				return new CommandOutput(stdout.toString(), stderr.toString(), exitCode);
+				return new CommandOutput(
+					new String(stdout.toByteArray(), charset),
+					new String(stderr.toByteArray(), charset),
+					exitCode
+				);
 			}
 		}
 	}
@@ -361,9 +369,8 @@ final class WsmanClient implements AutoCloseable {
 
 	private static void collectStreams(
 		final Document doc,
-		final StringBuilder stdout,
-		final StringBuilder stderr,
-		final Charset charset
+		final ByteArrayOutputStream stdout,
+		final ByteArrayOutputStream stderr
 	) {
 		final NodeList streams = doc.getElementsByTagNameNS("*", "Stream");
 		for (int i = 0; i < streams.getLength(); i++) {
@@ -372,11 +379,11 @@ final class WsmanClient implements AutoCloseable {
 			if (value == null || value.isEmpty()) {
 				continue;
 			}
-			final String decoded = new String(Base64.getDecoder().decode(value), charset);
+			final byte[] bytes = Base64.getDecoder().decode(value);
 			if ("stdout".equals(stream.getAttribute("Name"))) {
-				stdout.append(decoded);
+				stdout.write(bytes, 0, bytes.length);
 			} else if ("stderr".equals(stream.getAttribute("Name"))) {
-				stderr.append(decoded);
+				stderr.write(bytes, 0, bytes.length);
 			}
 		}
 	}
