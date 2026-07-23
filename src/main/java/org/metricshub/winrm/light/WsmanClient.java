@@ -48,30 +48,10 @@ import org.w3c.dom.NodeList;
  */
 final class WsmanClient implements AutoCloseable {
 
-	// Type 1 flags over plain HTTP: engine defaults + SIGN | SEAL | KEY_EXCH (matches
-	// NtlmMasqAsSpnegoScheme). Message sealing is what protects the SOAP over an unencrypted transport.
-	private static final int TYPE1_FLAGS_ENCRYPTED = (int) (Type1Message.getDefaultFlags() |
-		NTLMEngineUtils.NTLMSSP_NEGOTIATE_SIGN |
-		NTLMEngineUtils.NTLMSSP_NEGOTIATE_SEAL |
-		NTLMEngineUtils.NTLMSSP_NEGOTIATE_KEY_EXCH);
-
-	// Type 1 flags over HTTPS: engine defaults only. TLS already provides confidentiality/integrity, so
-	// we authenticate WITHOUT negotiating sealing and exchange plaintext SOAP — claiming SEAL but then
-	// sending plaintext would make the server reject the message.
-	private static final int TYPE1_FLAGS_PLAIN = (int) Type1Message.getDefaultFlags();
-
-	private static final String SOAP_CONTENT_TYPE = "application/soap+xml;charset=UTF-8";
-	private static final byte[] PRE_AUTH_BOGUS = "AWAITING_ENCRYPTION_KEYS".getBytes(StandardCharsets.US_ASCII);
-
 	// If no output is available before the OperationTimeout expires, the server returns this WSMan
 	// fault code and the client is expected to immediately re-issue the Receive request.
 	private static final String FAULT_OPERATION_TIMEOUT = "2150858793";
 	private static final String FAULT_SHELL_NOT_FOUND = "2150858843";
-
-	// A WWW-Authenticate value may list several challenges ("Negotiate <b64>, NTLM ...") and a server
-	// or proxy may split them across multiple header lines. Match the Negotiate scheme only at a
-	// challenge boundary (start of value or right after a comma) and capture just its base64 token.
-	private static final Pattern NEGOTIATE_TOKEN = Pattern.compile("(?i)(?:^|,)\\s*Negotiate\\s+([A-Za-z0-9+/=]+)");
 
 	// WS-Enumeration namespace: the EndOfSequence / EnumerationContext markers live here. Match them by
 	// namespace, never by local name alone, so a WMI property that happens to be named "EndOfSequence"
@@ -80,8 +60,7 @@ final class WsmanClient implements AutoCloseable {
 
 	private final long timeoutMs;
 	private final String url;
-	private final boolean https;
-	private final WinRMSession session;
+	private final AuthScheme auth;
 	private final HttpTransport transport;
 
 	private String pendingAuthorization;
@@ -97,24 +76,15 @@ final class WsmanClient implements AutoCloseable {
 	WsmanClient(
 		final String host,
 		final int port,
-		final String domain,
-		final String username,
-		final String password,
 		final long timeoutMs,
 		final SSLSocketFactory sslSocketFactory,
-		final boolean verifyHostname
+		final boolean verifyHostname,
+		final AuthScheme auth
 	) {
 		this.timeoutMs = timeoutMs;
 		// A non-null socket factory selects HTTPS: TLS wraps the transport and the SOAP travels plaintext.
-		this.https = sslSocketFactory != null;
-		this.url = (https ? "https" : "http") + "://" + host + ":" + port + "/wsman";
-		// Uppercase the domain: NTOWFv2 (and thus the NTLM session key) is computed over it, the
-		// Type 3 DomainName field goes on the wire uppercased, and the server derives its session
-		// key from the uppercased value. A lowercase domain here passes authentication but fails
-		// message integrity (server-side seal mismatch → HTTP 400).
-		// Workstation is left empty in the Type 3 message, matching the reference client.
-		final String upperDomain = domain == null ? null : domain.toUpperCase(Locale.ROOT);
-		this.session = new WinRMSession(upperDomain, null, username, password);
+		this.url = (sslSocketFactory != null ? "https" : "http") + "://" + host + ":" + port + "/wsman";
+		this.auth = auth;
 		this.transport = new HttpTransport(host, port, toSocketTimeoutMillis(timeoutMs), sslSocketFactory, verifyHostname);
 	}
 
@@ -268,121 +238,37 @@ final class WsmanClient implements AutoCloseable {
 	}
 
 	/**
-	 * Send one SOAP request (authenticating the connection on first use) and decrypt the response.
-	 * The caller must hold {@link #operationLock}; every path here is reached from a locked
-	 * wql/executeCommand/close, so requests never interleave on the stateful NTLM connection.
+	 * Send one SOAP request (authenticating the connection on first use via the {@link AuthScheme})
+	 * and decode the response. The caller must hold {@link #operationLock}; every path here is reached
+	 * from a locked wql/executeCommand/close, so requests never interleave on the stateful connection.
 	 */
 	private Decoded request(final String soap) throws Exception {
-		// If the connection was dropped (e.g. the server sent "Connection: close"), the NTLM session
-		// bound to it is dead — re-handshake on the fresh connection rather than sending unauthenticated.
-		if (session.isAuthenticated() && !transport.isConnected()) {
-			session.reset();
+		// If the connection was dropped (e.g. the server sent "Connection: close"), the session bound
+		// to it is dead — re-handshake on the fresh connection rather than sending unauthenticated.
+		if (auth.isAuthenticated() && !transport.isConnected()) {
+			auth.reset();
 		}
-		if (!session.isAuthenticated()) {
-			authenticate();
+		if (!auth.isAuthenticated()) {
+			pendingAuthorization = auth.authenticate(transport);
 		}
-		// The Type 3 authorization accompanies the first encrypted payload; later requests on the
+		// The handshake's Authorization accompanies the first real request; later requests on the
 		// already-authenticated connection carry no Authorization header.
 		final String authorization = pendingAuthorization;
 		pendingAuthorization = null;
 
-		// Over HTTPS the SOAP travels plaintext inside TLS; over plain HTTP it is NTLM-sealed.
-		final byte[] payload;
-		final String contentType;
-		if (https) {
-			payload = soap.getBytes(StandardCharsets.UTF_8);
-			contentType = SOAP_CONTENT_TYPE;
-		} else {
-			payload = NtlmCrypto.encryptAndSign(session, soap.getBytes(StandardCharsets.UTF_8));
-			contentType = NtlmCrypto.ENCRYPTED_CONTENT_TYPE;
-		}
-		final HttpTransport.Response resp = transport.post("/wsman", payload, contentType, authorization);
+		final HttpTransport.Response resp = transport.post(
+			"/wsman",
+			auth.wrap(soap.getBytes(StandardCharsets.UTF_8)),
+			auth.wrapContentType(),
+			authorization
+		);
 
 		// 200 = success, 500 = SOAP fault. Anything else is a protocol or authentication failure whose
 		// body is not a usable WSMan response.
 		if (resp.status != 200 && resp.status != 500) {
 			throw new IllegalStateException("WSMan request failed: HTTP " + resp.status);
 		}
-		return new Decoded(resp.status, decodeResponse(resp));
-	}
-
-	private void authenticate() throws Exception {
-		// Request 0: unauthenticated probe (bogus body), mirroring the reference client.
-		transport.post("/wsman", PRE_AUTH_BOGUS, SOAP_CONTENT_TYPE, null);
-
-		// Request A: Type 1 under the Negotiate header. No keys yet, so send the bogus placeholder.
-		final String type1 = new Type1Message(null, null, https ? TYPE1_FLAGS_PLAIN : TYPE1_FLAGS_ENCRYPTED).getResponse();
-		final HttpTransport.Response challenge = transport.post(
-			"/wsman",
-			PRE_AUTH_BOGUS,
-			SOAP_CONTENT_TYPE,
-			"Negotiate " + type1
-		);
-		if (challenge.status != 401) {
-			throw new IllegalStateException("Expected HTTP 401 with an NTLM challenge, got HTTP " + challenge.status);
-		}
-		final String type2 = extractNegotiateToken(challenge);
-		if (type2 == null) {
-			throw new IllegalStateException(
-				"No Negotiate challenge token in response: " + challenge.allHeaders("www-authenticate")
-			);
-		}
-
-		final Type2Message challengeMessage = new Type2Message(type2);
-		final Type3Message type3Message = new Type3Message(
-			session.getDomain(),
-			session.getWorkstation(),
-			session.getUsername(),
-			session.getPassword(),
-			challengeMessage.getChallenge(),
-			challengeMessage.getFlags(),
-			challengeMessage.getTarget(),
-			challengeMessage.getTargetInfo()
-		);
-		final String type3 = type3Message.getResponse();
-		if (https) {
-			// No sealing over TLS: authenticate the connection but derive no RC4 keys.
-			session.markAuthenticated();
-		} else {
-			session.applyKeys(type3Message);
-		}
-		pendingAuthorization = "Negotiate " + type3;
-	}
-
-	/**
-	 * Extract the Negotiate/NTLM challenge token from the 401 response, scanning every
-	 * {@code WWW-Authenticate} header (order-independent) and tolerating combined challenges.
-	 *
-	 * @return the base64 token, or {@code null} if no Negotiate challenge carries one
-	 */
-	private static String extractNegotiateToken(final HttpTransport.Response response) {
-		for (final String value : response.allHeaders("www-authenticate")) {
-			final Matcher matcher = NEGOTIATE_TOKEN.matcher(value);
-			if (matcher.find()) {
-				return matcher.group(1);
-			}
-		}
-		return null;
-	}
-
-	private Document decodeResponse(final HttpTransport.Response resp) throws Exception {
-		if (https) {
-			// Over TLS the response body is plaintext application/soap+xml; TLS already guarantees
-			// confidentiality and integrity, so there is no multipart/encrypted envelope to unseal.
-			return parse(resp.body);
-		}
-		final String contentType = resp.firstHeader("content-type");
-		// Once the NTLM session is authenticated, the seal is the ONLY thing protecting response
-		// integrity over plaintext HTTP. A non-encrypted body (from a proxy, a misconfigured server,
-		// or an on-path attacker returning a forged HTTP 200/500) has not passed the HMAC check, so it
-		// must never be parsed as a trusted WSMan response. request() only reaches here after the
-		// handshake, so an encrypted content type is always required.
-		if (contentType == null || !contentType.startsWith("multipart/encrypted")) {
-			throw new IllegalStateException(
-				"Refusing to parse an unencrypted WSMan response after authentication (Content-Type: " + contentType + ")"
-			);
-		}
-		return parse(NtlmCrypto.decrypt(session, resp.body));
+		return new Decoded(resp.status, parse(auth.unwrap(resp)));
 	}
 
 	// --- XML helpers --------------------------------------------------------

@@ -31,6 +31,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
@@ -110,7 +112,29 @@ final class HttpTransport implements AutoCloseable {
 			}
 			return values;
 		}
+
+		/**
+		 * Extract the Negotiate challenge token from the 401 response, scanning every
+		 * {@code WWW-Authenticate} header (order-independent) and tolerating combined challenges. Both
+		 * NTLM (masqueraded) and Kerberos ride under the {@code Negotiate} scheme, so both schemes use this.
+		 *
+		 * @return the base64 token, or {@code null} if no Negotiate challenge carries one
+		 */
+		String negotiateToken() {
+			for (final String value : allHeaders("www-authenticate")) {
+				final Matcher matcher = NEGOTIATE_TOKEN.matcher(value);
+				if (matcher.find()) {
+					return matcher.group(1);
+				}
+			}
+			return null;
+		}
 	}
+
+	// A WWW-Authenticate value may list several challenges ("Negotiate <b64>, NTLM ...") and a server
+	// or proxy may split them across multiple header lines. Match the Negotiate scheme only at a
+	// challenge boundary (start of value or right after a comma) and capture just its base64 token.
+	private static final Pattern NEGOTIATE_TOKEN = Pattern.compile("(?i)(?:^|,)\\s*Negotiate\\s+([A-Za-z0-9+/=]+)");
 
 	/** Whether a live connection is currently held. */
 	boolean isConnected() {

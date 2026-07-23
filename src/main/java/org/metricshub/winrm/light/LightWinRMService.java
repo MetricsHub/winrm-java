@@ -101,18 +101,23 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final boolean https = winRMEndpoint.getProtocol() == WinRMHttpProtocolEnum.HTTPS;
 		final SSLSocketFactory sslSocketFactory = https ? LightTls.socketFactory() : null;
 
+		final AuthScheme authScheme = new NtlmAuthScheme(
+			winRMEndpoint.getDomain(),
+			winRMEndpoint.getUsername(),
+			new String(winRMEndpoint.getPassword()),
+			https
+		);
+
 		// Use the endpoint's own validated host/port rather than re-parsing the URL: URI.getHost()/getPort()
 		// return null/-1 for names URI cannot classify (underscores, Unicode) that WinRMEndpoint accepts,
 		// which would otherwise make the default backend unable to reach hosts the CXF backend could.
 		final WsmanClient client = new WsmanClient(
 			winRMEndpoint.getHostname(),
 			winRMEndpoint.getPort(),
-			winRMEndpoint.getDomain(),
-			winRMEndpoint.getUsername(),
-			new String(winRMEndpoint.getPassword()),
 			timeout,
 			sslSocketFactory,
-			https && LightTls.verifyHostname()
+			https && LightTls.verifyHostname(),
+			authScheme
 		);
 		return new LightWinRMService(winRMEndpoint, client);
 	}
