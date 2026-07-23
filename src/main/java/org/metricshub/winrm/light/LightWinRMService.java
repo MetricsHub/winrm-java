@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import javax.net.ssl.SSLSocketFactory;
 import org.metricshub.winrm.Utils;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
@@ -45,8 +46,9 @@ import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
  * JAX-WS / JAXB stack, and immune by construction to JAXP {@code ServiceLoader} poisoning
  * (it uses the JDK-default XML factories).
  *
- * <p>Currently supports NTLM over HTTP with message encryption. Kerberos and HTTPS are handled
- * by the CXF backend until the corresponding light support lands.
+ * <p>Supports NTLM over HTTP (with message encryption) and over HTTPS (plaintext SOAP inside TLS,
+ * validating the server certificate by default; see {@link LightTls}). Kerberos is still handled by
+ * the CXF backend until light support lands.
  */
 public final class LightWinRMService implements WindowsRemoteExecutor {
 
@@ -94,13 +96,10 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			}
 		}
 
-		if (winRMEndpoint.getProtocol() != WinRMHttpProtocolEnum.HTTP) {
-			throw new WinRMException(
-				"The light WinRM backend currently supports only HTTP (endpoint was " +
-				winRMEndpoint.getEndpoint() +
-				"). Select the CXF backend with -Dorg.metricshub.winrm.backend=cxf until light support lands."
-			);
-		}
+		// HTTPS wraps the transport in TLS and exchanges plaintext SOAP; HTTP uses NTLM message sealing.
+		// TLS validates by default (platform trust store + hostname verification); see LightTls.
+		final boolean https = winRMEndpoint.getProtocol() == WinRMHttpProtocolEnum.HTTPS;
+		final SSLSocketFactory sslSocketFactory = https ? LightTls.socketFactory() : null;
 
 		// Use the endpoint's own validated host/port rather than re-parsing the URL: URI.getHost()/getPort()
 		// return null/-1 for names URI cannot classify (underscores, Unicode) that WinRMEndpoint accepts,
@@ -111,7 +110,9 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			winRMEndpoint.getDomain(),
 			winRMEndpoint.getUsername(),
 			new String(winRMEndpoint.getPassword()),
-			timeout
+			timeout,
+			sslSocketFactory,
+			https && LightTls.verifyHostname()
 		);
 		return new LightWinRMService(winRMEndpoint, client);
 	}

@@ -31,6 +31,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
 import org.metricshub.winrm.Utils;
 
 /**
@@ -49,15 +52,30 @@ final class HttpTransport implements AutoCloseable {
 	private final String host;
 	private final int port;
 	private final int timeoutMillis;
+	// Non-null => HTTPS: the socket is wrapped in TLS. Null => plain HTTP.
+	private final SSLSocketFactory sslSocketFactory;
+	private final boolean verifyHostname;
 	private Socket socket;
 	private OutputStream out;
 	private BufferedInputStream in;
 	private long lastActivityMillis;
 
 	HttpTransport(final String host, final int port, final int timeoutMillis) {
+		this(host, port, timeoutMillis, null, false);
+	}
+
+	HttpTransport(
+		final String host,
+		final int port,
+		final int timeoutMillis,
+		final SSLSocketFactory sslSocketFactory,
+		final boolean verifyHostname
+	) {
 		this.host = host;
 		this.port = port;
 		this.timeoutMillis = timeoutMillis;
+		this.sslSocketFactory = sslSocketFactory;
+		this.verifyHostname = verifyHostname;
 	}
 
 	static final class Response {
@@ -146,19 +164,34 @@ final class HttpTransport implements AutoCloseable {
 		if (isConnected()) {
 			return;
 		}
-		final Socket newSocket = new Socket();
+		final Socket newSocket = sslSocketFactory == null ? new Socket() : sslSocketFactory.createSocket();
 		try {
 			newSocket.setTcpNoDelay(true);
+			if (newSocket instanceof SSLSocket && verifyHostname) {
+				// Turn on hostname verification against the server certificate during the handshake
+				// (raw SSLSockets do not do this by default).
+				final SSLSocket sslSocket = (SSLSocket) newSocket;
+				final SSLParameters params = sslSocket.getSSLParameters();
+				params.setEndpointIdentificationAlgorithm("HTTPS");
+				sslSocket.setSSLParameters(params);
+			}
 			newSocket.connect(new InetSocketAddress(host, port), timeoutMillis);
 			// Read timeout slightly above the caller's timeout so the WSMan OperationTimeout fault
 			// (which the Receive loop retries) reliably arrives before a socket read times out.
 			newSocket.setSoTimeout(timeoutMillis + 10_000);
+			if (newSocket instanceof SSLSocket) {
+				// Force the TLS handshake now so certificate/hostname failures surface here, not on
+				// the first read after we have already sent the request.
+				((SSLSocket) newSocket).startHandshake();
+			}
 			socket = newSocket;
 			out = socket.getOutputStream();
 			in = new BufferedInputStream(socket.getInputStream());
 			lastActivityMillis = Utils.getCurrentTimeMillis();
-		} catch (final IOException e) {
+		} catch (final IOException | RuntimeException e) {
 			// Never leave a half-open socket in the field, or ensureConnected would skip reconnecting.
+			// Catch RuntimeException too so an unexpected failure during TLS setup (e.g. setSSLParameters)
+			// cannot leak the freshly created SSLSocket.
 			try {
 				newSocket.close();
 			} catch (final IOException ignore) {

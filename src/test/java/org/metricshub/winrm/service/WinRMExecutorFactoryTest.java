@@ -75,35 +75,34 @@ class WinRMExecutorFactoryTest {
 	}
 
 	@Test
-	void defaultBackendRejectsHttps() {
-		// Intentional, documented regression on this branch: with light as the default, HTTPS is
-		// rejected until the light backend supports it. Pinned so a silent CXF fallback cannot be
-		// reintroduced without updating this test.
-		assertThrows(
-			WinRMException.class,
-			() ->
-				WinRMExecutorFactory.createInstance(
-					endpoint(WinRMHttpProtocolEnum.HTTPS),
-					30000L,
-					null,
-					List.of(AuthenticationEnum.NTLM)
-				)
-		);
+	void defaultBackendAcceptsHttps() throws Exception {
+		// Light now supports HTTPS (TLS + plaintext SOAP), so the default backend accepts it. Building
+		// the client does not open a connection (or a TLS handshake), so this stays offline.
+		try (
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTPS),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.NTLM)
+			)
+		) {
+			assertInstanceOf(LightWinRMService.class, executor);
+		}
 	}
 
 	@Test
-	void lightBackendRejectsHttps() {
+	void lightBackendAcceptsHttps() throws Exception {
 		System.setProperty(WinRMExecutorFactory.BACKEND_PROPERTY, "light");
-		assertThrows(
-			WinRMException.class,
-			() ->
-				WinRMExecutorFactory.createInstance(
-					endpoint(WinRMHttpProtocolEnum.HTTPS),
-					30000L,
-					null,
-					List.of(AuthenticationEnum.NTLM)
-				)
-		);
+		try (
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTPS),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.NTLM)
+			)
+		) {
+			assertInstanceOf(LightWinRMService.class, executor);
+		}
 	}
 
 	@Test

@@ -131,6 +131,14 @@ final class WinRMSession {
 		sequenceIncoming.set(-1);
 	}
 
+	/**
+	 * Mark the connection authenticated without deriving sealing keys. Used for HTTPS, where TLS
+	 * provides confidentiality and WinRM exchanges plaintext SOAP (no NTLM message sealing).
+	 */
+	void markAuthenticated() {
+		authenticated = true;
+	}
+
 	/** Derive signing/sealing keys from the Type 3 exported session key and open both RC4 ciphers. */
 	void applyKeys(final Type3Message type3) {
 		final byte[] exportedSessionKey = type3.getExportedSessionKey();

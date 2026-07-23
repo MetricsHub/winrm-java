@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.net.ssl.SSLSocketFactory;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -47,11 +48,17 @@ import org.w3c.dom.NodeList;
  */
 final class WsmanClient implements AutoCloseable {
 
-	// Type 1 flags: engine defaults + SIGN | SEAL | KEY_EXCH (matches NtlmMasqAsSpnegoScheme).
-	private static final int TYPE1_FLAGS = (int) (Type1Message.getDefaultFlags() |
+	// Type 1 flags over plain HTTP: engine defaults + SIGN | SEAL | KEY_EXCH (matches
+	// NtlmMasqAsSpnegoScheme). Message sealing is what protects the SOAP over an unencrypted transport.
+	private static final int TYPE1_FLAGS_ENCRYPTED = (int) (Type1Message.getDefaultFlags() |
 		NTLMEngineUtils.NTLMSSP_NEGOTIATE_SIGN |
 		NTLMEngineUtils.NTLMSSP_NEGOTIATE_SEAL |
 		NTLMEngineUtils.NTLMSSP_NEGOTIATE_KEY_EXCH);
+
+	// Type 1 flags over HTTPS: engine defaults only. TLS already provides confidentiality/integrity, so
+	// we authenticate WITHOUT negotiating sealing and exchange plaintext SOAP — claiming SEAL but then
+	// sending plaintext would make the server reject the message.
+	private static final int TYPE1_FLAGS_PLAIN = (int) Type1Message.getDefaultFlags();
 
 	private static final String SOAP_CONTENT_TYPE = "application/soap+xml;charset=UTF-8";
 	private static final byte[] PRE_AUTH_BOGUS = "AWAITING_ENCRYPTION_KEYS".getBytes(StandardCharsets.US_ASCII);
@@ -73,6 +80,7 @@ final class WsmanClient implements AutoCloseable {
 
 	private final long timeoutMs;
 	private final String url;
+	private final boolean https;
 	private final WinRMSession session;
 	private final HttpTransport transport;
 
@@ -92,10 +100,14 @@ final class WsmanClient implements AutoCloseable {
 		final String domain,
 		final String username,
 		final String password,
-		final long timeoutMs
+		final long timeoutMs,
+		final SSLSocketFactory sslSocketFactory,
+		final boolean verifyHostname
 	) {
 		this.timeoutMs = timeoutMs;
-		this.url = "http://" + host + ":" + port + "/wsman";
+		// A non-null socket factory selects HTTPS: TLS wraps the transport and the SOAP travels plaintext.
+		this.https = sslSocketFactory != null;
+		this.url = (https ? "https" : "http") + "://" + host + ":" + port + "/wsman";
 		// Uppercase the domain: NTOWFv2 (and thus the NTLM session key) is computed over it, the
 		// Type 3 DomainName field goes on the wire uppercased, and the server derives its session
 		// key from the uppercased value. A lowercase domain here passes authentication but fails
@@ -103,7 +115,7 @@ final class WsmanClient implements AutoCloseable {
 		// Workstation is left empty in the Type 3 message, matching the reference client.
 		final String upperDomain = domain == null ? null : domain.toUpperCase(Locale.ROOT);
 		this.session = new WinRMSession(upperDomain, null, username, password);
-		this.transport = new HttpTransport(host, port, toSocketTimeoutMillis(timeoutMs));
+		this.transport = new HttpTransport(host, port, toSocketTimeoutMillis(timeoutMs), sslSocketFactory, verifyHostname);
 	}
 
 	/**
@@ -274,20 +286,24 @@ final class WsmanClient implements AutoCloseable {
 		final String authorization = pendingAuthorization;
 		pendingAuthorization = null;
 
-		final byte[] encrypted = NtlmCrypto.encryptAndSign(session, soap.getBytes(StandardCharsets.UTF_8));
-		final HttpTransport.Response resp = transport.post(
-			"/wsman",
-			encrypted,
-			NtlmCrypto.ENCRYPTED_CONTENT_TYPE,
-			authorization
-		);
+		// Over HTTPS the SOAP travels plaintext inside TLS; over plain HTTP it is NTLM-sealed.
+		final byte[] payload;
+		final String contentType;
+		if (https) {
+			payload = soap.getBytes(StandardCharsets.UTF_8);
+			contentType = SOAP_CONTENT_TYPE;
+		} else {
+			payload = NtlmCrypto.encryptAndSign(session, soap.getBytes(StandardCharsets.UTF_8));
+			contentType = NtlmCrypto.ENCRYPTED_CONTENT_TYPE;
+		}
+		final HttpTransport.Response resp = transport.post("/wsman", payload, contentType, authorization);
 
-		// 200 = success, 500 = SOAP fault (both bodies are encrypted). Anything else is a protocol
-		// or authentication failure whose body is not a usable WSMan response.
+		// 200 = success, 500 = SOAP fault. Anything else is a protocol or authentication failure whose
+		// body is not a usable WSMan response.
 		if (resp.status != 200 && resp.status != 500) {
 			throw new IllegalStateException("WSMan request failed: HTTP " + resp.status);
 		}
-		return new Decoded(resp.status, decryptResponse(resp));
+		return new Decoded(resp.status, decodeResponse(resp));
 	}
 
 	private void authenticate() throws Exception {
@@ -295,7 +311,7 @@ final class WsmanClient implements AutoCloseable {
 		transport.post("/wsman", PRE_AUTH_BOGUS, SOAP_CONTENT_TYPE, null);
 
 		// Request A: Type 1 under the Negotiate header. No keys yet, so send the bogus placeholder.
-		final String type1 = new Type1Message(null, null, TYPE1_FLAGS).getResponse();
+		final String type1 = new Type1Message(null, null, https ? TYPE1_FLAGS_PLAIN : TYPE1_FLAGS_ENCRYPTED).getResponse();
 		final HttpTransport.Response challenge = transport.post(
 			"/wsman",
 			PRE_AUTH_BOGUS,
@@ -324,7 +340,12 @@ final class WsmanClient implements AutoCloseable {
 			challengeMessage.getTargetInfo()
 		);
 		final String type3 = type3Message.getResponse();
-		session.applyKeys(type3Message);
+		if (https) {
+			// No sealing over TLS: authenticate the connection but derive no RC4 keys.
+			session.markAuthenticated();
+		} else {
+			session.applyKeys(type3Message);
+		}
 		pendingAuthorization = "Negotiate " + type3;
 	}
 
@@ -344,7 +365,12 @@ final class WsmanClient implements AutoCloseable {
 		return null;
 	}
 
-	private Document decryptResponse(final HttpTransport.Response resp) throws Exception {
+	private Document decodeResponse(final HttpTransport.Response resp) throws Exception {
+		if (https) {
+			// Over TLS the response body is plaintext application/soap+xml; TLS already guarantees
+			// confidentiality and integrity, so there is no multipart/encrypted envelope to unseal.
+			return parse(resp.body);
+		}
 		final String contentType = resp.firstHeader("content-type");
 		// Once the NTLM session is authenticated, the seal is the ONLY thing protecting response
 		// integrity over plaintext HTTP. A non-encrypted body (from a proxy, a misconfigured server,
