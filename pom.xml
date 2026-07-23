@@ -143,6 +143,7 @@
 						<include>**/*.java</include>
 					</includes>
 					<configFile>metricshub-eclipse-formatter.xml</configFile>
+					<lineEnding>KEEP</lineEnding>
 				</configuration>
 			</plugin>
 
