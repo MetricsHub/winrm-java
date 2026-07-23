@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import org.w3c.dom.Document;
@@ -291,6 +292,15 @@ final class WsmanClient implements AutoCloseable {
 	private static Document parse(final byte[] xml) throws Exception {
 		final DocumentBuilderFactory factory = DocumentBuilderFactory.newDefaultInstance();
 		factory.setNamespaceAware(true);
+		// Harden against XXE: a malicious/compromised WinRM endpoint must not be able to make us
+		// resolve external entities (local file read, SSRF, entity-expansion DoS). WSMan responses
+		// never carry a DOCTYPE, so rejecting it outright is the strongest and safest defence.
+		factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+		factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+		factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+		factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+		factory.setXIncludeAware(false);
+		factory.setExpandEntityReferences(false);
 		final DocumentBuilder builder = factory.newDocumentBuilder();
 		// Throw parse errors instead of letting the default handler print them to stderr — a request
 		// abandoned by the timeout may parse a truncated response on a soon-to-die background thread.

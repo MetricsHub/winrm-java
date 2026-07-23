@@ -40,7 +40,7 @@ import org.metricshub.winrm.WindowsTempShare;
 import org.metricshub.winrm.exceptions.WinRMException;
 import org.metricshub.winrm.exceptions.WindowsRemoteException;
 import org.metricshub.winrm.service.WinRMEndpoint;
-import org.metricshub.winrm.service.WinRMService;
+import org.metricshub.winrm.service.WinRMExecutorFactory;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 
 public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
@@ -54,7 +54,7 @@ public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
 	/**
 	 * The SmbTempShare constructor.
 	 *
-	 * @param winRMService WinRMService instance
+	 * @param windowsRemoteExecutor WinRM executor (CXF or light backend)
 	 * @param winRMEndpoint Endpoint with credentials
 	 * @param smbClient The SMB client
 	 * @param connection The SMB connection
@@ -64,7 +64,7 @@ public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
 	 * @param remotePath The path on the remote system of the directory being shared
 	 */
 	private SmbTempShare(
-		final WinRMService winRMService,
+		final WindowsRemoteExecutor windowsRemoteExecutor,
 		final WinRMEndpoint winRMEndpoint,
 		final SMBClient smbClient,
 		final Connection connection,
@@ -73,7 +73,7 @@ public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
 		final String shareNameOrUnc,
 		final String remotePath
 	) {
-		super(winRMService, shareNameOrUnc, remotePath);
+		super(windowsRemoteExecutor, shareNameOrUnc, remotePath);
 		this.winRMEndpoint = winRMEndpoint;
 		this.smbClient = smbClient;
 		this.connection = connection;
@@ -115,17 +115,20 @@ public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
 				winRMEndpoint,
 				(key, smb) -> {
 					if (smb == null) {
-						WinRMService winRMService = null;
+						WindowsRemoteExecutor windowsRemoteExecutor = null;
 						SMBClient smbClient = null;
 						Connection connection = null;
 						Session session = null;
 						DiskShare diskShare = null;
 
 						try {
-							winRMService = WinRMService.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
+							// Honour the backend toggle: SMB file transfer is always smbj, but the WinRM command
+							// orchestration follows the selected backend (so "light" does not fall back to CXF).
+							windowsRemoteExecutor =
+								WinRMExecutorFactory.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
 
 							final WindowsTempShare windowsTempShare = getOrCreateShare(
-								winRMService,
+								windowsRemoteExecutor,
 								timeout,
 								(w, r, s, t) -> {
 									try {
@@ -154,7 +157,7 @@ public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
 							diskShare = (DiskShare) session.connectShare(windowsTempShare.getShareName());
 
 							return new SmbTempShare(
-								winRMService,
+								windowsRemoteExecutor,
 								winRMEndpoint,
 								smbClient,
 								connection,
@@ -164,11 +167,11 @@ public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
 								windowsTempShare.getRemotePath()
 							);
 						} catch (final RuntimeException e) {
-							closeResources(winRMService, smbClient, connection, session, diskShare);
+							closeResources(windowsRemoteExecutor, smbClient, connection, session, diskShare);
 
 							throw e;
 						} catch (final Exception e) {
-							closeResources(winRMService, smbClient, connection, session, diskShare);
+							closeResources(windowsRemoteExecutor, smbClient, connection, session, diskShare);
 
 							throw new RuntimeException(e);
 						}
@@ -201,7 +204,7 @@ public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
 	}
 
 	private static void closeResources(
-		final WinRMService winRMService,
+		final WindowsRemoteExecutor windowsRemoteExecutor,
 		final SMBClient smbClient,
 		final Connection connection,
 		final Session session,
@@ -227,8 +230,8 @@ public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
 			smbClient.close();
 		}
 
-		if (winRMService != null) {
-			winRMService.close();
+		if (windowsRemoteExecutor != null) {
+			windowsRemoteExecutor.close();
 		}
 	}
 
@@ -277,7 +280,7 @@ public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
 				smbClient.close();
 			}
 
-			((WinRMService) getWindowsRemoteExecutor()).close();
+			getWindowsRemoteExecutor().close();
 		}
 	}
 
