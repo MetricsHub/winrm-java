@@ -42,9 +42,9 @@ import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 
 /**
  * Dependency-free {@link WindowsRemoteExecutor} backed by {@link WsmanClient}. A drop-in
- * alternative to the CXF-based {@code WinRMService}: same public behaviour, no Apache CXF /
- * JAX-WS / JAXB stack, and immune by construction to JAXP {@code ServiceLoader} poisoning
- * (it uses the JDK-default XML factories).
+ * replacement for the CXF-based {@code WinRMService} that shipped before 2.0.0: same public
+ * behaviour, no Apache CXF / JAX-WS / JAXB stack, and immune by construction to JAXP
+ * {@code ServiceLoader} poisoning (it uses the JDK-default XML factories).
  *
  * <p>Supports NTLM over HTTP (with message encryption) and over HTTPS (plaintext SOAP inside TLS,
  * validating the server certificate by default; see {@link LightTls}), and Kerberos over HTTPS
@@ -147,9 +147,9 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		if (schemes.isEmpty()) {
 			// e.g. Kerberos requested over plain HTTP with no other scheme to fall back to.
 			throw new WinRMException(
-				"Kerberos over the light backend requires HTTPS (endpoint was " +
+				"Kerberos over WinRM requires HTTPS (endpoint was " +
 				winRMEndpoint.getEndpoint() +
-				"). Use HTTPS, or select the CXF backend with -Dorg.metricshub.winrm.backend=cxf."
+				"): there is no Kerberos message encryption over plain HTTP. Use HTTPS, or add NTLM to the authentication list."
 			);
 		}
 		return schemes.size() == 1 ? schemes.get(0) : new FallbackAuthScheme(schemes);

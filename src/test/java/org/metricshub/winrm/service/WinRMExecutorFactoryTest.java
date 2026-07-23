@@ -3,6 +3,7 @@ package org.metricshub.winrm.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -58,20 +59,21 @@ class WinRMExecutorFactoryTest {
 	}
 
 	@Test
-	void cxfBackendSelectedViaProperty() throws Exception {
-		// The CXF backend stays reachable via the property while light matures. Building the client
-		// does not open a connection, so this stays offline.
+	void cxfBackendRejectedWithRemovalMessage() {
+		// The CXF backend was removed in 2.0.0. An operator who explicitly pinned it must get a clear
+		// error, not be silently switched to another implementation.
 		System.setProperty(WinRMExecutorFactory.BACKEND_PROPERTY, "cxf");
-		try (
-			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
-				endpoint(WinRMHttpProtocolEnum.HTTP),
-				30000L,
-				null,
-				List.of(AuthenticationEnum.NTLM)
-			)
-		) {
-			assertInstanceOf(WinRMService.class, executor);
-		}
+		final WinRMException e = assertThrows(
+			WinRMException.class,
+			() ->
+				WinRMExecutorFactory.createInstance(
+					endpoint(WinRMHttpProtocolEnum.HTTP),
+					30000L,
+					null,
+					List.of(AuthenticationEnum.NTLM)
+				)
+		);
+		assertTrue(e.getMessage().contains("removed in winrm-java 2.0.0"), e.getMessage());
 	}
 
 	@Test

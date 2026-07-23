@@ -30,7 +30,6 @@ import org.metricshub.winrm.WindowsRemoteExecutor;
 import org.metricshub.winrm.WindowsRemoteProcessUtils;
 import org.metricshub.winrm.service.WinRMEndpoint;
 import org.metricshub.winrm.service.WinRMExecutorFactory;
-import org.metricshub.winrm.service.WinRMService;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 import org.metricshub.winrm.shares.SmbTempShare;
 import org.mockito.MockedStatic;
@@ -201,7 +200,7 @@ class WinRMCommandExecutorTest {
 				.thenReturn("launch remote/localFile");
 
 			final SmbTempShare smbTempShare = mock(SmbTempShare.class);
-			final WinRMService winRMService = mock(WinRMService.class);
+			final WindowsRemoteExecutor winRMService = mock(WindowsRemoteExecutor.class);
 
 			mockedSmbTempShare
 				.when(() -> SmbTempShare.createInstance(any(WinRMEndpoint.class), anyLong(), isNull(), isNull()))

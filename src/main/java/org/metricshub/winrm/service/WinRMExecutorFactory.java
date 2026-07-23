@@ -29,16 +29,14 @@ import org.metricshub.winrm.light.LightWinRMService;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 
 /**
- * Selects the WinRM backend that fulfils a request. The default is the dependency-free
- * {@link LightWinRMService}; setting the system property {@value #BACKEND_PROPERTY} to
- * {@code cxf} selects the mature CXF-based {@link WinRMService} instead — needed for capabilities
- * the light backend does not yet cover (HTTPS and Kerberos).
- *
- * <p>Both backends implement {@link WindowsRemoteExecutor}, so callers are agnostic to the choice.
+ * Creates the {@link WindowsRemoteExecutor} that fulfils a request. Since 2.0.0 the dependency-free
+ * {@link LightWinRMService} is the only backend: the legacy CXF-based backend has been removed.
+ * The {@value #BACKEND_PROPERTY} system property is kept so operators who still set it get a clear
+ * error ({@code cxf}) or a no-op ({@code light}) instead of a silent behavior change.
  */
 public final class WinRMExecutorFactory {
 
-	/** System property selecting the backend: {@code light} (default) or {@code cxf}. */
+	/** System property selecting the backend; {@code light} is the only supported value. */
 	public static final String BACKEND_PROPERTY = "org.metricshub.winrm.backend";
 
 	private static final String LIGHT = "light";
@@ -47,14 +45,15 @@ public final class WinRMExecutorFactory {
 	private WinRMExecutorFactory() {}
 
 	/**
-	 * Create a {@link WindowsRemoteExecutor} using the configured backend.
+	 * Create a {@link WindowsRemoteExecutor} (light backend).
 	 *
 	 * @param winRMEndpoint   endpoint with credentials (mandatory)
 	 * @param timeout         timeout in milliseconds (must be &gt; 0)
 	 * @param ticketCache     Kerberos ticket cache path (may be {@code null})
 	 * @param authentications requested authentication schemes (may be {@code null})
-	 * @return a light-backed or CXF-backed executor depending on {@value #BACKEND_PROPERTY}
-	 * @throws WinRMException for any problem creating the executor
+	 * @return a light-backed executor
+	 * @throws WinRMException for any problem creating the executor, or when {@value #BACKEND_PROPERTY}
+	 *                        requests the removed CXF backend or an unknown value
 	 */
 	public static WindowsRemoteExecutor createInstance(
 		final WinRMEndpoint winRMEndpoint,
@@ -67,20 +66,16 @@ public final class WinRMExecutorFactory {
 			return LightWinRMService.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
 		}
 		if (CXF.equals(backend)) {
-			return WinRMService.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
+			// Fail loudly: an operator who explicitly pinned the legacy backend must not be silently
+			// switched to another implementation.
+			throw new WinRMException(
+				"The CXF WinRM backend was removed in winrm-java 2.0.0; remove the " +
+				BACKEND_PROPERTY +
+				" system property to use the light backend (or stay on winrm-java 1.x)."
+			);
 		}
-		// Fail loudly on a typo or unsupported value rather than silently running a backend the operator
-		// did not ask for (which would also emit misleading "set the property" hints downstream).
 		throw new WinRMException(
-			"Unsupported value \"" +
-			backend +
-			"\" for system property " +
-			BACKEND_PROPERTY +
-			"; expected \"" +
-			LIGHT +
-			"\" (default) or \"" +
-			CXF +
-			"\"."
+			"Unsupported value \"" + backend + "\" for system property " + BACKEND_PROPERTY + "; expected \"" + LIGHT + "\"."
 		);
 	}
 }

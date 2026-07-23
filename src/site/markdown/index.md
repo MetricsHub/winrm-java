@@ -4,17 +4,17 @@ The Windows Remote Management (WinRM) Java Client is a library that enables to:
 * Connect to a remote Windows server using one of the two authentication types (NTLM, KERBEROS)
 * Execute WMI Query Language (WQL) queries which uses HTTP/HTTPS protocols.
 
-> ## ⚠️ Upgrade warning
+> ## ⚠️ Upgrading from 1.x
 >
-> The dependency-free **light** backend is now the **default**. Unlike the previous CXF-based client,
-> which silently trusted every TLS certificate, the light backend **validates the server certificate
-> and verifies the hostname by default**, so **WinRM-over-HTTPS connections to hosts with self-signed
-> or untrusted certificates will now fail** during the TLS handshake. To restore connectivity, either
-> install the certificate into a Java trust store, set `-Dorg.metricshub.winrm.tls.insecure=true`
-> (insecure — for testing only), or select the legacy backend with
-> `-Dorg.metricshub.winrm.backend=cxf`. The light backend supports NTLM over HTTP/HTTPS and Kerberos
-> (SPNEGO) over HTTPS; the CXF backend remains available via that property and will be removed in a
-> future major release.
+> Version 2.0.0 **removed the legacy Apache CXF backend**: the dependency-free client is the only
+> implementation (same public API). Unlike the CXF-based client, which silently trusted every TLS
+> certificate, it **validates the server certificate and verifies the hostname by default**, so
+> **WinRM-over-HTTPS connections to hosts with self-signed or untrusted certificates will fail**
+> during the TLS handshake. To restore connectivity, either install the certificate into a Java
+> trust store or set `-Dorg.metricshub.winrm.tls.insecure=true` (insecure — for testing only).
+> The client supports NTLM over HTTP/HTTPS and Kerberos (SPNEGO) over HTTPS. Setting
+> `-Dorg.metricshub.winrm.backend=cxf` now fails with a clear error; remove the property (or stay
+> on winrm-java 1.x).
 
 # How to run the WinRM Client inside Java
 
