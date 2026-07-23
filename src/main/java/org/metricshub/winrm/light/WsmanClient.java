@@ -66,6 +66,11 @@ final class WsmanClient implements AutoCloseable {
 	// challenge boundary (start of value or right after a comma) and capture just its base64 token.
 	private static final Pattern NEGOTIATE_TOKEN = Pattern.compile("(?i)(?:^|,)\\s*Negotiate\\s+([A-Za-z0-9+/=]+)");
 
+	// WS-Enumeration namespace: the EndOfSequence / EnumerationContext markers live here. Match them by
+	// namespace, never by local name alone, so a WMI property that happens to be named "EndOfSequence"
+	// or "EnumerationContext" inside <Items> cannot be mistaken for the enumeration control element.
+	private static final String WS_ENUMERATION_NS = "http://schemas.xmlsoap.org/ws/2004/09/enumeration";
+
 	private final long timeoutMs;
 	private final String url;
 	private final WinRMSession session;
@@ -122,13 +127,13 @@ final class WsmanClient implements AutoCloseable {
 
 		// Pull until the server signals EndOfSequence (matching the CXF backend). The aggregate
 		// timeout in LightWinRMService bounds a misbehaving server that never ends the sequence.
-		boolean endOfSequence = doc.getElementsByTagNameNS("*", "EndOfSequence").getLength() > 0;
-		String context = endOfSequence ? null : text(doc, "EnumerationContext");
+		boolean endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
+		String context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
 		while (!endOfSequence && context != null && !context.isEmpty()) {
 			doc = expectOk(Envelopes.pull(url, ns, context, timeoutMs), "Pull");
 			collectItems(doc, rows);
-			endOfSequence = doc.getElementsByTagNameNS("*", "EndOfSequence").getLength() > 0;
-			context = endOfSequence ? null : text(doc, "EnumerationContext");
+			endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
+			context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
 		}
 		return rows;
 	}
@@ -364,6 +369,17 @@ final class WsmanClient implements AutoCloseable {
 
 	private static String text(final Document doc, final String localName) {
 		final NodeList nodes = doc.getElementsByTagNameNS("*", localName);
+		return nodes.getLength() > 0 ? nodes.item(0).getTextContent() : null;
+	}
+
+	/** Whether the document contains the given WS-Enumeration control element (namespace-scoped). */
+	private static boolean hasEnumerationElement(final Document doc, final String localName) {
+		return doc.getElementsByTagNameNS(WS_ENUMERATION_NS, localName).getLength() > 0;
+	}
+
+	/** First text content of an element matched by both namespace and local name. */
+	private static String textNS(final Document doc, final String namespace, final String localName) {
+		final NodeList nodes = doc.getElementsByTagNameNS(namespace, localName);
 		return nodes.getLength() > 0 ? nodes.item(0).getTextContent() : null;
 	}
 

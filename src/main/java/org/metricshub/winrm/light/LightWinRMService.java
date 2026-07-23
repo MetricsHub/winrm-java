@@ -20,7 +20,6 @@ package org.metricshub.winrm.light;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
-import java.net.URI;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -29,6 +28,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import org.metricshub.winrm.Utils;
+import org.metricshub.winrm.WinRMHttpProtocolEnum;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
 import org.metricshub.winrm.WindowsRemoteExecutor;
 import org.metricshub.winrm.WmiHelper;
@@ -76,27 +76,36 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		Utils.checkNonNull(winRMEndpoint, "winRMEndpoint");
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
 
-		if (authentications != null && !authentications.isEmpty() && !authentications.contains(AuthenticationEnum.NTLM)) {
-			throw new WinRMException(
-				"The light WinRM backend currently supports only NTLM authentication (requested: " +
-				authentications +
-				"). Select the CXF backend with -Dorg.metricshub.winrm.backend=cxf until light support lands."
-			);
+		// Reject any list that requests a scheme the light backend cannot honour, even when NTLM is also
+		// present. The authentications list is an ordered fallback: accepting e.g. [KERBEROS, NTLM] would
+		// silently ignore the preferred Kerberos (and ticketCache) and downgrade to NTLM, which is weaker
+		// and fails against NTLM-disabled servers. Fail loudly toward the escape hatch instead.
+		if (authentications != null) {
+			for (final AuthenticationEnum requested : authentications) {
+				if (requested != AuthenticationEnum.NTLM) {
+					throw new WinRMException(
+						"The light WinRM backend currently supports only NTLM authentication (requested: " +
+						authentications +
+						"). Select the CXF backend with -Dorg.metricshub.winrm.backend=cxf until light support lands."
+					);
+				}
+			}
 		}
 
-		final URI uri = URI.create(winRMEndpoint.getEndpoint());
-		if (!"http".equalsIgnoreCase(uri.getScheme())) {
+		if (winRMEndpoint.getProtocol() != WinRMHttpProtocolEnum.HTTP) {
 			throw new WinRMException(
 				"The light WinRM backend currently supports only HTTP (endpoint was " +
 				winRMEndpoint.getEndpoint() +
 				"). Select the CXF backend with -Dorg.metricshub.winrm.backend=cxf until light support lands."
 			);
 		}
-		final int port = uri.getPort() > 0 ? uri.getPort() : 5985;
 
+		// Use the endpoint's own validated host/port rather than re-parsing the URL: URI.getHost()/getPort()
+		// return null/-1 for names URI cannot classify (underscores, Unicode) that WinRMEndpoint accepts,
+		// which would otherwise make the default backend unable to reach hosts the CXF backend could.
 		final WsmanClient client = new WsmanClient(
-			uri.getHost(),
-			port,
+			winRMEndpoint.getHostname(),
+			winRMEndpoint.getPort(),
 			winRMEndpoint.getDomain(),
 			winRMEndpoint.getUsername(),
 			new String(winRMEndpoint.getPassword()),

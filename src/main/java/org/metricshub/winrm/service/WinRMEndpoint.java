@@ -41,6 +41,7 @@ public class WinRMEndpoint {
 	private final String namespace;
 	private final String rawUsername;
 	private final WinRMHttpProtocolEnum protocol;
+	private final int port;
 
 	/**
 	 * Constructor of the endpoint and credentials for WinRM.
@@ -81,6 +82,7 @@ public class WinRMEndpoint {
 		}
 
 		this.protocol = protocol != null ? protocol : WinRMHttpProtocolEnum.HTTP;
+		this.port = getEndpointPort(this.protocol, port);
 		final String endpointUrl = buildEndpointUrl(this.protocol, this.hostname, port);
 
 		endpoint = buildWSManEndpoint(endpointUrl);
@@ -124,6 +126,11 @@ public class WinRMEndpoint {
 	/** Get the protocol */
 	public WinRMHttpProtocolEnum getProtocol() {
 		return protocol;
+	}
+
+	/** Get the resolved endpoint port (the port provided to the constructor, or the protocol default). */
+	public int getPort() {
+		return port;
 	}
 
 	/**

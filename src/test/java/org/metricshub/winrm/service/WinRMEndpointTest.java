@@ -106,6 +106,25 @@ class WinRMEndpointTest {
 	}
 
 	@Test
+	void testGetPort() {
+		assertEquals(5985, new WinRMEndpoint(HTTP, HOSTNAME, null, USER, PASSWORD, null).getPort());
+		assertEquals(5986, new WinRMEndpoint(HTTPS, HOSTNAME, null, USER, PASSWORD, null).getPort());
+		assertEquals(PORT, new WinRMEndpoint(HTTP, HOSTNAME, PORT, USER, PASSWORD, null).getPort());
+		assertEquals(PORT, new WinRMEndpoint(HTTPS, HOSTNAME, PORT, USER, PASSWORD, null).getPort());
+	}
+
+	@Test
+	void testUnderscoreHostnameEndpoint() {
+		// Regression guard for the light backend default: WinRMEndpoint accepts NetBIOS-style names with
+		// underscores and exposes a usable hostname/port, whereas java.net.URI cannot classify such a host
+		// (URI.create(endpoint).getHost() is null). The light backend must rely on these accessors.
+		final WinRMEndpoint winRMEndpoint = new WinRMEndpoint(HTTP, "server_name", 5999, USER, PASSWORD, null);
+		assertEquals("server_name", winRMEndpoint.getHostname());
+		assertEquals(5999, winRMEndpoint.getPort());
+		assertNull(java.net.URI.create(winRMEndpoint.getEndpoint()).getHost());
+	}
+
+	@Test
 	void testBuildNamespace() {
 		assertEquals("ROOT/CIMV2", buildNamespace(null));
 		assertEquals("ROOT/CIMV2", buildNamespace(EMPTY));

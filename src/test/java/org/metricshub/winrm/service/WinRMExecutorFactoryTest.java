@@ -120,4 +120,21 @@ class WinRMExecutorFactoryTest {
 				)
 		);
 	}
+
+	@Test
+	void lightBackendRejectsMixedKerberosNtlm() {
+		// A fallback list like [KERBEROS, NTLM] must be rejected, not silently downgraded to NTLM: the
+		// light backend cannot honour the preferred Kerberos scheme, so it points at the CXF escape hatch.
+		System.setProperty(WinRMExecutorFactory.BACKEND_PROPERTY, "light");
+		assertThrows(
+			WinRMException.class,
+			() ->
+				WinRMExecutorFactory.createInstance(
+					endpoint(WinRMHttpProtocolEnum.HTTP),
+					30000L,
+					null,
+					List.of(AuthenticationEnum.KERBEROS, AuthenticationEnum.NTLM)
+				)
+		);
+	}
 }
