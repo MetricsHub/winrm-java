@@ -33,6 +33,8 @@ import java.util.List;
 final class FallbackAuthScheme implements AuthScheme {
 
 	private final List<AuthScheme> candidates;
+	// The next candidate to try when (re)running the fallback; advanced past a server-rejected scheme.
+	private int startIndex;
 	private AuthScheme active;
 
 	FallbackAuthScheme(final List<AuthScheme> candidates) {
@@ -44,12 +46,18 @@ final class FallbackAuthScheme implements AuthScheme {
 
 	@Override
 	public String authenticate(final HttpTransport transport) throws Exception {
+		// Re-authenticating after a dropped connection: reuse the scheme that already succeeded rather
+		// than restarting the fallback from the top.
+		if (active != null) {
+			return active.authenticate(transport);
+		}
 		Exception lastFailure = null;
-		for (int i = 0; i < candidates.size(); i++) {
+		for (int i = startIndex; i < candidates.size(); i++) {
 			final AuthScheme candidate = candidates.get(i);
 			try {
 				final String authorization = candidate.authenticate(transport);
 				active = candidate;
+				startIndex = i;
 				return authorization;
 			} catch (final Exception e) {
 				lastFailure = e;
@@ -75,10 +83,24 @@ final class FallbackAuthScheme implements AuthScheme {
 
 	@Override
 	public void reset() {
+		// A dropped connection: clear the active scheme's session but keep it selected so the next
+		// authenticate() re-handshakes with the same (already-accepted) scheme.
 		if (active != null) {
 			active.reset();
-			active = null;
 		}
+	}
+
+	@Override
+	public boolean advance() {
+		// The server rejected the active scheme (401 on a real request). Drop it and move to the next
+		// candidate so the next authenticate() runs the remaining schemes.
+		if (active != null && startIndex + 1 < candidates.size()) {
+			active.reset();
+			active = null;
+			startIndex++;
+			return true;
+		}
+		return false;
 	}
 
 	@Override

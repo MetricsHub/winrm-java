@@ -72,4 +72,17 @@ interface AuthScheme {
 	 * @throws Exception if the body cannot be trusted or decoded
 	 */
 	byte[] unwrap(HttpTransport.Response response) throws Exception;
+
+	/**
+	 * After the server rejects this scheme on a real request (HTTP 401) — which for Kerberos/NTLM only
+	 * surfaces after {@link #authenticate} has returned, because the token/Type-3 rides the first real
+	 * request — move to the next candidate of an ordered fallback list, if any. A single scheme cannot
+	 * advance.
+	 *
+	 * @return {@code true} if a further scheme is now available so the caller should re-authenticate and
+	 *         retry; {@code false} if there is nothing left to try
+	 */
+	default boolean advance() {
+		return false;
+	}
 }

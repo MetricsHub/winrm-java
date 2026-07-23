@@ -245,27 +245,45 @@ final class WsmanClient implements AutoCloseable {
 		if (auth.isAuthenticated() && !transport.isConnected()) {
 			auth.reset();
 		}
-		if (!auth.isAuthenticated()) {
-			pendingAuthorization = auth.authenticate(transport);
-		}
-		// The handshake's Authorization accompanies the first real request; later requests on the
-		// already-authenticated connection carry no Authorization header.
-		final String authorization = pendingAuthorization;
-		pendingAuthorization = null;
+		final byte[] body = soap.getBytes(StandardCharsets.UTF_8);
+		while (true) {
+			if (!auth.isAuthenticated()) {
+				pendingAuthorization = auth.authenticate(transport);
+			}
+			// The handshake's Authorization accompanies the first real request; later requests on the
+			// already-authenticated connection carry no Authorization header.
+			final String authorization = pendingAuthorization;
+			pendingAuthorization = null;
 
-		final HttpTransport.Response resp = transport.post(
-			"/wsman",
-			auth.wrap(soap.getBytes(StandardCharsets.UTF_8)),
-			auth.wrapContentType(),
-			authorization
-		);
+			final HttpTransport.Response resp = transport.post(
+				"/wsman",
+				auth.wrap(body),
+				auth.wrapContentType(),
+				authorization
+			);
 
-		// 200 = success, 500 = SOAP fault. Anything else is a protocol or authentication failure whose
-		// body is not a usable WSMan response.
-		if (resp.status != 200 && resp.status != 500) {
-			throw new IllegalStateException("WSMan request failed: HTTP " + resp.status);
+			// HTTP 401 = the server rejected the credentials/token. For NTLM and Kerberos this can only
+			// surface here — the Type 3 / AP-REQ rides the first real request, not the handshake — so we
+			// must NOT keep the "authenticated" connection (it would loop resending with no Authorization
+			// header, wedging the executor). Drop it and, for an ordered fallback list, retry the next
+			// scheme once on a fresh connection. A 401'd request was rejected before processing, so
+			// re-sending it is safe.
+			if (resp.status == 401) {
+				transport.close();
+				auth.reset();
+				if (auth.advance()) {
+					continue;
+				}
+				throw new IllegalStateException("WSMan request failed: authentication rejected (HTTP 401)");
+			}
+
+			// 200 = success, 500 = SOAP fault. Anything else is a protocol failure whose body is not a
+			// usable WSMan response.
+			if (resp.status != 200 && resp.status != 500) {
+				throw new IllegalStateException("WSMan request failed: HTTP " + resp.status);
+			}
+			return new Decoded(resp.status, parse(auth.unwrap(resp)));
 		}
-		return new Decoded(resp.status, parse(auth.unwrap(resp)));
 	}
 
 	// --- XML helpers --------------------------------------------------------
