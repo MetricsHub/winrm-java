@@ -4,7 +4,7 @@ package org.metricshub.winrm.wql;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2024 Metricshub
+ * Copyright 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,11 +27,13 @@ import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import org.metricshub.winrm.Utils;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
+import org.metricshub.winrm.WindowsRemoteExecutor;
 import org.metricshub.winrm.WmiHelper;
 import org.metricshub.winrm.exceptions.WinRMException;
+import org.metricshub.winrm.exceptions.WindowsRemoteException;
 import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
 import org.metricshub.winrm.service.WinRMEndpoint;
-import org.metricshub.winrm.service.WinRMService;
+import org.metricshub.winrm.service.WinRMExecutorFactory;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 
 public class WinRMWqlExecutor {
@@ -117,7 +119,7 @@ public class WinRMWqlExecutor {
 		final WinRMEndpoint winRMEndpoint = new WinRMEndpoint(protocol, hostname, port, username, password, namespace);
 
 		try (
-			final WinRMService winRMService = WinRMService.createInstance(
+			final WindowsRemoteExecutor winRMService = WinRMExecutorFactory.createInstance(
 				winRMEndpoint,
 				timeout,
 				ticketCache,
@@ -135,6 +137,12 @@ public class WinRMWqlExecutor {
 				.collect(Collectors.toList());
 
 			return new WinRMWqlExecutor(Utils.getCurrentTimeMillis() - start, headers, rows);
+		} catch (final WinRMException | WqlQuerySyntaxException | TimeoutException e) {
+			throw e;
+		} catch (final WindowsRemoteException e) {
+			// The WindowsRemoteExecutor interface declares the broader WindowsRemoteException; both
+			// backends actually throw WinRMException. Preserve the historical checked-exception surface.
+			throw new WinRMException(e, e.getMessage());
 		}
 	}
 }

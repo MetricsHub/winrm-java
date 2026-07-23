@@ -4,7 +4,7 @@ package org.metricshub.winrm.command;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2024 Metricshub
+ * Copyright 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,11 +30,12 @@ import org.metricshub.winrm.TimeoutHelper;
 import org.metricshub.winrm.Utils;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
+import org.metricshub.winrm.WindowsRemoteExecutor;
 import org.metricshub.winrm.WindowsRemoteProcessUtils;
 import org.metricshub.winrm.exceptions.WindowsRemoteException;
 import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
 import org.metricshub.winrm.service.WinRMEndpoint;
-import org.metricshub.winrm.service.WinRMService;
+import org.metricshub.winrm.service.WinRMExecutorFactory;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 import org.metricshub.winrm.shares.SmbTempShare;
 
@@ -103,7 +104,7 @@ public class WinRMCommandExecutor {
 
 		if (localFileToCopyList == null || localFileToCopyList.isEmpty()) {
 			try (
-				final WinRMService winRMService = WinRMService.createInstance(
+				final WindowsRemoteExecutor winRMService = WinRMExecutorFactory.createInstance(
 					winRMEndpoint,
 					timeout,
 					ticketCache,

@@ -4,7 +4,7 @@ package org.metricshub.winrm;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2024 Metricshub
+ * Copyright 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -81,4 +81,12 @@ public interface WindowsRemoteExecutor extends AutoCloseable {
 	 * @return
 	 */
 	public char[] getPassword();
+
+	/**
+	 * Close the executor and release its resources. Narrows {@link AutoCloseable#close()} so it does
+	 * not declare a checked exception, letting callers use try-with-resources without catching
+	 * {@link Exception}.
+	 */
+	@Override
+	public void close();
 }
