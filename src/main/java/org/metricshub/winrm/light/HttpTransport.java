@@ -26,10 +26,12 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import org.metricshub.winrm.Utils;
 
 /**
  * Minimal HTTP/1.1 client over a single kept-alive TCP socket. WinRM's NTLM authentication is
@@ -38,12 +40,19 @@ import java.util.Locale;
  */
 final class HttpTransport implements AutoCloseable {
 
+	// After a connection has been idle at least this long, validate it before reuse: a peer may have
+	// silently dropped an idle keep-alive connection, which Socket.isClosed() cannot detect. Kept small
+	// so it never fires between the back-to-back requests of a single operation, only across idle gaps
+	// (e.g. a cached executor sitting between polling cycles).
+	private static final long VALIDATE_AFTER_INACTIVITY_MS = 1000;
+
 	private final String host;
 	private final int port;
 	private final int timeoutMillis;
 	private Socket socket;
 	private OutputStream out;
 	private BufferedInputStream in;
+	private long lastActivityMillis;
 
 	HttpTransport(final String host, final int port, final int timeoutMillis) {
 		this.host = host;
@@ -87,7 +96,50 @@ final class HttpTransport implements AutoCloseable {
 
 	/** Whether a live connection is currently held. */
 	boolean isConnected() {
-		return socket != null && !socket.isClosed();
+		if (socket == null || socket.isClosed() || !socket.isConnected()) {
+			return false;
+		}
+		// Socket.isClosed() only reflects LOCAL closure: a server (or intermediary) that dropped an idle
+		// keep-alive connection is invisible until the next write/read fails, which would silently lose
+		// the first operation after the idle gap. Once the connection has been idle a while, probe it so
+		// we treat it as dead here — request() then resets the NTLM session and reconnects before sending.
+		if (Utils.getCurrentTimeMillis() - lastActivityMillis >= VALIDATE_AFTER_INACTIVITY_MS && isStalePeerClosed()) {
+			close();
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Probe whether the peer has closed the connection, using a very short blocking read. A healthy idle
+	 * keep-alive connection has no readable bytes, so the read times out (returns {@code false}); any
+	 * byte or EOF means the connection is unusable (returns {@code true}). The read only ever consumes
+	 * data on the unusable path, where the socket is discarded anyway, so a live stream is never disturbed.
+	 */
+	private boolean isStalePeerClosed() {
+		final int previousTimeout;
+		try {
+			previousTimeout = socket.getSoTimeout();
+		} catch (final IOException e) {
+			return true;
+		}
+		try {
+			socket.setSoTimeout(1);
+			// A healthy idle keep-alive has nothing to read, so this blocks and times out (caught below).
+			// Any return — EOF (peer closed) or an unexpected byte (protocol desync) — means it is unusable.
+			in.read();
+			return true;
+		} catch (final SocketTimeoutException e) {
+			return false;
+		} catch (final IOException e) {
+			return true;
+		} finally {
+			try {
+				socket.setSoTimeout(previousTimeout);
+			} catch (final IOException ignore) {
+				// socket is being discarded on the stale path anyway
+			}
+		}
 	}
 
 	private void ensureConnected() throws IOException {
@@ -104,6 +156,7 @@ final class HttpTransport implements AutoCloseable {
 			socket = newSocket;
 			out = socket.getOutputStream();
 			in = new BufferedInputStream(socket.getInputStream());
+			lastActivityMillis = Utils.getCurrentTimeMillis();
 		} catch (final IOException e) {
 			// Never leave a half-open socket in the field, or ensureConnected would skip reconnecting.
 			try {
@@ -149,7 +202,9 @@ final class HttpTransport implements AutoCloseable {
 			out.write(request.toByteArray());
 			out.flush();
 
-			return readResponse();
+			final Response response = readResponse();
+			lastActivityMillis = Utils.getCurrentTimeMillis();
+			return response;
 		} catch (final IOException | RuntimeException e) {
 			// A broken write/read leaves the socket in an unknown state and its read position possibly
 			// corrupted; close it so the next request establishes a fresh (re-authenticated) connection.
