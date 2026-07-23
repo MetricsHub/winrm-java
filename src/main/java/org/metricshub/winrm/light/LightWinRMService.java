@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.metricshub.winrm.Utils;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
@@ -51,6 +52,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 
 	private final WinRMEndpoint winRMEndpoint;
 	private final WsmanClient client;
+	private final AtomicBoolean closed = new AtomicBoolean(false);
 
 	private LightWinRMService(final WinRMEndpoint winRMEndpoint, final WsmanClient client) {
 		this.winRMEndpoint = winRMEndpoint;
@@ -117,6 +119,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	@Override
 	public List<Map<String, Object>> executeWql(final String wqlQuery, final long timeout)
 		throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
+		checkNotClosed();
 		Utils.checkNonNull(wqlQuery, "wqlQuery");
 		if (!WmiHelper.isValidWql(wqlQuery)) {
 			throw new WqlQuerySyntaxException(wqlQuery);
@@ -152,6 +155,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final Charset charset,
 		final long timeout
 	) throws WindowsRemoteException, TimeoutException {
+		checkNotClosed();
 		Utils.checkNonNull(command, "command");
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
 
@@ -192,6 +196,16 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 
 	@Override
 	public void close() {
-		client.close();
+		// Idempotent: releases the underlying connection exactly once, and marks the executor closed so
+		// a later operation is rejected rather than silently reviving it with a fresh handshake.
+		if (closed.compareAndSet(false, true)) {
+			client.close();
+		}
+	}
+
+	private void checkNotClosed() {
+		if (closed.get()) {
+			throw new IllegalStateException("This WinRM executor has been closed; create a new one.");
+		}
 	}
 }

@@ -103,7 +103,17 @@ final class WsmanClient implements AutoCloseable {
 		// Workstation is left empty in the Type 3 message, matching the reference client.
 		final String upperDomain = domain == null ? null : domain.toUpperCase(Locale.ROOT);
 		this.session = new WinRMSession(upperDomain, null, username, password);
-		this.transport = new HttpTransport(host, port, (int) timeoutMs);
+		this.transport = new HttpTransport(host, port, toSocketTimeoutMillis(timeoutMs));
+	}
+
+	/**
+	 * Convert the public {@code long} timeout to the {@code int} milliseconds a {@link java.net.Socket}
+	 * accepts. Clamp so a large but valid timeout never narrows to a negative/garbage value, leaving
+	 * headroom for the extra read-timeout seconds {@link HttpTransport} adds. The full {@code long}
+	 * remains authoritative for the WSMan OperationTimeout and the wall-clock deadline in the service.
+	 */
+	private static int toSocketTimeoutMillis(final long millis) {
+		return (int) Math.min(millis, Integer.MAX_VALUE - 10_000L);
 	}
 
 	/** A decrypted WSMan response: HTTP status plus the (decrypted) SOAP body. */

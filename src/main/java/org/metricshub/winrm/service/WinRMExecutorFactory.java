@@ -41,6 +41,7 @@ public final class WinRMExecutorFactory {
 	/** System property selecting the backend: {@code light} (default) or {@code cxf}. */
 	public static final String BACKEND_PROPERTY = "org.metricshub.winrm.backend";
 
+	private static final String LIGHT = "light";
 	private static final String CXF = "cxf";
 
 	private WinRMExecutorFactory() {}
@@ -61,10 +62,25 @@ public final class WinRMExecutorFactory {
 		final Path ticketCache,
 		final List<AuthenticationEnum> authentications
 	) throws WinRMException {
-		final String backend = System.getProperty(BACKEND_PROPERTY, "light").trim().toLowerCase(Locale.ROOT);
+		final String backend = System.getProperty(BACKEND_PROPERTY, LIGHT).trim().toLowerCase(Locale.ROOT);
+		if (LIGHT.equals(backend)) {
+			return LightWinRMService.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
+		}
 		if (CXF.equals(backend)) {
 			return WinRMService.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
 		}
-		return LightWinRMService.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
+		// Fail loudly on a typo or unsupported value rather than silently running a backend the operator
+		// did not ask for (which would also emit misleading "set the property" hints downstream).
+		throw new WinRMException(
+			"Unsupported value \"" +
+			backend +
+			"\" for system property " +
+			BACKEND_PROPERTY +
+			"; expected \"" +
+			LIGHT +
+			"\" (default) or \"" +
+			CXF +
+			"\"."
+		);
 	}
 }

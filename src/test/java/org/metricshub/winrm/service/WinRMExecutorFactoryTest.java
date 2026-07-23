@@ -137,4 +137,39 @@ class WinRMExecutorFactoryTest {
 				)
 		);
 	}
+
+	@Test
+	void unsupportedBackendValueRejected() {
+		// A typo or unknown value must fail loudly instead of silently falling through to a backend the
+		// operator did not request.
+		System.setProperty(WinRMExecutorFactory.BACKEND_PROPERTY, "cxff");
+		assertThrows(
+			WinRMException.class,
+			() ->
+				WinRMExecutorFactory.createInstance(
+					endpoint(WinRMHttpProtocolEnum.HTTP),
+					30000L,
+					null,
+					List.of(AuthenticationEnum.NTLM)
+				)
+		);
+	}
+
+	@Test
+	void closedLightExecutorRejectsOperations() throws Exception {
+		// close() must release the executor for good: a later operation is rejected, not silently served
+		// by a fresh reconnect/handshake.
+		System.setProperty(WinRMExecutorFactory.BACKEND_PROPERTY, "light");
+		final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+			endpoint(WinRMHttpProtocolEnum.HTTP),
+			30000L,
+			null,
+			List.of(AuthenticationEnum.NTLM)
+		);
+		executor.close();
+		assertThrows(
+			IllegalStateException.class,
+			() -> executor.executeWql("SELECT Name FROM Win32_OperatingSystem", 30000L)
+		);
+	}
 }
