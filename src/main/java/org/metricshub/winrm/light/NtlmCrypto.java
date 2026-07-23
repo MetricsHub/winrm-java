@@ -21,6 +21,7 @@ package org.metricshub.winrm.light;
  */
 
 import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.zip.CRC32;
 
@@ -42,15 +43,15 @@ final class NtlmCrypto {
 
 	static byte[] encryptAndSign(final WinRMSession session, final byte[] messageBody) {
 		try (final ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-			out.write(BOUNDARY_CR.getBytes());
-			out.write("\tContent-Type: application/HTTP-SPNEGO-session-encrypted\r\n".getBytes());
+			out.write(BOUNDARY_CR.getBytes(StandardCharsets.US_ASCII));
+			out.write("\tContent-Type: application/HTTP-SPNEGO-session-encrypted\r\n".getBytes(StandardCharsets.US_ASCII));
 			out.write(
 				String
 					.format("\tOriginalContent: type=application/soap+xml;charset=UTF-8;Length=%d\r\n", messageBody.length)
-					.getBytes()
+					.getBytes(StandardCharsets.US_ASCII)
 			);
-			out.write(BOUNDARY_CR.getBytes());
-			out.write("\tContent-Type: application/octet-stream\r\n".getBytes());
+			out.write(BOUNDARY_CR.getBytes(StandardCharsets.US_ASCII));
+			out.write("\tContent-Type: application/octet-stream\r\n".getBytes(StandardCharsets.US_ASCII));
 
 			final long seqNum = session.getSequenceNumberOutgoing().incrementAndGet();
 			// Seal the body FIRST (advances the stateful cipher), even though the signature is written before it.
@@ -62,7 +63,7 @@ final class NtlmCrypto {
 			out.write(signature.toByteArray());
 			out.write(sealed);
 
-			out.write(BOUNDARY_END.getBytes());
+			out.write(BOUNDARY_END.getBytes(StandardCharsets.US_ASCII));
 			return out.toByteArray();
 		} catch (final Exception e) {
 			throw new IllegalStateException("Cannot encrypt WinRM message", e);
@@ -170,7 +171,7 @@ final class NtlmCrypto {
 		}
 
 		void skipOver(final String s) {
-			final byte[] expected = s.getBytes();
+			final byte[] expected = s.getBytes(StandardCharsets.US_ASCII);
 			for (int i = 0; i < expected.length; i++) {
 				if (index >= bytes.length || expected[i] != bytes[index++]) {
 					throw new IllegalStateException("Unexpected encrypted-response framing at byte " + index);
@@ -179,7 +180,7 @@ final class NtlmCrypto {
 		}
 
 		void skipUntil(final String s) {
-			final byte[] expected = s.getBytes();
+			final byte[] expected = s.getBytes(StandardCharsets.US_ASCII);
 			int next = index;
 			outer:while (true) {
 				for (int i = 0; i < expected.length; i++) {

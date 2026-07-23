@@ -72,6 +72,17 @@ final class HttpTransport implements AutoCloseable {
 			}
 			return null;
 		}
+
+		List<String> allHeaders(final String name) {
+			final String n = name.toLowerCase(Locale.ROOT);
+			final List<String> values = new ArrayList<>();
+			for (final String[] h : headers) {
+				if (h[0].equals(n)) {
+					values.add(h[1]);
+				}
+			}
+			return values;
+		}
 	}
 
 	/** Whether a live connection is currently held. */
@@ -230,7 +241,12 @@ final class HttpTransport implements AutoCloseable {
 			final int semicolon = sizeLine.indexOf(';');
 			final int size = Integer.parseInt((semicolon < 0 ? sizeLine : sizeLine.substring(0, semicolon)).trim(), 16);
 			if (size == 0) {
-				readLine(); // trailing CRLF after the last chunk
+				// After the terminating chunk come zero or more optional trailer fields, then a final
+				// empty line. Consume them all, or leftover bytes desync the kept-alive NTLM socket.
+				String trailer;
+				while ((trailer = readLine()) != null && !trailer.isEmpty()) {
+					// discard trailer field
+				}
 				break;
 			}
 			body.write(readFixed(size));

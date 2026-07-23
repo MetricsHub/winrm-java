@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -58,6 +60,11 @@ final class WsmanClient implements AutoCloseable {
 	// fault code and the client is expected to immediately re-issue the Receive request.
 	private static final String FAULT_OPERATION_TIMEOUT = "2150858793";
 	private static final String FAULT_SHELL_NOT_FOUND = "2150858843";
+
+	// A WWW-Authenticate value may list several challenges ("Negotiate <b64>, NTLM ...") and a server
+	// or proxy may split them across multiple header lines. Match the Negotiate scheme only at a
+	// challenge boundary (start of value or right after a comma) and capture just its base64 token.
+	private static final Pattern NEGOTIATE_TOKEN = Pattern.compile("(?i)(?:^|,)\\s*Negotiate\\s+([A-Za-z0-9+/=]+)");
 
 	private final long timeoutMs;
 	private final String url;
@@ -268,11 +275,12 @@ final class WsmanClient implements AutoCloseable {
 		if (challenge.status != 401) {
 			throw new IllegalStateException("Expected HTTP 401 with an NTLM challenge, got HTTP " + challenge.status);
 		}
-		final String wwwAuth = challenge.firstHeader("www-authenticate");
-		if (wwwAuth == null || !wwwAuth.toLowerCase(Locale.ROOT).contains("negotiate ")) {
-			throw new IllegalStateException("No Negotiate challenge token in response: " + wwwAuth);
+		final String type2 = extractNegotiateToken(challenge);
+		if (type2 == null) {
+			throw new IllegalStateException(
+				"No Negotiate challenge token in response: " + challenge.allHeaders("www-authenticate")
+			);
 		}
-		final String type2 = wwwAuth.substring(wwwAuth.indexOf(' ') + 1).trim();
 
 		final Type2Message challengeMessage = new Type2Message(type2);
 		final Type3Message type3Message = new Type3Message(
@@ -288,6 +296,22 @@ final class WsmanClient implements AutoCloseable {
 		final String type3 = type3Message.getResponse();
 		session.applyKeys(type3Message);
 		pendingAuthorization = "Negotiate " + type3;
+	}
+
+	/**
+	 * Extract the Negotiate/NTLM challenge token from the 401 response, scanning every
+	 * {@code WWW-Authenticate} header (order-independent) and tolerating combined challenges.
+	 *
+	 * @return the base64 token, or {@code null} if no Negotiate challenge carries one
+	 */
+	private static String extractNegotiateToken(final HttpTransport.Response response) {
+		for (final String value : response.allHeaders("www-authenticate")) {
+			final Matcher matcher = NEGOTIATE_TOKEN.matcher(value);
+			if (matcher.find()) {
+				return matcher.group(1);
+			}
+		}
+		return null;
 	}
 
 	private Document decryptResponse(final HttpTransport.Response resp) throws Exception {
