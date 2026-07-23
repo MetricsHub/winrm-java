@@ -4,6 +4,18 @@ The Windows Remote Management (WinRM) Java Client is a library that enables to:
 * Connect to a remote Windows server using one of the two authentication types (NTLM, KERBEROS)
 * Execute WMI Query Language (WQL) queries which uses HTTP/HTTPS protocols.
 
+> ## ⚠️ Upgrade warning
+>
+> The dependency-free **light** backend is now the **default**. Unlike the previous CXF-based client,
+> which silently trusted every TLS certificate, the light backend **validates the server certificate
+> and verifies the hostname by default**, so **WinRM-over-HTTPS connections to hosts with self-signed
+> or untrusted certificates will now fail** during the TLS handshake. To restore connectivity, either
+> install the certificate into a Java trust store, set `-Dorg.metricshub.winrm.tls.insecure=true`
+> (insecure — for testing only), or select the legacy backend with
+> `-Dorg.metricshub.winrm.backend=cxf`. The light backend supports NTLM over HTTP/HTTPS and Kerberos
+> (SPNEGO) over HTTPS; the CXF backend remains available via that property and will be removed in a
+> future major release.
+
 # How to run the WinRM Client inside Java
 
 Add WinRM in the list of dependencies in your [Maven **pom.xml**](https://maven.apache.org/pom.html):

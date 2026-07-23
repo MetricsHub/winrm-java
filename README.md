@@ -13,21 +13,32 @@ The Windows Remote Management (WinRM) Java Client is a library that enables to:
 * Connect to a remote Windows server using one of the two authentication types (NTLM, KERBEROS)
 * Execute WMI Query Language (WQL) queries which uses HTTP/HTTPS protocols.
 
+> ## ⚠️ Upgrade warning
+>
+> The **light** backend is now the **default**, and — unlike the previous CXF-based client, which
+> silently trusted every TLS certificate — it **validates the server certificate and verifies the
+> hostname by default**. **WinRM-over-HTTPS connections to hosts with self-signed or otherwise
+> untrusted certificates will now fail** during the TLS handshake unless you do one of:
+>
+> * install the server certificate (or its issuing CA) into a Java trust store (e.g. `-Djavax.net.ssl.trustStore=...`);
+> * disable TLS validation with `-Dorg.metricshub.winrm.tls.insecure=true` (**insecure — for testing only**); or
+> * select the legacy CXF backend with `-Dorg.metricshub.winrm.backend=cxf`.
+>
+> The CXF backend stays available through that property for now and will be **removed in a future major release**.
+
 ## WinRM backends
 
-The library ships two interchangeable backends, both implementing the same API so calling code is unaffected by the choice:
+The library ships two interchangeable backends, both implementing the same public API so calling code is unaffected by the choice:
 
-* **light** (default) — a dependency-free client with no Apache CXF / JAX-WS / JAXB stack. It currently supports **NTLM over HTTP** with message encryption, and is immune by construction to JAXP `ServiceLoader` conflicts (it uses the JDK-default XML factories).
-* **cxf** — the mature CXF-based backend, additionally covering **HTTPS** and **Kerberos**.
+* **light** (default) — a dependency-free client (no Apache CXF / JAX-WS / JAXB), immune by construction to JAXP `ServiceLoader` conflicts (it uses the JDK-default XML factories). Supports **NTLM over HTTP and HTTPS** and **Kerberos (SPNEGO) over HTTPS**. Over HTTPS it validates the certificate and verifies the hostname by default (see the upgrade warning above); `-Dorg.metricshub.winrm.tls.insecure=true` trusts all certificates (insecure, testing only). Kerberos uses the ambient Kerberos configuration (`krb5.conf` / `-Djava.security.krb5.*`).
+* **cxf** — the mature CXF-based backend, still available during the transition and scheduled for removal in a future major release.
 
-Select the backend with the `org.metricshub.winrm.backend` system property. When it is unset, the **light** backend is used:
+Select the backend with the `org.metricshub.winrm.backend` system property (`light` is the default):
 
 ```bash
-# Force the CXF backend (currently required for HTTPS or Kerberos)
+# opt into the legacy CXF backend
 java -Dorg.metricshub.winrm.backend=cxf ...
 ```
-
-Requesting HTTPS or Kerberos on the light backend raises an error that points to the `cxf` value above, until the corresponding light support lands.
 
 ## Build instructions
 
