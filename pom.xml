@@ -89,6 +89,12 @@
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
+			<!-- Override the vulnerable version pulled transitively by smbj (GHSA-574f-3g2m-x479, GHSA-c3fc-8qff-9hwx) -->
+			<dependency>
+				<groupId>org.bouncycastle</groupId>
+				<artifactId>bcprov-jdk18on</artifactId>
+				<version>1.85</version>
+			</dependency>
 		</dependencies>
 	</dependencyManagement>
 
