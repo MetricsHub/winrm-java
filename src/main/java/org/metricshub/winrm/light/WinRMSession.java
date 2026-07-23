@@ -141,13 +141,23 @@ final class WinRMSession {
 
 	/** Derive signing/sealing keys from the Type 3 exported session key and open both RC4 ciphers. */
 	void applyKeys(final Type3Message type3) {
-		final byte[] exportedSessionKey = type3.getExportedSessionKey();
-		negotiateFlags = type3.getType2Flags();
+		applyKeys(type3.getType2Flags(), type3.getExportedSessionKey(), false);
+	}
 
-		clientSigningKey = signKey(exportedSessionKey, CLIENT_SIGNING);
-		serverSigningKey = signKey(exportedSessionKey, SERVER_SIGNING);
-		encryptor = EncryptionUtils.arc4(sealKey(exportedSessionKey, CLIENT_SEALING));
-		decryptor = EncryptionUtils.arc4(sealKey(exportedSessionKey, SERVER_SEALING));
+	/**
+	 * Derive the directional signing/sealing keys from the exported session key and open both RC4
+	 * ciphers. The client passes {@code mirror=false}: it signs and seals outgoing messages with the
+	 * client-to-server keys and verifies/unseals incoming ones with the server-to-client keys.
+	 * {@code mirror=true} swaps the directions — that is the server side of the same handshake, used
+	 * by the in-process protocol-test server to speak real NTLM message encryption to the client.
+	 */
+	void applyKeys(final long flags, final byte[] exportedSessionKey, final boolean mirror) {
+		negotiateFlags = flags;
+
+		clientSigningKey = signKey(exportedSessionKey, mirror ? SERVER_SIGNING : CLIENT_SIGNING);
+		serverSigningKey = signKey(exportedSessionKey, mirror ? CLIENT_SIGNING : SERVER_SIGNING);
+		encryptor = EncryptionUtils.arc4(sealKey(exportedSessionKey, mirror ? SERVER_SEALING : CLIENT_SEALING));
+		decryptor = EncryptionUtils.arc4(sealKey(exportedSessionKey, mirror ? CLIENT_SEALING : SERVER_SEALING));
 		authenticated = true;
 	}
 

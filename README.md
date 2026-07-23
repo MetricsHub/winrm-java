@@ -48,6 +48,33 @@ This is a simple Maven project. Build with:
 mvn verify
 ```
 
+### Protocol tests
+
+The build includes in-process protocol tests (`WsmanProtocolTest`) that exercise the light
+backend's full WSMan path — NTLM handshake, message encryption, `multipart/encrypted` framing,
+WQL Enumerate/Pull paging, the command shell lifecycle, and fault mapping — against a fake WSMan
+server, so no Windows host is needed in CI.
+
+### Differential run against a real host
+
+`BackendDifferentialTest` runs the same operations through the legacy CXF backend and the light
+backend against a **real** WinRM host and asserts the results match. It is skipped unless
+`winrm.diff.host` is set:
+
+```bash
+mvn test -Dtest=BackendDifferentialTest -Dmaven.javadoc.skip=true \
+  -Dwinrm.diff.host=myhost.example.com \
+  -Dwinrm.diff.protocol=https \
+  -Dwinrm.diff.username='MYDOMAIN\myuser' \
+  -Dwinrm.diff.password-file=/path/to/password.txt
+```
+
+Optional properties: `winrm.diff.port`, `winrm.diff.password` (inline), `winrm.diff.namespace`,
+`winrm.diff.wql`, `winrm.diff.command`, `winrm.diff.badcreds=true` (also compare wrong-password
+error messages; off by default because it triggers failed logons), and
+`winrm.diff.tls.insecure=false` (validate TLS on the light backend instead of matching the CXF
+backend's trust-all behavior).
+
 ## Release instructions
 
 The artifact is deployed to Sonatype's [Maven Central](https://central.sonatype.com/).

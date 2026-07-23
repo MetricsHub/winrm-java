@@ -22,6 +22,12 @@ connectivity, do one of:
 
 ### Added
 
+- In-process protocol tests (`WsmanProtocolTest` + `FakeWsmanServer`) covering the light backend's
+  full WSMan path — NTLM handshake, message encryption, multipart framing, Enumerate/Pull paging,
+  shell lifecycle, and fault mapping — with no Windows host required (they run in `mvn verify`).
+- `BackendDifferentialTest`: a one-command differential run comparing the CXF and light backends
+  against a real host (see README), the go/no-go gate for removing CXF.
+
 - Dependency-free "light" WinRM backend with no Apache CXF / JAX-WS / JAXB stack, immune by
   construction to JAXP `ServiceLoader` conflicts (it uses the JDK-default XML factories). Supports
   NTLM over HTTP and HTTPS, and Kerberos (SPNEGO, via the JDK GSS-API) over HTTPS.
