@@ -78,17 +78,18 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 
 		if (authentications != null && !authentications.isEmpty() && !authentications.contains(AuthenticationEnum.NTLM)) {
 			throw new WinRMException(
-				"The light WinRM backend currently supports only NTLM authentication; " +
-				"use the CXF backend for " +
+				"The light WinRM backend currently supports only NTLM authentication (requested: " +
 				authentications +
-				"."
+				"). Select the CXF backend with -Dorg.metricshub.winrm.backend=cxf until light support lands."
 			);
 		}
 
 		final URI uri = URI.create(winRMEndpoint.getEndpoint());
 		if (!"http".equalsIgnoreCase(uri.getScheme())) {
 			throw new WinRMException(
-				"The light WinRM backend currently supports only HTTP; endpoint was " + winRMEndpoint.getEndpoint()
+				"The light WinRM backend currently supports only HTTP (endpoint was " +
+				winRMEndpoint.getEndpoint() +
+				"). Select the CXF backend with -Dorg.metricshub.winrm.backend=cxf until light support lands."
 			);
 		}
 		final int port = uri.getPort() > 0 ? uri.getPort() : 5985;

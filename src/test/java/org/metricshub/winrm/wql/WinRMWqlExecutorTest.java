@@ -6,7 +6,6 @@ import static java.util.Collections.singletonList;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.metricshub.winrm.WinRMHttpProtocolEnum.HTTPS;
-import static org.metricshub.winrm.service.WinRMService.createInstance;
 import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.NTLM;
 import static org.metricshub.winrm.wql.WinRMWqlExecutor.executeWql;
 import static org.mockito.ArgumentMatchers.any;
@@ -23,8 +22,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.metricshub.winrm.WindowsRemoteExecutor;
 import org.metricshub.winrm.service.WinRMEndpoint;
-import org.metricshub.winrm.service.WinRMService;
+import org.metricshub.winrm.service.WinRMExecutorFactory;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 import org.mockito.MockedStatic;
 
@@ -71,8 +71,8 @@ class WinRMWqlExecutorTest {
 			() -> executeWql(HTTPS, hostname, 5986, username, password, null, wqlQuery, 0L, ticketCache, authentications)
 		);
 
-		try (final MockedStatic<WinRMService> mockedWinRMService = mockStatic(WinRMService.class)) {
-			final WinRMService winRMService = mock(WinRMService.class);
+		try (final MockedStatic<WinRMExecutorFactory> mockedFactory = mockStatic(WinRMExecutorFactory.class)) {
+			final WindowsRemoteExecutor executor = mock(WindowsRemoteExecutor.class);
 
 			final List<Map<String, Object>> result = new ArrayList<>();
 			{
@@ -88,11 +88,11 @@ class WinRMWqlExecutorTest {
 				result.add(row);
 			}
 
-			mockedWinRMService
-				.when(() -> createInstance(any(WinRMEndpoint.class), anyLong(), isNull(), isNull()))
-				.thenReturn(winRMService);
+			mockedFactory
+				.when(() -> WinRMExecutorFactory.createInstance(any(WinRMEndpoint.class), anyLong(), isNull(), isNull()))
+				.thenReturn(executor);
 
-			doReturn(result).when(winRMService).executeWql(eq(wqlQuery), anyLong());
+			doReturn(result).when(executor).executeWql(eq(wqlQuery), anyLong());
 
 			final WinRMWqlExecutor actual = executeWql(
 				null,

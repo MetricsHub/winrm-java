@@ -287,7 +287,7 @@ public class SmbTempShare extends WindowsTempShare implements AutoCloseable {
 	/**
 	 * Share the remote directory on the host.
 	 *
-	 * @param windowsRemoteExecutor WinRMService instance.
+	 * @param windowsRemoteExecutor WinRM executor (CXF or light backend).
 	 * @param remotePath The remote path.
 	 * @param shareName The Share Name.
 	 * @param timeout Timeout in milliseconds.

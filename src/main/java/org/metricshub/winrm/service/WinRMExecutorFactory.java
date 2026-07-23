@@ -29,18 +29,19 @@ import org.metricshub.winrm.light.LightWinRMService;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 
 /**
- * Selects the WinRM backend that fulfils a request. The default is the mature CXF-based
- * {@link WinRMService}; setting the system property {@value #BACKEND_PROPERTY} to
- * {@code light} selects the dependency-free {@link LightWinRMService} instead.
+ * Selects the WinRM backend that fulfils a request. The default is the dependency-free
+ * {@link LightWinRMService}; setting the system property {@value #BACKEND_PROPERTY} to
+ * {@code cxf} selects the mature CXF-based {@link WinRMService} instead — needed for capabilities
+ * the light backend does not yet cover (HTTPS and Kerberos).
  *
  * <p>Both backends implement {@link WindowsRemoteExecutor}, so callers are agnostic to the choice.
  */
 public final class WinRMExecutorFactory {
 
-	/** System property selecting the backend: {@code cxf} (default) or {@code light}. */
+	/** System property selecting the backend: {@code light} (default) or {@code cxf}. */
 	public static final String BACKEND_PROPERTY = "org.metricshub.winrm.backend";
 
-	private static final String LIGHT = "light";
+	private static final String CXF = "cxf";
 
 	private WinRMExecutorFactory() {}
 
@@ -51,7 +52,7 @@ public final class WinRMExecutorFactory {
 	 * @param timeout         timeout in milliseconds (must be &gt; 0)
 	 * @param ticketCache     Kerberos ticket cache path (may be {@code null})
 	 * @param authentications requested authentication schemes (may be {@code null})
-	 * @return a CXF-backed or light-backed executor depending on {@value #BACKEND_PROPERTY}
+	 * @return a light-backed or CXF-backed executor depending on {@value #BACKEND_PROPERTY}
 	 * @throws WinRMException for any problem creating the executor
 	 */
 	public static WindowsRemoteExecutor createInstance(
@@ -60,10 +61,10 @@ public final class WinRMExecutorFactory {
 		final Path ticketCache,
 		final List<AuthenticationEnum> authentications
 	) throws WinRMException {
-		final String backend = System.getProperty(BACKEND_PROPERTY, "cxf").trim().toLowerCase(Locale.ROOT);
-		if (LIGHT.equals(backend)) {
-			return LightWinRMService.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
+		final String backend = System.getProperty(BACKEND_PROPERTY, "light").trim().toLowerCase(Locale.ROOT);
+		if (CXF.equals(backend)) {
+			return WinRMService.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
 		}
-		return WinRMService.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
+		return LightWinRMService.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
 	}
 }

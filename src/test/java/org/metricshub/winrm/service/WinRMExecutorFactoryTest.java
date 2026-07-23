@@ -42,9 +42,26 @@ class WinRMExecutorFactoryTest {
 	}
 
 	@Test
-	void defaultBackendIsCxf() throws Exception {
-		// No backend property set -> the mature CXF backend. Building the client does not open a
-		// connection (that happens on the first operation), so this stays offline.
+	void defaultBackendIsLight() throws Exception {
+		// No backend property set -> the dependency-free light backend. Building the client does not
+		// open a connection (that happens on the first operation), so this stays offline.
+		try (
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTP),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.NTLM)
+			)
+		) {
+			assertInstanceOf(LightWinRMService.class, executor);
+		}
+	}
+
+	@Test
+	void cxfBackendSelectedViaProperty() throws Exception {
+		// The CXF backend stays reachable via the property while light matures. Building the client
+		// does not open a connection, so this stays offline.
+		System.setProperty(WinRMExecutorFactory.BACKEND_PROPERTY, "cxf");
 		try (
 			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
 				endpoint(WinRMHttpProtocolEnum.HTTP),
@@ -55,6 +72,23 @@ class WinRMExecutorFactoryTest {
 		) {
 			assertInstanceOf(WinRMService.class, executor);
 		}
+	}
+
+	@Test
+	void defaultBackendRejectsHttps() {
+		// Intentional, documented regression on this branch: with light as the default, HTTPS is
+		// rejected until the light backend supports it. Pinned so a silent CXF fallback cannot be
+		// reintroduced without updating this test.
+		assertThrows(
+			WinRMException.class,
+			() ->
+				WinRMExecutorFactory.createInstance(
+					endpoint(WinRMHttpProtocolEnum.HTTPS),
+					30000L,
+					null,
+					List.of(AuthenticationEnum.NTLM)
+				)
+		);
 	}
 
 	@Test
