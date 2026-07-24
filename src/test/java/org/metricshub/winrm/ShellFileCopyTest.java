@@ -343,8 +343,28 @@ class ShellFileCopyTest {
 		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("quo\"te.txt"));
 		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("ctrl\u0001.txt"));
 
+		// Windows-forbidden characters, legal in file names on other client platforms
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("wild*card.txt"));
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("que?ry.txt"));
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("col:on.txt"));
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("back\\slash.txt"));
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("pi|pe.txt"));
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("angle<bracket>.txt"));
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("trailingdot."));
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("trailing space "));
+
+		// Windows reserved device names, with or without an extension, case-insensitive
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("CON"));
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("CON.ps1"));
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("nul.txt"));
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("com3.vbs"));
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("Lpt9"));
+
 		// Legal Windows file names pass, including cmd metacharacters neutralized by quoting
 		ShellFileCopy.checkTransferableFileName("My Script (v2) & more!.vbs");
+		ShellFileCopy.checkTransferableFileName("CONSOLE.vbs");
+		ShellFileCopy.checkTransferableFileName("COM10.txt");
+		ShellFileCopy.checkTransferableFileName("null.txt");
 	}
 
 	@Test

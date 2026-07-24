@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.regex.Pattern;
 import org.metricshub.winrm.exceptions.WindowsRemoteException;
 
 /**
@@ -81,6 +82,13 @@ public class ShellFileCopy {
 	 * integrity check on an already-encrypted channel, not a security control.
 	 */
 	private static final String[] CERTUTIL_ALGORITHMS = { "SHA256", "SHA1" };
+
+	/** Characters that are forbidden in Windows file names (a non-Windows client may produce them locally). */
+	private static final String WINDOWS_FORBIDDEN_CHARACTERS = "<>:\"/\\|?*";
+
+	/** Windows reserved device names, with or without an extension (e.g. {@code CON}, {@code CON.ps1}). */
+	private static final Pattern RESERVED_DEVICE_NAME = Pattern
+		.compile("(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\\..*)?");
 
 	/** WSManFault code for "the maximum number of concurrent operations for this user has been exceeded". */
 	private static final String FAULT_OPERATION_QUOTA = "2150859174";
@@ -685,16 +693,30 @@ public class ShellFileCopy {
 	}
 
 	/**
-	 * Reject file names that cannot be embedded safely in a quoted cmd.exe argument.
-	 * Windows already forbids most cmd metacharacters in file names; the remaining dangerous
-	 * one is {@code %}, which cmd.exe expands as a variable reference even between quotes.
+	 * Reject file names that cannot be transferred: names that cannot be embedded safely in a
+	 * quoted cmd.exe argument ({@code %} expands as a variable reference even between quotes,
+	 * {@code "} and control characters break the quoting), and names Windows cannot create —
+	 * relevant when the client runs on an OS whose local file names may legally contain
+	 * Windows-forbidden characters ({@code < > : " / \ | ? *}), end with a dot or a space, or
+	 * collide with a reserved device name ({@code CON}, {@code NUL}, {@code COM1}…, with or
+	 * without an extension).
 	 *
 	 * @param fileName The name of the file to transfer
 	 */
 	static void checkTransferableFileName(final String fileName) {
-		if (fileName.contains("%") || fileName.contains("\"") || fileName.chars().anyMatch(c -> c < 0x20)) {
+		if (fileName.isEmpty()
+			||
+			fileName.contains("%")
+			||
+			fileName.chars().anyMatch(c -> c < 0x20 || WINDOWS_FORBIDDEN_CHARACTERS.indexOf(c) >= 0)
+			||
+			fileName.endsWith(".")
+			||
+			fileName.endsWith(" ")
+			||
+			RESERVED_DEVICE_NAME.matcher(fileName).matches()) {
 			throw new IllegalArgumentException(
-				String.format("File name %s contains characters that cannot be transferred safely.", fileName)
+				String.format("File name %s cannot be transferred to a Windows host safely.", fileName)
 			);
 		}
 	}
