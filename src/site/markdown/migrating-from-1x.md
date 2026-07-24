@@ -6,9 +6,9 @@ description: What changed in WinRM Java Client 2.0.0 and how to upgrade from the
 <!-- MACRO{toc|fromDepth=2|toDepth=3|id=toc} -->
 
 Version 2.0.0 is a major cleanup: the legacy Apache CXF backend and the SMB-based file copy are
-gone, leaving a **dependency-free** client. The **public API is unchanged**, so calling code
-compiles and runs without modification — but two runtime behaviors changed, and you should read this
-page before upgrading.
+gone, leaving a **dependency-free** client. The **documented entry points are unchanged**, so typical
+calling code is unaffected — but a few CXF/SMB-only public types were removed (see the *Removed types*
+section below), and two runtime behaviors changed. Read this page before upgrading.
 
 ## TL;DR
 
@@ -62,9 +62,10 @@ JAX-WS / JAXB stack is gone, and so are `smbj`, BouncyCastle, SLF4J, `mbassador`
 standalone CLI jar shrinks from around 9 MB to a few hundred kB, and the library no longer references
 any logging API — problems are reported through [exceptions](timeouts-and-errors.html) only.
 
-## Removed classes
+## Removed types
 
-If your code referenced these internal or SMB/CXF-only types, they no longer exist:
+These types and members were public in 1.x but are **removed** in 2.0.0. Code that referenced them
+will not compile against 2.0.0 (all were CXF- or SMB-specific):
 
 * `KerberosCredentialsException` — was thrown only by CXF internals.
 * `SmbTempShare` and `WindowsRemoteProcessUtils.copyLocalFilesToShare(...)` — replaced by the

@@ -11,10 +11,13 @@ Both `executeWql(...)` and `WinRMCommandExecutor.execute(...)` take a `timeout` 
 **milliseconds**. The value must be **greater than zero** — passing `0` or a negative value throws
 an `IllegalArgumentException` immediately.
 
-The timeout is a **budget for the whole operation**, not for a single network round trip. Opening
-the connection, detecting the remote code page, copying files, and running the query or command all
-draw from it. When the budget is exhausted, the call throws
-`java.util.concurrent.TimeoutException`.
+The `timeout` applies to the remote operation and to the preparatory steps the client performs —
+opening the connection, detecting the remote code page, and (for commands) copying files. It is
+enforced **per step**, not as a single cumulative deadline: each major step is given up to `timeout`
+to complete, so a call that chains several slow steps can take longer than one `timeout` overall
+before a step finally exceeds its own limit and throws `java.util.concurrent.TimeoutException`. (When
+files are copied, the later stages are budgeted against the time already spent, so that path stays
+close to a single overall deadline.)
 
 ```java
 try {

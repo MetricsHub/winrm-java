@@ -14,7 +14,8 @@ The Windows Remote Management (WinRM) Java Client is a library that enables to:
 > ## ⚠️ Upgrading from 1.x
 >
 > Version 2.0.0 **removed the legacy Apache CXF backend**: the dependency-free **light** client is
-> the only implementation (same public API — calling code is unaffected). The main consequence:
+> the only implementation (same documented entry points; a few CXF/SMB-only public types were
+> removed). The main consequence:
 >
 > * Unlike the CXF-based client, which silently trusted every TLS certificate, the light client
 >   **validates the server certificate and verifies the hostname by default**.
