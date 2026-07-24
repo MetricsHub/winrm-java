@@ -45,8 +45,9 @@ Consequences:
 ### ⚠️ Breaking — the CXF backend was removed
 
 Version 2.0.0 removes the legacy Apache CXF backend. The dependency-free client introduced in the
-previous release is the only implementation; the public API is unchanged, so calling code is
-unaffected. Consequences:
+previous release is the only implementation; the documented entry points are unchanged, so typical
+calling code is unaffected (though a few CXF/SMB-only public types were removed — see Removed).
+Consequences:
 
 - **WinRM over HTTPS with self-signed certificates**: unlike the CXF-based client — which silently
   trusted every TLS certificate and skipped hostname verification — this client **validates the
@@ -56,8 +57,6 @@ unaffected. Consequences:
     (`-Djavax.net.ssl.trustStore=...`); or
   - disable TLS validation with `-Dorg.metricshub.winrm.tls.insecure=true`
     (**insecure — for testing only**).
-- Setting `-Dorg.metricshub.winrm.backend=cxf` now fails with a clear error instead of selecting
-  the removed backend: remove the property (or stay on winrm-java 1.x).
 - The jar shrinks dramatically: the Apache CXF / JAX-WS / JAXB stack is gone, and with the SMB
   file copy replaced by a WinRM-native transfer (see above), the library has **zero runtime
   dependencies**.

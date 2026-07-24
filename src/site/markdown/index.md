@@ -1,71 +1,100 @@
+keywords: winrm java client, windows remote management, wsman, dependency-free, overview
+description: A dependency-free Java client for Windows Remote Management (WinRM): run WQL queries and remote commands over NTLM or Kerberos.
+
 # WinRM Java Client
 
-The Windows Remote Management (WinRM) Java Client is a library that enables to:
-* Connect to a remote Windows server using one of the two authentication types (NTLM, KERBEROS)
-* Execute WMI Query Language (WQL) queries which uses HTTP/HTTPS protocols.
+<!-- MACRO{toc|fromDepth=2|toDepth=3|id=toc} -->
 
-> ## ⚠️ Upgrading from 1.x
->
-> Version 2.0.0 **removed the legacy Apache CXF backend**: the dependency-free client is the only
-> implementation (same public API). Unlike the CXF-based client, which silently trusted every TLS
-> certificate, it **validates the server certificate and verifies the hostname by default**, so
-> **WinRM-over-HTTPS connections to hosts with self-signed or untrusted certificates will fail**
-> during the TLS handshake. To restore connectivity, either install the certificate into a Java
-> trust store or set `-Dorg.metricshub.winrm.tls.insecure=true` (insecure — for testing only).
-> The client supports NTLM over HTTP/HTTPS and Kerberos (SPNEGO) over HTTPS. Setting
-> `-Dorg.metricshub.winrm.backend=cxf` now fails with a clear error; remove the property (or stay
-> on winrm-java 1.x).
+## Overview
 
-# How to run the WinRM Client inside Java
+The **WinRM Java Client** is a small library that talks to the Windows Remote Management
+(WS-Management) service on a remote Windows host. It lets a Java application:
 
-Add WinRM in the list of dependencies in your [Maven **pom.xml**](https://maven.apache.org/pom.html):
+* run **WQL / WMI queries** such as `SELECT Name, State FROM Win32_Service` and read the rows back
+  ([WQL Queries](wql.html)), and
+* **execute remote commands**, capturing standard output, standard error and the exit code —
+  optionally copying local script files to the host first ([Remote Commands](commands.html)).
 
-```xml
-<dependencies>
-	<!-- [...] -->
-	<dependency>
-		<groupId>${project.groupId}</groupId>
-		<artifactId>${project.artifactId}</artifactId>
-		<version>${project.version}</version>
-	</dependency>
-</dependencies>
-```
+It supports **NTLM** over HTTP (with message encryption) and HTTPS, and **Kerberos (SPNEGO)** over
+HTTPS ([Authentication](authentication.html)).
 
-Use it as follows:
-```Java
-import static java.nio.file.Paths.get;
+Since 2.0.0 the client has **zero runtime dependencies** (no Apache CXF / JAX-WS / JAXB stack, no SMB
+stack) and is immune by construction to JAXP `ServiceLoader` conflicts, because it uses the
+JDK-default XML factories. Problems are reported through exceptions only — the library pulls in no
+logging framework.
+
+> [!WARNING]
+> **Upgrading from 1.x?** Version 2.0.0 removed the legacy Apache CXF backend and now
+> **validates TLS certificates and verifies hostnames by default**. If you connect over HTTPS to
+> hosts with self-signed certificates, read [Migrating from 1.x](migrating-from-1x.html) first.
+
+## Add the dependency
+
+The library is published on [Maven Central](https://central.sonatype.com/artifact/${project.groupId}/${project.artifactId}).
+
+> [!TABS]
+> * Maven
+>   ```xml
+>   <dependency>
+>     <groupId>${project.groupId}</groupId>
+>     <artifactId>${project.artifactId}</artifactId>
+>     <version>${project.version}</version>
+>   </dependency>
+>   ```
+> * Gradle (Groovy)
+>   ```groovy
+>   implementation '${project.groupId}:${project.artifactId}:${project.version}'
+>   ```
+> * Gradle (Kotlin)
+>   ```kotlin
+>   implementation("${project.groupId}:${project.artifactId}:${project.version}")
+>   ```
+
+See [Installation](installation.html) for the coordinates, the supported JDKs, and the standalone
+command-line jar.
+
+## A first WQL query
+
+Everything starts with the static
+[`WinRMWqlExecutor.executeWql(...)`](apidocs/org/metricshub/winrm/wql/WinRMWqlExecutor.html) method:
+
+```java
 import static java.util.Collections.singletonList;
 import static org.metricshub.winrm.WinRMHttpProtocolEnum.HTTP;
 import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.NTLM;
 import static org.metricshub.winrm.wql.WinRMWqlExecutor.executeWql;
 
-import java.nio.file.Path;
-import java.util.List;
-import java.util.concurrent.TimeoutException;
-
-import org.metricshub.winrm.exceptions.WinRMException;
-import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
-import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 import org.metricshub.winrm.wql.WinRMWqlExecutor;
 
-public class Main {
+public class Example {
 
-	public static void main(String[] args) throws WinRMException, WqlQuerySyntaxException, TimeoutException {
+    public static void main(String[] args) throws Exception {
 
-		final String wqlQuery = "SELECT Name, Path, Type FROM Win32_Share";
-		final String hostname = "my-hostname-or-ip-address";
-		final String username = "my-username";
-		final char[] password = "my-password".toCharArray();
-		final long timeout = 50 * 1000L; // in milliseconds
-		final Path ticketCache = get("path");
+        WinRMWqlExecutor result = executeWql(
+            HTTP,                                   // protocol (HTTP or HTTPS)
+            "server.example.com",                   // hostname (mandatory)
+            5985,                                   // port (null for the protocol default)
+            "DOMAIN\\Administrator",                // username (DOMAIN\user or user)
+            "the-password".toCharArray(),           // password
+            null,                                   // namespace (null → ROOT\CIMV2)
+            "SELECT Name, State FROM Win32_Service", // WQL query
+            30_000L,                                // timeout in milliseconds
+            null,                                   // Kerberos ticket cache (null for NTLM)
+            singletonList(NTLM)                     // authentication schemes
+        );
 
-		// Authentication type : NTLM or KERBEROS
-		final List<AuthenticationEnum> authentications = singletonList(NTLM);
-
-		// Execute a WQL Query in the hostname and print the result
-		executeWql(HTTP, hostname, 5985, username, password, null, wqlQuery, timeout, ticketCache, authentications)
-				.getRows().forEach(System.out::println);
-
-	}
+        System.out.println(result.getHeaders());        // [Name, State]
+        result.getRows().forEach(System.out::println);  // one List<String> per row
+    }
 }
 ```
+
+## Where to go next
+
+* [Installation](installation.html) — coordinates, supported JDKs, and the standalone CLI jar
+* [WQL Queries](wql.html) — query WMI and read the result
+* [Remote Commands](commands.html) — run commands and copy files to the host
+* [Authentication](authentication.html) — NTLM and Kerberos
+* [TLS / HTTPS](tls.html) — certificate validation and trust stores
+* [Timeouts and Errors](timeouts-and-errors.html) — timeout semantics and the exception surface
+* [Migrating from 1.x](migrating-from-1x.html) — the 2.0.0 breaking changes
