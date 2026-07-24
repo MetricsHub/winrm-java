@@ -153,8 +153,13 @@ public class ShellFileCopy {
 		final String fileName = localPath.getFileName().toString();
 		checkTransferableFileName(fileName);
 
-		final String remoteFile = remoteDirectory + "\\" + fileName;
 		final byte[] content = Files.readAllBytes(localPath);
+
+		// Content-addressed remote name: same-named files with different content get different
+		// remote paths, so concurrent clients — including clients whose computer names collide
+		// in the shared temporary directory — can never overwrite each other's payload between
+		// the digest verification and the command execution.
+		final String remoteFile = remoteDirectory + "\\" + contentAddressedName(fileName, content);
 
 		// Skip the transfer if the remote host already has an identical copy
 		final Optional<RemoteDigest> existing = remoteDigest(windowsRemoteExecutor, remoteFile, timeout, start);
@@ -409,6 +414,44 @@ public class ShellFileCopy {
 	}
 
 	/**
+	 * Build the remote name of a transferred file: the local file name with a fragment of the
+	 * content digest inserted before the extension (e.g. {@code script.1a2b3c4d5e6f.vbs}), so
+	 * the remote path identifies both the name and the content of the file.
+	 *
+	 * @param fileName The local file name
+	 * @param content The file content
+	 * @return the content-addressed remote file name
+	 */
+	static String contentAddressedName(final String fileName, final byte[] content) {
+		final int dot = fileName.lastIndexOf('.');
+		final String base = dot > 0 ? fileName.substring(0, dot) : fileName;
+		final String extension = dot > 0 ? fileName.substring(dot) : Utils.EMPTY;
+
+		return base + "." + digestHex("SHA-256", content).substring(0, 12) + extension;
+	}
+
+	/**
+	 * Compute the hexadecimal digest of the given content.
+	 *
+	 * @param algorithm The {@link MessageDigest} algorithm name
+	 * @param content The content to hash
+	 * @return the lowercase hexadecimal digest
+	 */
+	static String digestHex(final String algorithm, final byte[] content) {
+		try {
+			final StringBuilder hex = new StringBuilder();
+			for (final byte b : MessageDigest.getInstance(algorithm).digest(content)) {
+				hex.append(String.format("%02x", b));
+			}
+
+			return hex.toString();
+		} catch (final NoSuchAlgorithmException e) {
+			// Cannot happen: every JVM is required to provide SHA-1 and SHA-256
+			throw new IllegalStateException(e);
+		}
+	}
+
+	/**
 	 * Reject file names that cannot be embedded safely in a quoted cmd.exe argument.
 	 * Windows already forbids most cmd metacharacters in file names; the remaining dangerous
 	 * one is {@code %}, which cmd.exe expands as a variable reference even between quotes.
@@ -436,21 +479,7 @@ public class ShellFileCopy {
 
 		/** Whether this remote digest matches the digest of the given local content. */
 		private boolean matches(final byte[] content) {
-			try {
-				final MessageDigest messageDigest = MessageDigest.getInstance(
-					"SHA256".equals(algorithm) ? "SHA-256" : "SHA-1"
-				);
-
-				final StringBuilder hex = new StringBuilder();
-				for (final byte b : messageDigest.digest(content)) {
-					hex.append(String.format("%02x", b));
-				}
-
-				return hex.toString().equals(digest);
-			} catch (final NoSuchAlgorithmException e) {
-				// Cannot happen: every JVM is required to provide SHA-1 and SHA-256
-				throw new IllegalStateException(e);
-			}
+			return digestHex("SHA256".equals(algorithm) ? "SHA-256" : "SHA-1", content).equals(digest);
 		}
 	}
 }

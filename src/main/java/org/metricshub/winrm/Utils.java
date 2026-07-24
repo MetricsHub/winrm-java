@@ -75,11 +75,29 @@ public class Utils {
 	 * @return the name of the local computer (or "localhost" if it can't be determined)
 	 */
 	public static String getComputerName() {
+		// Windows sets COMPUTERNAME; on other platforms fall back to HOSTNAME, then to the
+		// resolver, so distinct clients don't all end up named "localhost" (their transfer
+		// directories on the remote host are keyed by this name).
 		final String computerName = System.getenv("COMPUTERNAME");
-		if (computerName == null) {
-			return "localhost";
+		if (isNotBlank(computerName)) {
+			return computerName;
 		}
-		return computerName;
+
+		final String hostName = System.getenv("HOSTNAME");
+		if (isNotBlank(hostName)) {
+			return hostName;
+		}
+
+		try {
+			final String localName = java.net.InetAddress.getLocalHost().getHostName();
+			if (isNotBlank(localName)) {
+				return localName;
+			}
+		} catch (final java.net.UnknownHostException ignored) {
+			// Fall through to the default
+		}
+
+		return "localhost";
 	}
 
 	/**

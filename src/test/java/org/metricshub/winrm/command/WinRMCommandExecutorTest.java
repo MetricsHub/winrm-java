@@ -240,7 +240,8 @@ class WinRMCommandExecutorTest {
 			final String finalCommand = executor.getExecutedCommands().get(executor.getExecutedCommands().size() - 1);
 			assertTrue(finalCommand.startsWith("CMD.EXE /C (CSCRIPT "));
 			assertTrue(finalCommand.contains("\\Temp\\"));
-			assertTrue(finalCommand.contains("MyScript.vbs"));
+			// The remote name is content-addressed: MyScript.<digest-fragment>.vbs
+			assertTrue(finalCommand.matches("(?s).*MyScript\\.[0-9a-f]{12}\\.vbs.*"));
 			assertTrue(executor.isClosed());
 		}
 	}

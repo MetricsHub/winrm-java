@@ -107,7 +107,8 @@ class ShellFileCopyTest {
 			.expectCommand(" echo ", SUCCESS)
 			.expectCommand("certutil -f -decode", SUCCESS);
 
-		final String remoteFile = expectedRemoteDirectory() + "\\My Script.vbs";
+		final String remoteFile = expectedRemoteDirectory() + "\\"
+			+ ShellFileCopy.contentAddressedName("My Script.vbs", content);
 
 		// The command references the local file with a different case: the replacement is case-insensitive
 		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
@@ -150,7 +151,10 @@ class ShellFileCopyTest {
 			TIMEOUT
 		);
 
-		assertEquals("CMD /C " + expectedRemoteDirectory() + "\\script.bat", updatedCommand);
+		assertEquals(
+			"CMD /C " + expectedRemoteDirectory() + "\\" + ShellFileCopy.contentAddressedName("script.bat", content),
+			updatedCommand
+		);
 		assertFalse(executor.getExecutedCommands().stream().anyMatch(command -> command.contains(" echo ")));
 		assertFalse(executor.getExecutedCommands().stream().anyMatch(command -> command.contains("-decode")));
 	}
@@ -174,7 +178,10 @@ class ShellFileCopyTest {
 			TIMEOUT
 		);
 
-		assertEquals(expectedRemoteDirectory() + "\\legacy.vbs", updatedCommand);
+		assertEquals(
+			expectedRemoteDirectory() + "\\" + ShellFileCopy.contentAddressedName("legacy.vbs", content),
+			updatedCommand
+		);
 		assertArrayEquals(content, echoedContent(executor.getExecutedCommands()));
 	}
 
@@ -198,7 +205,8 @@ class ShellFileCopyTest {
 
 		assertTrue(exception.getMessage().contains("Integrity check failed"));
 
-		final String remoteFile = expectedRemoteDirectory() + "\\corrupted.txt";
+		final String remoteFile = expectedRemoteDirectory() + "\\"
+			+ ShellFileCopy.contentAddressedName("corrupted.txt", content);
 		assertTrue(
 			executor
 				.getExecutedCommands()
@@ -225,7 +233,10 @@ class ShellFileCopyTest {
 			TIMEOUT
 		);
 
-		assertEquals(expectedRemoteDirectory() + "\\empty.txt", updatedCommand);
+		assertEquals(
+			expectedRemoteDirectory() + "\\" + ShellFileCopy.contentAddressedName("empty.txt", content),
+			updatedCommand
+		);
 		assertFalse(executor.getExecutedCommands().stream().anyMatch(command -> command.contains(" echo ")));
 	}
 
@@ -273,6 +284,23 @@ class ShellFileCopyTest {
 
 		// Reassembling every echoed payload yields the original base64, in order
 		assertArrayEquals(content, echoedContent(commands));
+	}
+
+	@Test
+	void buildsContentAddressedRemoteNames() {
+		// SHA-256("abc") = ba7816bf8f01cfea...: the first 12 hex chars go into the remote name
+		final byte[] content = "abc".getBytes(UTF_8);
+
+		assertEquals("script.ba7816bf8f01.vbs", ShellFileCopy.contentAddressedName("script.vbs", content));
+		assertEquals("no-extension.ba7816bf8f01", ShellFileCopy.contentAddressedName("no-extension", content));
+		assertEquals(".hidden.ba7816bf8f01", ShellFileCopy.contentAddressedName(".hidden", content));
+
+		// Same name, different content: different remote path (no cross-client overwrite)
+		assertFalse(
+			ShellFileCopy
+				.contentAddressedName("script.vbs", content)
+				.equals(ShellFileCopy.contentAddressedName("script.vbs", "abd".getBytes(UTF_8)))
+		);
 	}
 
 	@Test

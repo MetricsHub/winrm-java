@@ -21,6 +21,10 @@ Consequences:
   worked from a Windows client with ambient access to the share).
 - A file already present in the remote temporary directory with an identical digest is not
   transferred again, preserving the caching behavior of repeated script executions.
+- The remote copy is **content-addressed**: a fragment of the content digest is inserted before
+  the file extension (e.g. `script.1a2b3c4d5e6f.vbs`), so same-named files with different content
+  from concurrent clients can never overwrite each other. Scripts that inspect their own file
+  name (e.g. `WScript.ScriptName`) will see the digest fragment.
 - The transfer is designed for the small script files this API is meant for; base64 over SOAP is
   not suited to bulk data.
 - `SmbTempShare` (class) and `WindowsRemoteProcessUtils.copyLocalFilesToShare(...)` were removed.
