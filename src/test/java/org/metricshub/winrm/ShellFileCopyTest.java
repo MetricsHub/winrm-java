@@ -162,6 +162,17 @@ class ShellFileCopyTest {
 				.stream()
 				.anyMatch(command -> command.contains("MOVE /Y") && command.contains("\"" + remoteFile + "\""))
 		);
+
+		// The age-based purge rides the directory-creation leg (exit code stays MKDIR's)
+		final String directoryCommand = executor
+			.getExecutedCommands()
+			.stream()
+			.filter(command -> command.contains("MKDIR"))
+			.findFirst()
+			.orElseThrow();
+		assertTrue(directoryCommand.startsWith("forfiles /P "));
+		assertTrue(directoryCommand.contains("del /f /q @path"));
+		assertTrue(directoryCommand.endsWith("\""));
 	}
 
 	@Test

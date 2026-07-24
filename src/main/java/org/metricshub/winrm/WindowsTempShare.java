@@ -204,7 +204,7 @@ public class WindowsTempShare {
 	static String buildCreateRemoteDirectoryCommand(final String remotePath) {
 		Utils.checkNonBlank(remotePath, "remotePath");
 
-		return String.format("CMD.EXE /C IF NOT EXIST \"%s\" MKDIR %s", remotePath, remotePath);
+		return String.format("CMD.EXE /C IF NOT EXIST \"%1$s\" MKDIR \"%1$s\"", remotePath);
 	}
 
 	/**

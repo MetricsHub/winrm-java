@@ -77,6 +77,15 @@ public class ShellFileCopy {
 	private static final int MAX_EXTENSION_LENGTH = 30;
 
 	/**
+	 * Transfer-directory entries not modified for this many days are purged before a transfer:
+	 * content-addressing means every revision of a changing file gets a new remote name, and
+	 * without a lifecycle the directory would grow without bound. Also reclaims staging or
+	 * base64 files orphaned by an interrupted transfer. The rare downside: a cached script
+	 * used unmodified for that long is re-uploaded once after the purge.
+	 */
+	private static final int CLEANUP_AGE_DAYS = 30;
+
+	/**
 	 * Digest algorithms in order of preference, as certutil spells them. SHA1 is only a
 	 * fallback for old certutil versions without SHA256 support; the digest is a transfer
 	 * integrity check on an already-encrypted channel, not a security control.
@@ -143,10 +152,15 @@ public class ShellFileCopy {
 			WindowsTempShare.buildShareName()
 		);
 
-		// Through the local, quota-retrying runChecked rather than WindowsTempShare.createRemoteDirectory
+		// One leg (through the local, quota-retrying runChecked): first purge entries older than
+		// CLEANUP_AGE_DAYS (best-effort, stderr suppressed — reclaims obsolete content-addressed
+		// revisions and orphaned staging files), then create the directory — last command, so the
+		// leg's exit code is the MKDIR's.
 		runChecked(
 			windowsRemoteExecutor,
-			WindowsTempShare.buildCreateRemoteDirectoryCommand(remoteDirectory),
+			String
+				.format("forfiles /P \"%s\" /D -%d /C \"cmd /c del /f /q @path\" 2>NUL & ", remoteDirectory, CLEANUP_AGE_DAYS) +
+				WindowsTempShare.buildCreateRemoteDirectoryCommand(remoteDirectory),
 			"create the remote temporary directory",
 			timeout,
 			start
