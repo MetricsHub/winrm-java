@@ -261,7 +261,9 @@ final class WsmanClient implements AutoCloseable {
 			auth.reset();
 		}
 		final byte[] body = soap.getBytes(StandardCharsets.UTF_8);
-		while (true) {
+		// Stays null while the loop retries the next authentication scheme on a fresh connection.
+		Decoded decoded = null;
+		while (decoded == null) {
 			if (!auth.isAuthenticated()) {
 				pendingAuthorization = auth.authenticate(transport);
 			}
@@ -301,8 +303,9 @@ final class WsmanClient implements AutoCloseable {
 			if (resp.status != 200 && resp.status != 500) {
 				throw new IllegalStateException("WSMan request failed: HTTP " + resp.status);
 			}
-			return new Decoded(resp.status, parse(auth.unwrap(resp)));
+			decoded = new Decoded(resp.status, parse(auth.unwrap(resp)));
 		}
+		return decoded;
 	}
 
 	// --- XML helpers --------------------------------------------------------
@@ -350,9 +353,9 @@ final class WsmanClient implements AutoCloseable {
 	 * backend does.
 	 */
 	static boolean hasEnumerationElement(final Document doc, final String localName) {
-		return (doc.getElementsByTagNameNS(WS_ENUMERATION_NS, localName).getLength() > 0
+		return doc.getElementsByTagNameNS(WS_ENUMERATION_NS, localName).getLength() > 0
 			||
-			doc.getElementsByTagNameNS(WSMAN_NS, localName).getLength() > 0);
+			doc.getElementsByTagNameNS(WSMAN_NS, localName).getLength() > 0;
 	}
 
 	/** First text content of an element matched by both namespace and local name. */
@@ -365,11 +368,11 @@ final class WsmanClient implements AutoCloseable {
 		// The Items wrapper comes in the WS-Enumeration namespace (EnumerateResponse) or the WSMan
 		// namespace (PullResponse) depending on the operation; accept both, like the CXF backend, and
 		// nothing else — a WMI property or class named "Items" must not be mistaken for the wrapper.
-		collectItems(doc.getElementsByTagNameNS(WS_ENUMERATION_NS, "Items"), rows);
-		collectItems(doc.getElementsByTagNameNS(WSMAN_NS, "Items"), rows);
+		collectRows(doc.getElementsByTagNameNS(WS_ENUMERATION_NS, "Items"), rows);
+		collectRows(doc.getElementsByTagNameNS(WSMAN_NS, "Items"), rows);
 	}
 
-	private static void collectItems(final NodeList items, final List<Map<String, String>> rows) {
+	private static void collectRows(final NodeList items, final List<Map<String, String>> rows) {
 		for (int i = 0; i < items.getLength(); i++) {
 			final NodeList instances = items.item(i).getChildNodes();
 			for (int j = 0; j < instances.getLength(); j++) {
@@ -494,7 +497,7 @@ final class WsmanClient implements AutoCloseable {
 				if (shell != null) {
 					try {
 						request(Envelopes.deleteShell(url, shell, timeoutMs));
-					} catch (final Exception ignore) {
+					} catch (final Exception ignored) {
 						// best-effort shell cleanup
 					}
 				}

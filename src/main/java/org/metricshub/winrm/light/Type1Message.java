@@ -50,8 +50,8 @@ class Type1Message extends NTLMMessage {
 	}
 
 	static int getDefaultFlags() {
-		return ( // Required flags
-		NTLMEngineUtils.FLAG_REQUEST_NTLM_V1
+		// Required flags
+		return NTLMEngineUtils.FLAG_REQUEST_NTLM_V1
 			|
 			NTLMEngineUtils.FLAG_REQUEST_NTLM2_SESSION
 			|
@@ -63,7 +63,7 @@ class Type1Message extends NTLMMessage {
 			|
 			NTLMEngineUtils.FLAG_REQUEST_56BIT_ENCRYPTION
 			|
-			NTLMEngineUtils.FLAG_REQUEST_UNICODE_ENCODING);
+			NTLMEngineUtils.FLAG_REQUEST_UNICODE_ENCODING;
 	}
 
 	/**

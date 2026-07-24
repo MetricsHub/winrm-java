@@ -41,7 +41,7 @@ final class NtlmCrypto {
 	private NtlmCrypto() {}
 
 	static byte[] encryptAndSign(final WinRMSession session, final byte[] messageBody) {
-		try (final ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+		try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
 			out.write(BOUNDARY_CR.getBytes(StandardCharsets.US_ASCII));
 			out.write("\tContent-Type: application/HTTP-SPNEGO-session-encrypted\r\n".getBytes(StandardCharsets.US_ASCII));
 			out.write(
@@ -181,19 +181,26 @@ final class NtlmCrypto {
 		void skipUntil(final String s) {
 			final byte[] expected = s.getBytes(StandardCharsets.US_ASCII);
 			int next = index;
-			outer: while (true) {
-				for (int i = 0; i < expected.length; i++) {
-					if (next + i >= bytes.length) {
-						throw new IllegalStateException("Encrypted-response framing terminated early looking for delimiter");
-					}
-					if (expected[i] != bytes[next + i]) {
-						next++;
-						continue outer;
-					}
-				}
-				index = next + expected.length;
-				return;
+			while (!matchesAt(next, expected)) {
+				next++;
 			}
+			index = next + expected.length;
+		}
+
+		/**
+		 * Whether {@code expected} occurs at the given offset, throwing when the remaining bytes are
+		 * too few to hold it — i.e. the delimiter is missing from the response altogether.
+		 */
+		private boolean matchesAt(final int offset, final byte[] expected) {
+			for (int i = 0; i < expected.length; i++) {
+				if (offset + i >= bytes.length) {
+					throw new IllegalStateException("Encrypted-response framing terminated early looking for delimiter");
+				}
+				if (expected[i] != bytes[offset + i]) {
+					return false;
+				}
+			}
+			return true;
 		}
 	}
 }

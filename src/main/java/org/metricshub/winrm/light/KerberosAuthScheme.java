@@ -120,7 +120,7 @@ final class KerberosAuthScheme implements AuthScheme {
 		if (context != null) {
 			try {
 				context.dispose();
-			} catch (final GSSException ignore) {
+			} catch (final GSSException ignored) {
 				// disposing a dead context is best-effort
 			}
 			context = null;

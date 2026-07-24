@@ -81,6 +81,7 @@ final class FakeWsmanServer implements AutoCloseable {
 	private final Deque<Scripted> script = new ArrayDeque<>();
 	private final List<String> decryptedRequests = new CopyOnWriteArrayList<>();
 	private volatile boolean closed;
+	private volatile boolean chunkedResponses;
 
 	FakeWsmanServer(final String domain, final String user, final String password) throws IOException {
 		this.expectedDomain = domain.toUpperCase(Locale.ROOT);
@@ -101,6 +102,17 @@ final class FakeWsmanServer implements AutoCloseable {
 		synchronized (script) {
 			script.addLast(new Scripted(status, soapBody));
 		}
+		return this;
+	}
+
+	/**
+	 * Serve the scripted bodies with {@code Transfer-Encoding: chunked} — several chunks, a chunk
+	 * extension, and trailer fields after the terminating chunk — instead of {@code Content-Length},
+	 * like a real WinRM host does. A client that mis-reads the framing (e.g. leaves the trailers in
+	 * the socket) desyncs the kept-alive connection and fails on the NEXT request.
+	 */
+	FakeWsmanServer withChunkedResponses() {
+		chunkedResponses = true;
 		return this;
 	}
 
@@ -334,7 +346,7 @@ final class FakeWsmanServer implements AutoCloseable {
 
 	// --- minimal HTTP -----------------------------------------------------------
 
-	private static void respond(
+	private void respond(
 		final OutputStream out,
 		final int status,
 		final String extraHeader,
@@ -342,6 +354,7 @@ final class FakeWsmanServer implements AutoCloseable {
 		final byte[] body
 	) throws IOException {
 		final byte[] payload = body == null ? new byte[0] : body;
+		final boolean chunked = chunkedResponses && payload.length > 0;
 		final StringBuilder head = new StringBuilder();
 		head.append("HTTP/1.1 ").append(status).append(' ').append(status == 200 ? "OK" : "Error").append("\r\n");
 		head.append("Server: FakeWsmanServer\r\n");
@@ -351,11 +364,37 @@ final class FakeWsmanServer implements AutoCloseable {
 		if (contentType != null) {
 			head.append("Content-Type: ").append(contentType).append("\r\n");
 		}
-		head.append("Content-Length: ").append(payload.length).append("\r\n");
+		head.append(chunked ? "Transfer-Encoding: chunked\r\n" : "Content-Length: " + payload.length + "\r\n");
 		head.append("\r\n");
 		out.write(head.toString().getBytes(StandardCharsets.ISO_8859_1));
-		out.write(payload);
+		if (chunked) {
+			writeChunkedBody(out, payload);
+		} else {
+			out.write(payload);
+		}
 		out.flush();
+	}
+
+	/** Write the payload as two chunks (the first with a chunk extension) plus a trailer field. */
+	private static void writeChunkedBody(final OutputStream out, final byte[] payload) throws IOException {
+		final int split = Math.max(1, payload.length / 2);
+		writeChunk(out, payload, 0, split, ";boundary=middle");
+		if (split < payload.length) {
+			writeChunk(out, payload, split, payload.length - split, "");
+		}
+		out.write("0\r\nX-Fake-Trailer: done\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
+	}
+
+	private static void writeChunk(
+		final OutputStream out,
+		final byte[] payload,
+		final int offset,
+		final int length,
+		final String extension
+	) throws IOException {
+		out.write((Integer.toHexString(length) + extension + "\r\n").getBytes(StandardCharsets.ISO_8859_1));
+		out.write(payload, offset, length);
+		out.write("\r\n".getBytes(StandardCharsets.ISO_8859_1));
 	}
 
 	/** One parsed HTTP request: headers (lower-cased names) and the raw body. */

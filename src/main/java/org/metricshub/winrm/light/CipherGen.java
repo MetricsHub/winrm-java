@@ -75,7 +75,6 @@ public class CipherGen {
 		final String user,
 		final String password,
 		final byte[] challenge,
-		final String target,
 		final byte[] targetInformation
 	) {
 		this.random = random;

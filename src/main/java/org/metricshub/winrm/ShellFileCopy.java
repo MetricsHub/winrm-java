@@ -637,11 +637,11 @@ public class ShellFileCopy {
 	static boolean isRetryableQuotaRejection(final Exception exception) {
 		final String message = exception.getMessage();
 
-		return (message != null
+		return message != null
 			&&
 			message.contains(FAULT_OPERATION_QUOTA)
 			&&
-			(message.contains("Command failed") || message.contains("Create shell failed")));
+			(message.contains("Command failed") || message.contains("Create shell failed"));
 	}
 
 	/**
@@ -810,6 +810,8 @@ public class ShellFileCopy {
 		}
 
 		/** Whether this remote digest matches the digest of the given local content. */
+		// PMD does not resolve the call through Optional<RemoteDigest>#get() and reports this as unused.
+		@SuppressWarnings("PMD.UnusedPrivateMethod")
 		private boolean matches(final byte[] content) {
 			return digestHex("SHA256".equals(algorithm) ? "SHA-256" : "SHA-1", content).equals(digest);
 		}

@@ -74,7 +74,7 @@ public abstract class WmiHelper {
 	 */
 	public static boolean isLocalNetworkResource(final String networkResource) {
 		Utils.checkNonNull(networkResource, "networkResource");
-		return (!networkResource.startsWith("\\\\")
+		return !networkResource.startsWith("\\\\")
 			||
 			networkResource.startsWith("\\\\localhost\\")
 			||
@@ -86,7 +86,7 @@ public abstract class WmiHelper {
 			||
 			networkResource.startsWith("\\\\0000:0000:0000:0000:0000:0000:0000:0001\\")
 			||
-			networkResource.toLowerCase().startsWith("\\\\" + Utils.getComputerName().toLowerCase() + "\\"));
+			networkResource.toLowerCase().startsWith("\\\\" + Utils.getComputerName().toLowerCase() + "\\");
 	}
 
 	/**

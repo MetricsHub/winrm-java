@@ -132,6 +132,58 @@ class WsmanProtocolTest {
 		assertTrue(requests.get(2).contains("uuid:CTX-2"), requests.get(2));
 	}
 
+	@Test
+	void wqlPagesOverChunkedResponsesWithTrailers() throws Exception {
+		// Real WinRM hosts answer with Transfer-Encoding: chunked. The client must reassemble the
+		// chunks AND consume the trailer fields that follow the terminating chunk — leftover trailer
+		// bytes desync the kept-alive NTLM connection, so the SECOND request on it is what fails.
+		server
+			.withChunkedResponses()
+			.enqueue(
+				200,
+				envelope(
+					"<wsen:EnumerateResponse xmlns:wsen=\"" +
+						WSEN +
+						"\" xmlns:wsman=\"" +
+						WSMAN +
+						"\">" +
+						"<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" +
+						"<wsman:Items>" +
+						service("Spooler", "Running") +
+						"</wsman:Items>" +
+						"</wsen:EnumerateResponse>"
+				)
+			)
+			.enqueue(
+				200,
+				envelope(
+					"<wsen:PullResponse xmlns:wsen=\"" +
+						WSEN +
+						"\" xmlns:wsman=\"" +
+						WSMAN +
+						"\">" +
+						"<wsman:Items>" +
+						service("WinRM", "Running") +
+						"</wsman:Items>" +
+						"<wsman:EndOfSequence/>" +
+						"</wsen:PullResponse>"
+				)
+			);
+
+		try (LightWinRMService service = client(PASSWORD)) {
+			final List<Map<String, Object>> rows = service.executeWql("SELECT Name,State FROM Win32_Service", TIMEOUT);
+
+			assertEquals(2, rows.size());
+			assertEquals("Spooler", rows.get(0).get("Name"));
+			assertEquals("WinRM", rows.get(1).get("Name"));
+		}
+
+		// The Pull was answered on the same connection: proof the trailers were fully drained.
+		final List<String> requests = server.decryptedRequests();
+		assertEquals(2, requests.size(), () -> String.join("\n---\n", requests));
+		assertTrue(requests.get(1).contains("uuid:CTX-1"), requests.get(1));
+	}
+
 	// --- Command shell lifecycle ------------------------------------------------
 
 	@Test

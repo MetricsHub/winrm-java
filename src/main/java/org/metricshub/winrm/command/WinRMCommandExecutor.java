@@ -101,7 +101,7 @@ public class WinRMCommandExecutor {
 			: localFileToCopyList.stream().filter(Utils::isNotBlank).collect(Collectors.toList());
 
 		try (
-			final WindowsRemoteExecutor winRMService = WinRMExecutorFactory.createInstance(
+			WindowsRemoteExecutor winRMService = WinRMExecutorFactory.createInstance(
 				winRMEndpoint,
 				timeout,
 				ticketCache,

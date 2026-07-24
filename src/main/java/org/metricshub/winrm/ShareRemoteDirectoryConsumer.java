@@ -30,5 +30,5 @@ public interface ShareRemoteDirectoryConsumer<W extends WindowsRemoteExecutor, R
 	 * @param shareName The Share Name.
 	 * @param timeout Timeout in milliseconds.
 	 */
-	public void apply(final W windowsRemoteExecutor, final R remotePath, final S shareName, final T timeout);
+	void apply(final W windowsRemoteExecutor, final R remotePath, final S shareName, final T timeout);
 }
