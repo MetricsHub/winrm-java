@@ -213,6 +213,8 @@ class WinRMCommandExecutorTest {
 			.expectCommand(" SHA1", failure)
 			.expectCommand(" echo ", success)
 			.expectCommand("certutil -f -decode", success)
+			.expectCommand("MOVE /Y", success)
+			.expectCommand("EXIT /B 1", success)
 			.expectCommand("CSCRIPT", expected);
 
 		try (final MockedStatic<WinRMExecutorFactory> mockedFactory = mockStatic(WinRMExecutorFactory.class)) {

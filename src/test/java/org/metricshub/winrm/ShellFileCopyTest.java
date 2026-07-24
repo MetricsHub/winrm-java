@@ -125,7 +125,9 @@ class ShellFileCopyTest {
 			.expectCommand(" SHA256", FAILURE, hashOutput("SHA256", sha256Hex(content)))
 			.expectCommand(" SHA1", FAILURE)
 			.expectCommand(" echo ", SUCCESS)
-			.expectCommand("certutil -f -decode", SUCCESS);
+			.expectCommand("certutil -f -decode", SUCCESS)
+			.expectCommand("MOVE /Y", SUCCESS)
+			.expectCommand("EXIT /B 1", SUCCESS);
 
 		final String remoteFile = expectedRemoteDirectory() + "\\"
 			+ ShellFileCopy.contentAddressedName("My Script.vbs", content);
@@ -143,16 +145,25 @@ class ShellFileCopyTest {
 		// The echoed base64, reassembled, is exactly the file content (multibyte UTF-8 intact)
 		assertArrayEquals(content, echoedContent(executor.getExecutedCommands()));
 
-		// The decode leg produces the target file and removes the intermediate base64 file
+		// The decode leg produces the operation-unique staging file and removes the base64 sidecar
 		final String decodeCommand = executor
 			.getExecutedCommands()
 			.stream()
 			.filter(command -> command.contains("certutil -f -decode"))
 			.findFirst()
 			.orElseThrow();
-		assertTrue(decodeCommand.contains("\"" + remoteFile + "\""));
+		assertTrue(decodeCommand.contains(remoteFile + "."));
+		assertTrue(decodeCommand.contains(".part"));
 		assertTrue(decodeCommand.contains("DEL /F /Q"));
 		assertTrue(decodeCommand.contains(".b64"));
+
+		// The verified staging file is then published as the content-addressed destination
+		assertTrue(
+			executor
+				.getExecutedCommands()
+				.stream()
+				.anyMatch(command -> command.contains("MOVE /Y") && command.contains("\"" + remoteFile + "\""))
+		);
 	}
 
 	@Test
@@ -189,7 +200,9 @@ class ShellFileCopyTest {
 			.expectCommand(" SHA256", FAILURE)
 			.expectCommand(" SHA1", FAILURE, hashOutput("SHA1", sha1Hex(content)))
 			.expectCommand(" echo ", SUCCESS)
-			.expectCommand("certutil -f -decode", SUCCESS);
+			.expectCommand("certutil -f -decode", SUCCESS)
+			.expectCommand("MOVE /Y", SUCCESS)
+			.expectCommand("EXIT /B 1", SUCCESS);
 
 		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
 			executor,
@@ -314,6 +327,16 @@ class ShellFileCopyTest {
 		assertEquals("script.ba7816bf8f01.vbs", ShellFileCopy.contentAddressedName("script.vbs", content));
 		assertEquals("no-extension.ba7816bf8f01", ShellFileCopy.contentAddressedName("no-extension", content));
 		assertEquals(".hidden.ba7816bf8f01", ShellFileCopy.contentAddressedName(".hidden", content));
+
+		// Very long names are truncated (digest keeps them unique) so that even with the
+		// ".<unique>.part.b64" staging suffixes the NTFS 255-character component limit holds
+		final String longName = ShellFileCopy.contentAddressedName("x".repeat(300) + ".vbs", content);
+		assertTrue(longName.length() <= 180);
+		assertTrue(longName.endsWith(".ba7816bf8f01.vbs"));
+
+		final String longExtension = ShellFileCopy.contentAddressedName("f." + "e".repeat(300), content);
+		assertTrue(longExtension.length() <= 180);
+		assertTrue(longExtension.contains(".ba7816bf8f01."));
 
 		// Same name, different content: different remote path (no cross-client overwrite)
 		assertFalse(

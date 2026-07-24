@@ -66,6 +66,16 @@ public class ShellFileCopy {
 	private static final int BASE64_LINE_LENGTH = 76;
 
 	/**
+	 * Maximum length of a content-addressed remote file name: leaves ample room for the
+	 * ".&lt;unique&gt;.part" and ".b64" staging suffixes under the NTFS 255-character
+	 * path-component limit.
+	 */
+	private static final int MAX_REMOTE_NAME_LENGTH = 180;
+
+	/** Maximum extension length preserved when a remote file name must be truncated. */
+	private static final int MAX_EXTENSION_LENGTH = 30;
+
+	/**
 	 * Digest algorithms in order of preference, as certutil spells them. SHA1 is only a
 	 * fallback for old certutil versions without SHA256 support; the digest is a transfer
 	 * integrity check on an already-encrypted channel, not a security control.
@@ -167,23 +177,111 @@ public class ShellFileCopy {
 			return remoteFile;
 		}
 
-		upload(windowsRemoteExecutor, content, remoteFile, timeout, start);
-
-		final Optional<RemoteDigest> uploaded = remoteDigest(windowsRemoteExecutor, remoteFile, timeout, start);
-		if (!uploaded.isPresent() || !uploaded.get().matches(content)) {
-			bestEffortDelete(windowsRemoteExecutor, timeout, start, remoteFile);
-
-			throw new WindowsRemoteException(
-				String.format(
-					"Integrity check failed after copying %s to %s on %s.",
-					localPath,
-					remoteFile,
-					windowsRemoteExecutor.getHostname()
-				)
+		if (content.length == 0) {
+			// Nothing to stage: create the empty file only if absent, and verify it
+			runChecked(
+				windowsRemoteExecutor,
+				String.format("IF NOT EXIST \"%s\" TYPE NUL >\"%s\"", remoteFile, remoteFile),
+				"create an empty file",
+				timeout,
+				start
 			);
+
+			final Optional<RemoteDigest> uploaded = remoteDigest(windowsRemoteExecutor, remoteFile, timeout, start);
+			if (!uploaded.isPresent() || !uploaded.get().matches(content)) {
+				bestEffortDelete(windowsRemoteExecutor, timeout, start, remoteFile);
+
+				throw integrityCheckFailure(localPath, remoteFile, windowsRemoteExecutor);
+			}
+
+			return remoteFile;
+		}
+
+		// Upload and verify in an operation-unique staging file, then publish: the shared,
+		// content-addressed destination is never rewritten once it exists, so a concurrent
+		// operation can never invalidate a copy another operation has already verified.
+		final String stagingFile = String.format("%s.%s.part", remoteFile, uniqueSuffix());
+		try {
+			upload(windowsRemoteExecutor, content, stagingFile, timeout, start);
+
+			final Optional<RemoteDigest> staged = remoteDigest(windowsRemoteExecutor, stagingFile, timeout, start);
+			if (!staged.isPresent() || !staged.get().matches(content)) {
+				throw integrityCheckFailure(localPath, stagingFile, windowsRemoteExecutor);
+			}
+
+			publish(windowsRemoteExecutor, stagingFile, remoteFile, timeout, start);
+		} catch (final TimeoutException | WindowsRemoteException | RuntimeException e) {
+			bestEffortDelete(windowsRemoteExecutor, timeout, start, stagingFile);
+
+			throw e;
 		}
 
 		return remoteFile;
+	}
+
+	private static WindowsRemoteException integrityCheckFailure(
+		final Path localPath,
+		final String remoteFile,
+		final WindowsRemoteExecutor windowsRemoteExecutor
+	) {
+		return new WindowsRemoteException(
+			String.format(
+				"Integrity check failed after copying %s to %s on %s.",
+				localPath,
+				remoteFile,
+				windowsRemoteExecutor.getHostname()
+			)
+		);
+	}
+
+	/**
+	 * Publish the verified staging file as the content-addressed destination without ever
+	 * replacing an existing file: if a concurrent operation already published the destination
+	 * (whose content is identical by construction of the name), the staging copy is simply
+	 * discarded. The publication is confirmed with an existence check, so the loser of a
+	 * publish race succeeds as long as the destination is there.
+	 *
+	 * @param windowsRemoteExecutor Executor connected to the remote host
+	 * @param stagingFile The verified, operation-unique staging file
+	 * @param remoteFile The content-addressed destination
+	 * @param timeout Timeout in milliseconds
+	 * @param start Operation start time in milliseconds
+	 * @throws TimeoutException To notify userName of timeout
+	 * @throws WindowsRemoteException When the destination is missing after publication
+	 */
+	private static void publish(
+		final WindowsRemoteExecutor windowsRemoteExecutor,
+		final String stagingFile,
+		final String remoteFile,
+		final long timeout,
+		final long start
+	) throws TimeoutException, WindowsRemoteException {
+		// Unchecked: in a publish race, the loser's MOVE may fail — the confirmation below decides
+		run(
+			windowsRemoteExecutor,
+			String.format(
+				"IF EXIST \"%2$s\" (DEL /F /Q \"%1$s\") ELSE (MOVE /Y \"%1$s\" \"%2$s\")",
+				stagingFile,
+				remoteFile
+			),
+			"publish the transferred file",
+			timeout,
+			start
+		);
+
+		runChecked(
+			windowsRemoteExecutor,
+			String.format("IF NOT EXIST \"%s\" EXIT /B 1", remoteFile),
+			"confirm the published file",
+			timeout,
+			start
+		);
+	}
+
+	/** Compact operation-unique suffix for staging file names. */
+	private static String uniqueSuffix() {
+		return (Long.toHexString(Utils.getCurrentTimeMillis()) + "-"
+			+ Integer.toHexString((int) (Math.random() * 0x10000)));
 	}
 
 	/**
@@ -205,23 +303,8 @@ public class ShellFileCopy {
 		final long timeout,
 		final long start
 	) throws TimeoutException, WindowsRemoteException {
-		if (content.length == 0) {
-			runChecked(
-				windowsRemoteExecutor,
-				String.format("TYPE NUL >\"%s\"", remoteFile),
-				"create an empty file",
-				timeout,
-				start
-			);
-
-			return;
-		}
-
-		final String base64File = String.format(
-			"%s.%s.b64",
-			remoteFile,
-			WindowsRemoteProcessUtils.buildNewOutputFileName()
-		);
+		// The target is already operation-unique (staging), so the base64 sidecar is too
+		final String base64File = remoteFile + ".b64";
 
 		try {
 			for (final String uploadCommand : buildUploadCommands(
@@ -424,10 +507,24 @@ public class ShellFileCopy {
 	 */
 	static String contentAddressedName(final String fileName, final byte[] content) {
 		final int dot = fileName.lastIndexOf('.');
-		final String base = dot > 0 ? fileName.substring(0, dot) : fileName;
-		final String extension = dot > 0 ? fileName.substring(dot) : Utils.EMPTY;
+		String base = dot > 0 ? fileName.substring(0, dot) : fileName;
+		String extension = dot > 0 ? fileName.substring(dot) : Utils.EMPTY;
 
-		return base + "." + digestHex("SHA-256", content).substring(0, 12) + extension;
+		final String digest = digestHex("SHA-256", content).substring(0, 12);
+
+		// Bound the name so that even with the ".<unique>.part.b64" staging suffixes the remote
+		// path component stays well below the NTFS 255-character limit. Truncating never causes
+		// collisions: the digest fragment keeps the name unique per content.
+		if (extension.length() > MAX_EXTENSION_LENGTH) {
+			extension = extension.substring(0, MAX_EXTENSION_LENGTH);
+		}
+
+		final int maxBaseLength = MAX_REMOTE_NAME_LENGTH - digest.length() - 1 - extension.length();
+		if (base.length() > maxBaseLength) {
+			base = base.substring(0, maxBaseLength);
+		}
+
+		return base + "." + digest + extension;
 	}
 
 	/**
