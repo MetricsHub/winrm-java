@@ -97,7 +97,8 @@ unaffected. Consequences:
   WSMan namespace variants. WSMan fault exceptions additionally carry the detailed `WSManFault`
   message (including the provider-level detail, e.g. WMI `WBEM_E_*` mnemonics) alongside the SOAP
   reason text.
-- Code quality: the PMD report is clean (issue #122). The cleanup is behavior-preserving — redundant
+- Code quality: the PMD report is clean and `pmd:check` now runs in `mvn verify`, so a new violation
+  of `pmd.xml` fails the build (issue #122). The cleanup is behavior-preserving — redundant
   parentheses and modifiers removed, empty catch blocks named and commented, and two loops
   restructured. The only signature change is the removal of the unused `target` parameter from the
   `CipherGen` constructor (an internal NTLM helper).

@@ -202,6 +202,31 @@
 				</executions>
 			</plugin>
 
+			<!--
+				pmd: fail the build on any violation of pmd.xml, so the PMD report stays clean.
+				Version pinned to the one the parent manages for the site report, so the gate and
+				the report always run the same PMD.
+			-->
+			<plugin>
+				<artifactId>maven-pmd-plugin</artifactId>
+				<version>3.26.0</version>
+				<executions>
+					<execution>
+						<phase>verify</phase>
+						<goals>
+							<goal>check</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<targetJdk>${maven.compiler.release}</targetJdk>
+					<rulesets>
+						<ruleset>pmd.xml</ruleset>
+					</rulesets>
+					<printFailingErrors>true</printFailingErrors>
+				</configuration>
+			</plugin>
+
 		</plugins>
 	</build>
 
