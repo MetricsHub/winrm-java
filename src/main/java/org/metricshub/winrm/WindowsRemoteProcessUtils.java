@@ -20,14 +20,8 @@ package org.metricshub.winrm;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
-import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.FileTime;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -129,88 +123,6 @@ public class WindowsRemoteProcessUtils {
 			Utils.getCurrentTimeMillis(),
 			(long) (Math.random() * 1000000)
 		);
-	}
-
-	/**
-	 * Copy the local files to the share and update the command with their path as seen in the remote system.
-	 *
-	 * @param command The command (mandatory)
-	 * @param localFiles The local files to copy list
-	 * @param uncSharePath The UNC path of the share
-	 * @param remotePath The remote path
-	 * @return The updated command.
-	 * @throws IOException If an I/O error occurs.
-	 */
-	public static String copyLocalFilesToShare(
-		final String command,
-		final List<String> localFiles,
-		final String uncSharePath,
-		final String remotePath
-	) throws IOException {
-		Utils.checkNonNull(command, "command");
-
-		if (localFiles == null || localFiles.isEmpty()) {
-			return command;
-		}
-
-		Utils.checkNonNull(uncSharePath, "uncSharePath");
-		Utils.checkNonNull(remotePath, "remotePath");
-
-		try {
-			return localFiles
-				.stream()
-				.reduce(
-					command,
-					(cmd, localFile) -> {
-						try {
-							final Path localFilePath = Paths.get(localFile);
-							final Path remoteFilePath = copyToShare(localFilePath, uncSharePath, remotePath);
-
-							return caseInsensitiveReplace(cmd, localFile, remoteFilePath.toString());
-						} catch (final IOException e) {
-							throw new RuntimeException(e);
-						}
-					}
-				);
-		} catch (final Exception e) {
-			if (e.getCause() instanceof IOException) {
-				throw (IOException) e.getCause();
-			}
-			throw e;
-		}
-	}
-
-	/**
-	 * Copy a file to the share.
-	 * If the same file is already present on the share, the copy is not performed.
-	 * The "last-modified" time is used to determine whether the file needs to be
-	 * copied or not.
-	 *
-	 * @param localFilePath The path to the file to copy
-	 * @param uncSharePath The UNC path of the share
-	 * @param remotePath The remote path
-	 * @return the path to the copied file, as seen in the remote system
-	 * @throws IOException If an I/O error occurs.
-	 */
-	static Path copyToShare(final Path localFilePath, final String uncSharePath, final String remotePath)
-		throws IOException {
-		final Path targetUncPath = Paths.get(uncSharePath, localFilePath.getFileName().toString());
-		final Path targetRemotePath = Paths.get(remotePath, localFilePath.getFileName().toString());
-
-		if (Files.exists(targetUncPath)) {
-			final FileTime sourceFileTime = Files.getLastModifiedTime(localFilePath);
-			final FileTime targetFileTime = Files.getLastModifiedTime(targetUncPath);
-			if (sourceFileTime.compareTo(targetFileTime) <= 0) {
-				// File is already present on the target, simply skip the copy operation
-				return targetRemotePath;
-			}
-		}
-
-		// Copy
-		Files.copy(localFilePath, targetUncPath, StandardCopyOption.COPY_ATTRIBUTES, StandardCopyOption.REPLACE_EXISTING);
-
-		// Return the path to the copied file, as seen in the remote system
-		return targetRemotePath;
 	}
 
 	/**

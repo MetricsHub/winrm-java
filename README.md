@@ -29,10 +29,16 @@ The Windows Remote Management (WinRM) Java Client is a library that enables to:
 
 ## The WinRM client
 
-The client is dependency-free (no Apache CXF / JAX-WS / JAXB — the only runtime dependency is
-`smbj`, used for copying files to remote shares) and immune by construction to JAXP
+The client has **zero runtime dependencies** (no Apache CXF / JAX-WS / JAXB, no BouncyCastle, no
+SLF4J — problems are reported through exceptions only) and is immune by construction to JAXP
 `ServiceLoader` conflicts (it uses the JDK-default XML factories). It supports **NTLM over HTTP
-(with message encryption) and HTTPS** and **Kerberos (SPNEGO) over HTTPS**. Over HTTPS it
+(with message encryption) and HTTPS** and **Kerberos (SPNEGO) over HTTPS**.
+
+Files listed in `localFileToCopyList` are copied to the remote host **through the WinRM channel
+itself** (chunked base64 through the command shell, decoded with `certutil` and verified with a
+digest): no SMB, no TCP port 445, no administrative share — and it works from any client OS. A
+file already present on the remote host with an identical digest is not transferred again. This
+transport is designed for small script files, not bulk data. Over HTTPS it
 validates the certificate and verifies the hostname by default (see the upgrade warning above);
 `-Dorg.metricshub.winrm.tls.insecure=true` trusts all certificates (insecure, testing only).
 Kerberos uses the ambient Kerberos configuration (`krb5.conf` / `-Djava.security.krb5.*`) unless

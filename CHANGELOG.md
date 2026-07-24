@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased] — 2.0.0
 
+### ⚠️ Breaking — SMB file copy replaced by a transfer through the WinRM channel
+
+Files passed to `WinRMCommandExecutor.execute(...)` in `localFileToCopyList` are no longer copied
+over SMB: they are transferred **through the WinRM command shell** (chunked base64, decoded with
+`certutil -decode`, verified with a `certutil -hashfile` digest against the locally computed one).
+Consequences:
+
+- **Zero runtime dependencies**: `smbj` is gone, and with it BouncyCastle (`bcprov-jdk18on`,
+  8.2 MB and a recurring source of CVE churn), `slf4j-api`, `mbassador`, and `asn-one`. The
+  standalone CLI JAR shrinks from ~9 MB to a few hundred kB, and the library no longer references
+  any logging API — problems are reported through exceptions only.
+- **No SMB requirement**: TCP port 445 does not need to be reachable, no administrative/temporary
+  share is created on the remote host (`net share` is no longer issued), and the copy now works
+  from any client OS (the previous implementation wrote through a Windows UNC path, which only
+  worked from a Windows client with ambient access to the share).
+- A file already present in the remote temporary directory with an identical digest is not
+  transferred again, preserving the caching behavior of repeated script executions.
+- The transfer is designed for the small script files this API is meant for; base64 over SOAP is
+  not suited to bulk data.
+- `SmbTempShare` (class) and `WindowsRemoteProcessUtils.copyLocalFilesToShare(...)` were removed.
+  `WindowsTempShare` is unchanged.
+
 ### ⚠️ Breaking — the CXF backend was removed
 
 Version 2.0.0 removes the legacy Apache CXF backend. The dependency-free client introduced in the
@@ -20,14 +42,18 @@ unaffected. Consequences:
     (**insecure — for testing only**).
 - Setting `-Dorg.metricshub.winrm.backend=cxf` now fails with a clear error instead of selecting
   the removed backend: remove the property (or stay on winrm-java 1.x).
-- The jar shrinks dramatically: the Apache CXF / JAX-WS / JAXB stack is gone and the only runtime
-  dependency left is `smbj` (used for copying files to remote shares).
+- The jar shrinks dramatically: the Apache CXF / JAX-WS / JAXB stack is gone, and with the SMB
+  file copy replaced by a WinRM-native transfer (see above), the library has **zero runtime
+  dependencies**.
 
 ### Removed
 
 - The Apache CXF-based backend (`WinRMService` and the `service.client` internals), the CXF /
   JAX-WS / JAXB / `jaxws-rt` dependencies, and the WSDL/XSD resources and code generation.
 - `KerberosCredentialsException` (was thrown only by CXF internals).
+- The `smbj` dependency (and its transitive BouncyCastle, SLF4J, `mbassador`, and `asn-one`),
+  `SmbTempShare`, and `WindowsRemoteProcessUtils.copyLocalFilesToShare(...)` — replaced by the
+  file transfer through the WinRM command shell.
 
 ### Added
 
