@@ -760,6 +760,7 @@ public class ShellFileCopy {
 	/**
 	 * Reject file names that cannot be transferred: names that cannot be embedded safely in a
 	 * quoted cmd.exe argument ({@code %} expands as a variable reference even between quotes,
+	 * {@code !} does too on hosts with delayed expansion enabled,
 	 * {@code "} and control characters break the quoting), and names Windows cannot create —
 	 * relevant when the client runs on an OS whose local file names may legally contain
 	 * Windows-forbidden characters ({@code < > : " / \ | ? *}), end with a dot or a space, or
@@ -772,6 +773,8 @@ public class ShellFileCopy {
 		if (fileName.isEmpty()
 			||
 			fileName.contains("%")
+			||
+			fileName.contains("!")
 			||
 			fileName.chars().anyMatch(c -> c < 0x20 || WINDOWS_FORBIDDEN_CHARACTERS.indexOf(c) >= 0)
 			||

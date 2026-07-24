@@ -364,6 +364,9 @@ class ShellFileCopyTest {
 		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("trailingdot."));
 		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("trailing space "));
 
+		// "!" expands like a variable reference on hosts with cmd delayed expansion enabled
+		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("script!TEMP!.vbs"));
+
 		// Windows reserved device names, with or without an extension, case-insensitive
 		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("CON"));
 		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("CON.ps1"));
@@ -372,7 +375,7 @@ class ShellFileCopyTest {
 		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("Lpt9"));
 
 		// Legal Windows file names pass, including cmd metacharacters neutralized by quoting
-		ShellFileCopy.checkTransferableFileName("My Script (v2) & more!.vbs");
+		ShellFileCopy.checkTransferableFileName("My Script (v2) & more.vbs");
 		ShellFileCopy.checkTransferableFileName("CONSOLE.vbs");
 		ShellFileCopy.checkTransferableFileName("COM10.txt");
 		ShellFileCopy.checkTransferableFileName("null.txt");
