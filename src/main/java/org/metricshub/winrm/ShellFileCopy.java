@@ -76,6 +76,12 @@ public class ShellFileCopy {
 	/** Maximum extension length preserved when a remote file name must be truncated. */
 	private static final int MAX_EXTENSION_LENGTH = 30;
 
+	/** The traditional Windows MAX_PATH limit (260 including the terminator) still enforced on old hosts. */
+	private static final int MAX_WINDOWS_PATH_LENGTH = 259;
+
+	/** Space reserved for the ".&lt;unique&gt;.part" and ".b64" staging suffixes (at most 26 characters). */
+	private static final int STAGING_SUFFIX_BUDGET = 30;
+
 	/**
 	 * Transfer-directory entries not modified for this many days are purged before a transfer:
 	 * content-addressing means every revision of a changing file gets a new remote name, and
@@ -205,8 +211,10 @@ public class ShellFileCopy {
 		// Content-addressed remote name: same-named files with different content get different
 		// remote paths, so concurrent clients — including clients whose computer names collide
 		// in the shared temporary directory — can never overwrite each other's payload between
-		// the digest verification and the command execution.
-		final String remoteFile = remoteDirectory + "\\" + contentAddressedName(fileName, content);
+		// the digest verification and the command execution. The name budget accounts for the
+		// actual directory prefix, so the COMPLETE staging path stays under MAX_PATH.
+		final String remoteFile = remoteDirectory + "\\"
+			+ contentAddressedName(fileName, content, maxRemoteNameLength(remoteDirectory));
 
 		// Skip the transfer if the remote host already has an identical copy. A destination that
 		// exists with a DIFFERENT digest (e.g. a cached copy corrupted or modified in place) is
@@ -664,6 +672,20 @@ public class ShellFileCopy {
 	 * @return the content-addressed remote file name
 	 */
 	static String contentAddressedName(final String fileName, final byte[] content) {
+		return contentAddressedName(fileName, content, MAX_REMOTE_NAME_LENGTH);
+	}
+
+	/**
+	 * Same as {@link #contentAddressedName(String, byte[])} with an explicit length bound,
+	 * derived by the caller from the length of the directory the file goes to, so the complete
+	 * path (staging suffixes included) honors the traditional Windows MAX_PATH limit.
+	 *
+	 * @param fileName The local file name
+	 * @param content The file content
+	 * @param maxLength Maximum length of the generated name
+	 * @return the content-addressed remote file name
+	 */
+	static String contentAddressedName(final String fileName, final byte[] content, final int maxLength) {
 		final int dot = fileName.lastIndexOf('.');
 		String base = dot > 0 ? fileName.substring(0, dot) : fileName;
 		String extension = dot > 0 ? fileName.substring(dot) : Utils.EMPTY;
@@ -677,12 +699,28 @@ public class ShellFileCopy {
 			extension = extension.substring(0, MAX_EXTENSION_LENGTH);
 		}
 
-		final int maxBaseLength = MAX_REMOTE_NAME_LENGTH - digest.length() - 1 - extension.length();
+		final int maxBaseLength = Math.max(1, maxLength - digest.length() - 1 - extension.length());
 		if (base.length() > maxBaseLength) {
 			base = base.substring(0, maxBaseLength);
 		}
 
 		return base + "." + digest + extension;
+	}
+
+	/**
+	 * Maximum length of a content-addressed name in the given remote directory: the component
+	 * bound, further reduced so that the COMPLETE path of the longest transfer artifact
+	 * (destination + "." + unique suffix + ".part" + ".b64") stays within the traditional
+	 * Windows MAX_PATH limit that old hosts still enforce.
+	 *
+	 * @param remoteDirectory The directory receiving the transferred files
+	 * @return the maximum name length
+	 */
+	static int maxRemoteNameLength(final String remoteDirectory) {
+		return Math.min(
+			MAX_REMOTE_NAME_LENGTH,
+			MAX_WINDOWS_PATH_LENGTH - remoteDirectory.length() - 1 - STAGING_SUFFIX_BUDGET
+		);
 	}
 
 	/**

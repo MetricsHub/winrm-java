@@ -24,8 +24,9 @@ Consequences:
 - The remote copy is **content-addressed**: a fragment of the content digest is inserted before
   the file extension (e.g. `script.1a2b3c4d5e6f.vbs`), so same-named files with different content
   from concurrent clients can never overwrite each other. Scripts that inspect their own file
-  name (e.g. `WScript.ScriptName`) will see the digest fragment. Overlong names are truncated to
-  stay below the NTFS path-component limit (the digest keeps them unique).
+  name (e.g. `WScript.ScriptName`) will see the digest fragment. Overlong names are truncated so
+  that both the NTFS path-component limit and the traditional Windows `MAX_PATH` (260) full-path
+  limit hold, staging suffixes included (the digest keeps truncated names unique).
 - The transfer is decoded into an operation-unique staging file, verified there, and only then
   published as the content-addressed destination. A destination that already carries the
   expected digest is never rewritten (so concurrent transfers of the same content cannot

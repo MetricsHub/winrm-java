@@ -423,6 +423,17 @@ class ShellFileCopyTest {
 		assertTrue(longExtension.length() <= 180);
 		assertTrue(longExtension.contains(".ba7816bf8f01."));
 
+		// The explicit bound derived from the directory keeps the COMPLETE staging path (with
+		// the ".<unique>.part.b64" suffixes) within the traditional Windows MAX_PATH limit,
+		// even for the longest allowed (64-character) client computer name
+		final String longDirectory = "C:\\Windows\\Temp\\SEN_ShareFor_" + "h".repeat(64) + "$";
+		final int budget = ShellFileCopy.maxRemoteNameLength(longDirectory);
+		final String bounded = ShellFileCopy.contentAddressedName("x".repeat(300) + ".vbs", content, budget);
+		assertTrue(
+			longDirectory.length() + 1 + bounded.length() + ".0123456789a-bcde.part".length() + ".b64".length() <= 259
+		);
+		assertTrue(bounded.endsWith(".ba7816bf8f01.vbs"));
+
 		// Same name, different content: different remote path (no cross-client overwrite)
 		assertFalse(
 			ShellFileCopy
