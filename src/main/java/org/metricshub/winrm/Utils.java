@@ -75,11 +75,48 @@ public class Utils {
 	 * @return the name of the local computer (or "localhost" if it can't be determined)
 	 */
 	public static String getComputerName() {
+		// Windows sets COMPUTERNAME; on other platforms fall back to HOSTNAME, then to the
+		// resolver, so distinct clients don't all end up named "localhost" (their transfer
+		// directories on the remote host are keyed by this name).
 		final String computerName = System.getenv("COMPUTERNAME");
-		if (computerName == null) {
-			return "localhost";
+		if (isNotBlank(computerName)) {
+			return sanitizeComputerName(computerName);
 		}
-		return computerName;
+
+		final String hostName = System.getenv("HOSTNAME");
+		if (isNotBlank(hostName)) {
+			return sanitizeComputerName(hostName);
+		}
+
+		try {
+			final String localName = java.net.InetAddress.getLocalHost().getHostName();
+			if (isNotBlank(localName)) {
+				return sanitizeComputerName(localName);
+			}
+		} catch (final java.net.UnknownHostException ignored) {
+			// Fall through to the default
+		}
+
+		return "localhost";
+	}
+
+	/**
+	 * Keep only characters that are safe both in a Windows directory name and in a cmd.exe
+	 * command line. Real host names only contain letters, digits, dots, and hyphens, but the
+	 * name may come from an environment variable, which is not constrained at all — and it
+	 * ends up embedded in remote shell commands (temporary directory names).
+	 *
+	 * @param name The raw computer name
+	 * @return the sanitized name, or "localhost" if nothing safe remains
+	 */
+	static String sanitizeComputerName(final String name) {
+		String sanitized = name.trim().replaceAll("[^A-Za-z0-9._-]", "-");
+
+		if (sanitized.length() > 64) {
+			sanitized = sanitized.substring(0, 64);
+		}
+
+		return sanitized.replaceAll("[-.]", EMPTY).isEmpty() ? "localhost" : sanitized;
 	}
 
 	/**

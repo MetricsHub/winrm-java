@@ -70,7 +70,7 @@ final class WsmanClient implements AutoCloseable {
 	private String shellId;
 
 	// A single NTLM connection is a serial channel: one socket, stateful RC4 ciphers with sequence
-	// numbers, and a single shellId. Concurrent callers (e.g. a cached SmbTempShare shared across
+	// numbers, and a single shellId. Concurrent callers (e.g. one executor shared across
 	// threads) MUST NOT interleave, or they read each other's responses and desync the cipher streams.
 	// Every high-level operation (wql/executeCommand) runs while holding this lock; close() only
 	// tries it, so it can still hard-close the transport to unblock an abandoned, timed-out worker.
@@ -420,7 +420,9 @@ final class WsmanClient implements AutoCloseable {
 			final Element state = (Element) states.item(i);
 			if (Envelopes.COMMAND_STATE_DONE.equals(state.getAttribute("State"))) {
 				final NodeList exit = state.getElementsByTagNameNS("*", "ExitCode");
-				return exit.getLength() > 0 ? Integer.valueOf(exit.item(0).getTextContent().trim()) : 0;
+				// Parse as long, then narrow: Windows reports HRESULT exit codes (e.g. certutil's
+				// 0x80070002) as unsigned 32-bit values that overflow Integer.parseInt.
+				return exit.getLength() > 0 ? (int) Long.parseLong(exit.item(0).getTextContent().trim()) : 0;
 			}
 		}
 		return null;

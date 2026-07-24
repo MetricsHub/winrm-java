@@ -219,6 +219,41 @@ class WsmanProtocolTest {
 	}
 
 	@Test
+	void commandExitCodeAboveIntegerMaxIsNarrowedNotRejected() throws Exception {
+		// Windows reports HRESULT exit codes (e.g. certutil's 0x80070002 for a missing file) as
+		// unsigned 32-bit values like 2147942402, which overflow Integer.parseInt: the client
+		// must narrow them to the equivalent signed int instead of failing the whole command.
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(
+						"CMD-1",
+						stream("stdout", "CertUtil: -hashfile command FAILED: 0x80070002".getBytes(StandardCharsets.UTF_8)),
+						"<rsp:CommandState CommandId=\"CMD-1\" State=\"" +
+							RSP +
+							"/CommandState/Done\"><rsp:ExitCode>2147942402</rsp:ExitCode></rsp:CommandState>"
+					)
+				)
+			)
+			.enqueue(200, envelope("<rsp:SignalResponse xmlns:rsp=\"" + RSP + "\"/>"));
+
+		try (LightWinRMService service = client(PASSWORD)) {
+			final WindowsRemoteCommandResult result = service.executeCommand(
+				"certutil -hashfile \"C:\\missing\" SHA256",
+				null,
+				StandardCharsets.UTF_8,
+				TIMEOUT
+			);
+
+			assertEquals((int) 2147942402L, result.getStatusCode());
+			assertTrue(result.getStdout().contains("0x80070002"));
+		}
+	}
+
+	@Test
 	void terminateSignalToleratesShellNotFoundFault() throws Exception {
 		// The command finished and the shell may already be gone: fault 2150858843 on the terminate
 		// Signal must not fail the (successful) command.

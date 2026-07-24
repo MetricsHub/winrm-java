@@ -1,7 +1,6 @@
 package org.metricshub.winrm.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -29,7 +28,18 @@ class StandaloneJarIT {
 			final Attributes attributes = jar.getManifest().getMainAttributes();
 			assertEquals("org.metricshub.winrm.cli.WinRmCli", attributes.getValue(Attributes.Name.MAIN_CLASS));
 			assertEquals(projectVersion, attributes.getValue("Implementation-Version"));
-			assertNotNull(jar.getEntry("com/hierynomus/smbj/SMBClient.class"));
+
+			// winrm-java is dependency-free: no third-party classes may leak into the standalone JAR
+			jar
+				.stream()
+				.map(entry -> entry.getName())
+				.filter(name -> name.endsWith(".class"))
+				.forEach(
+					name -> assertTrue(
+						name.startsWith("org/metricshub/winrm/"),
+						() -> "Unexpected third-party class in the standalone JAR: " + name
+					)
+				);
 		}
 
 		final ProcessResult help = launch(standaloneJar, "--help");

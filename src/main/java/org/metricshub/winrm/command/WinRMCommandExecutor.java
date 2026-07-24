@@ -23,9 +23,11 @@ package org.metricshub.winrm.command;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
+import org.metricshub.winrm.ShellFileCopy;
 import org.metricshub.winrm.TimeoutHelper;
 import org.metricshub.winrm.Utils;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
@@ -37,7 +39,6 @@ import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
 import org.metricshub.winrm.service.WinRMEndpoint;
 import org.metricshub.winrm.service.WinRMExecutorFactory;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
-import org.metricshub.winrm.shares.SmbTempShare;
 
 public class WinRMCommandExecutor {
 
@@ -95,60 +96,45 @@ public class WinRMCommandExecutor {
 
 		final WinRMEndpoint winRMEndpoint = new WinRMEndpoint(protocol, hostname, port, username, password, null);
 
-		if (localFileToCopyList == null || localFileToCopyList.isEmpty()) {
-			try (
-				final WindowsRemoteExecutor winRMService = WinRMExecutorFactory.createInstance(
-					winRMEndpoint,
-					timeout,
-					ticketCache,
-					authentications
-				)) {
+		final List<String> localFiles = localFileToCopyList == null
+			? Collections.emptyList()
+			: localFileToCopyList.stream().filter(Utils::isNotBlank).collect(Collectors.toList());
+
+		try (
+			final WindowsRemoteExecutor winRMService = WinRMExecutorFactory.createInstance(
+				winRMEndpoint,
+				timeout,
+				ticketCache,
+				authentications
+			)) {
+			if (localFiles.isEmpty()) {
 				final Charset charset = WindowsRemoteProcessUtils.getWindowsEncodingCharset(
 					winRMService,
 					TimeoutHelper.getRemainingTime(timeout, start, "No time left to retrieve the code set")
 				);
 
 				return winRMService.executeCommand(command, workingDirectory, charset, timeout);
-			} catch (final WqlQuerySyntaxException e) {
-				throw new IOException(e);
 			}
-		}
 
-		try (
-			final SmbTempShare smbTempShare = SmbTempShare.createInstance(
-				winRMEndpoint,
-				timeout,
-				ticketCache,
-				authentications
-			)) {
-			smbTempShare.checkConnectedFirst();
-
-			final List<String> localFiles = localFileToCopyList
-				.stream()
-				.filter(Utils::isNotBlank)
-				.collect(Collectors.toList());
-
-			// Copy the list specified list of files, and update the command accordingly
-			final String localFilesUpdatedCommand = WindowsRemoteProcessUtils.copyLocalFilesToShare(
+			// Copy the specified list of files through the command shell, and update the command accordingly
+			final String localFilesUpdatedCommand = ShellFileCopy.copyLocalFilesToRemote(
+				winRMService,
 				command,
 				localFiles,
-				smbTempShare.getUncSharePath(),
-				smbTempShare.getRemotePath()
+				TimeoutHelper.getRemainingTime(timeout, start, "No time left to copy the local files")
 			);
 
 			final Charset charset = WindowsRemoteProcessUtils.getWindowsEncodingCharset(
-				smbTempShare.getWindowsRemoteExecutor(),
+				winRMService,
 				TimeoutHelper.getRemainingTime(timeout, start, "No time left to retrieve the code set")
 			);
 
-			return smbTempShare
-				.getWindowsRemoteExecutor()
-				.executeCommand(
-					String.format("CMD.EXE /C (%s)", localFilesUpdatedCommand),
-					null,
-					charset,
-					TimeoutHelper.getRemainingTime(timeout, start, "No time left to execute command")
-				);
+			return winRMService.executeCommand(
+				String.format("CMD.EXE /C (%s)", localFilesUpdatedCommand),
+				null,
+				charset,
+				TimeoutHelper.getRemainingTime(timeout, start, "No time left to execute command")
+			);
 		} catch (final WqlQuerySyntaxException e) {
 			throw new IOException(e);
 		}
