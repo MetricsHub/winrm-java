@@ -122,12 +122,10 @@ class ShellFileCopyTest {
 		Files.write(localFile, content);
 
 		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory()
-			.expectCommand(" SHA256", FAILURE, hashOutput("SHA256", sha256Hex(content)))
-			.expectCommand(" SHA1", FAILURE)
 			.expectCommand(" echo ", SUCCESS)
-			.expectCommand("certutil -f -decode", SUCCESS)
-			.expectCommand("MOVE /Y", SUCCESS)
-			.expectCommand("EXIT /B 1", SUCCESS);
+			.expectCommand("certutil -f -decode", hashOutput("SHA256", sha256Hex(content)))
+			.expectCommand("MOVE /Y", hashOutput("SHA256", sha256Hex(content)))
+			.expectCommand("certutil -hashfile", FAILURE);
 
 		final String remoteFile = expectedRemoteDirectory() + "\\"
 			+ ShellFileCopy.contentAddressedName("My Script.vbs", content);
@@ -173,7 +171,7 @@ class ShellFileCopyTest {
 		Files.write(localFile, content);
 
 		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory()
-			.expectCommand(" SHA256", hashOutput("SHA256", sha256Hex(content)));
+			.expectCommand("certutil -hashfile", hashOutput("SHA256", sha256Hex(content)));
 
 		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
 			executor,
@@ -197,12 +195,10 @@ class ShellFileCopyTest {
 		Files.write(localFile, content);
 
 		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory()
-			.expectCommand(" SHA256", FAILURE)
-			.expectCommand(" SHA1", FAILURE, hashOutput("SHA1", sha1Hex(content)))
 			.expectCommand(" echo ", SUCCESS)
-			.expectCommand("certutil -f -decode", SUCCESS)
-			.expectCommand("MOVE /Y", SUCCESS)
-			.expectCommand("EXIT /B 1", SUCCESS);
+			.expectCommand("certutil -f -decode", hashOutput("SHA1", sha1Hex(content)))
+			.expectCommand("MOVE /Y", hashOutput("SHA1", sha1Hex(content)))
+			.expectCommand("certutil -hashfile", FAILURE);
 
 		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
 			executor,
@@ -225,10 +221,9 @@ class ShellFileCopyTest {
 		Files.write(localFile, content);
 
 		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory()
-			.expectCommand(" SHA256", FAILURE, hashOutput("SHA256", sha256Hex("tampered".getBytes(UTF_8))))
-			.expectCommand(" SHA1", FAILURE)
 			.expectCommand(" echo ", SUCCESS)
-			.expectCommand("certutil -f -decode", SUCCESS)
+			.expectCommand("certutil -f -decode", hashOutput("SHA256", sha256Hex("tampered".getBytes(UTF_8))))
+			.expectCommand("certutil -hashfile", FAILURE)
 			.expectCommand("DEL /F /Q", SUCCESS);
 
 		final WindowsRemoteException exception = assertThrows(
@@ -249,15 +244,74 @@ class ShellFileCopyTest {
 	}
 
 	@Test
+	void repairsAMismatchedCachedDestination() throws Exception {
+		final byte[] content = "good content".getBytes(UTF_8);
+		final Path localFile = tempDir.resolve("repair.vbs");
+		Files.write(localFile, content);
+
+		// The destination pre-exists with a DIFFERENT digest (e.g. a cached copy corrupted in
+		// place): the transfer must replace it, never trust it.
+		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory()
+			.expectCommand(" echo ", SUCCESS)
+			.expectCommand("certutil -f -decode", hashOutput("SHA256", sha256Hex(content)))
+			.expectCommand("MOVE /Y", hashOutput("SHA256", sha256Hex(content)))
+			.expectCommand("certutil -hashfile", hashOutput("SHA256", sha256Hex("corrupted".getBytes(UTF_8))));
+
+		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
+			executor,
+			localFile.toString(),
+			List.of(localFile.toString()),
+			TIMEOUT
+		);
+
+		assertEquals(
+			expectedRemoteDirectory() + "\\" + ShellFileCopy.contentAddressedName("repair.vbs", content),
+			updatedCommand
+		);
+
+		// The file was re-uploaded and force-published: a bare MOVE, not guarded by IF EXIST
+		assertArrayEquals(content, echoedContent(executor.getExecutedCommands()));
+		final String publishCommand = executor
+			.getExecutedCommands()
+			.stream()
+			.filter(command -> command.contains("MOVE /Y"))
+			.findFirst()
+			.orElseThrow();
+		assertTrue(publishCommand.startsWith("MOVE /Y"));
+	}
+
+	@Test
+	void failsWhenThePublishedDestinationDigestMismatches() throws Exception {
+		final byte[] content = "expected content".getBytes(UTF_8);
+		final Path localFile = tempDir.resolve("unlucky.txt");
+		Files.write(localFile, content);
+
+		// Staging verifies fine, but the published destination reports a different digest:
+		// the operation must fail rather than let the caller execute unproven bytes.
+		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory()
+			.expectCommand(" echo ", SUCCESS)
+			.expectCommand("certutil -f -decode", hashOutput("SHA256", sha256Hex(content)))
+			.expectCommand("MOVE /Y", hashOutput("SHA256", sha256Hex("something else".getBytes(UTF_8))))
+			.expectCommand("certutil -hashfile", FAILURE)
+			.expectCommand("DEL /F /Q", SUCCESS);
+
+		final WindowsRemoteException exception = assertThrows(
+			WindowsRemoteException.class,
+			() -> ShellFileCopy.copyLocalFilesToRemote(executor, localFile.toString(), List.of(localFile.toString()), TIMEOUT)
+		);
+
+		assertTrue(exception.getMessage().contains("Integrity check failed"));
+	}
+
+	@Test
 	void transfersEmptyFile() throws Exception {
 		final byte[] content = new byte[0];
 		final Path localFile = tempDir.resolve("empty.txt");
 		Files.write(localFile, content);
 
 		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory()
-			.expectCommand(" SHA256", FAILURE, hashOutput("SHA256", sha256Hex(content)))
-			.expectCommand(" SHA1", FAILURE)
-			.expectCommand("TYPE NUL", SUCCESS);
+			.expectCommand("TYPE NUL", hashOutput("SHA256", sha256Hex(content)))
+			.expectCommand("certutil -hashfile", FAILURE);
 
 		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
 			executor,
@@ -347,6 +401,103 @@ class ShellFileCopyTest {
 	}
 
 	@Test
+	void classifiesQuotaRejectionsForRetry() {
+		// Retryable: the operation was rejected at creation (shell or command), nothing ran yet
+		assertTrue(
+			ShellFileCopy.isRetryableQuotaRejection(
+				new WindowsRemoteException(
+					"Command failed: HTTP 500 (WSManFault 2150859174): The WS-Management service cannot process the request."
+				)
+			)
+		);
+		assertTrue(
+			ShellFileCopy.isRetryableQuotaRejection(
+				new WindowsRemoteException("Create shell failed: HTTP 500 (WSManFault 2150859174): quota exceeded")
+			)
+		);
+
+		// Not retryable: the command may already be running (Receive), or it's another fault
+		assertFalse(
+			ShellFileCopy.isRetryableQuotaRejection(
+				new WindowsRemoteException("Receive failed: HTTP 500 (WSManFault 2150859174): quota exceeded")
+			)
+		);
+		assertFalse(
+			ShellFileCopy.isRetryableQuotaRejection(
+				new WindowsRemoteException("Command failed: HTTP 500 (WSManFault 2150858793): timeout")
+			)
+		);
+		assertFalse(ShellFileCopy.isRetryableQuotaRejection(new WindowsRemoteException((String) null)));
+	}
+
+	@Test
+	void retriesACommandRejectedByTheOperationQuota() throws Exception {
+		final byte[] content = "quota".getBytes(UTF_8);
+		final Path localFile = tempDir.resolve("quota.bat");
+		Files.write(localFile, content);
+
+		// Delegate scripted for the cheap skip path (remote copy already identical)
+		final ScriptedWindowsRemoteExecutor delegate = executorWithTempDirectory()
+			.expectCommand("certutil -hashfile", hashOutput("SHA256", sha256Hex(content)));
+
+		// The first command attempt is rejected by the server operation quota; the retry succeeds
+		final java.util.concurrent.atomic.AtomicInteger rejections = new java.util.concurrent.atomic.AtomicInteger(1);
+		final WindowsRemoteExecutor flaky = new WindowsRemoteExecutor() {
+			@Override
+			public List<Map<String, Object>> executeWql(final String wqlQuery, final long timeout) {
+				return delegate.executeWql(wqlQuery, timeout);
+			}
+
+			@Override
+			public WindowsRemoteCommandResult executeCommand(
+				final String command,
+				final String workingDirectory,
+				final java.nio.charset.Charset charset,
+				final long timeout
+			) throws WindowsRemoteException {
+				if (command.contains("certutil -hashfile") && rejections.getAndDecrement() > 0) {
+					throw new WindowsRemoteException(
+						"Command failed: HTTP 500 (WSManFault 2150859174): maximum number of concurrent operations exceeded"
+					);
+				}
+				return delegate.executeCommand(command, workingDirectory, charset, timeout);
+			}
+
+			@Override
+			public String getHostname() {
+				return delegate.getHostname();
+			}
+
+			@Override
+			public String getUsername() {
+				return delegate.getUsername();
+			}
+
+			@Override
+			public char[] getPassword() {
+				return delegate.getPassword();
+			}
+
+			@Override
+			public void close() {
+				delegate.close();
+			}
+		};
+
+		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
+			flaky,
+			localFile.toString(),
+			List.of(localFile.toString()),
+			TIMEOUT
+		);
+
+		assertEquals(
+			expectedRemoteDirectory() + "\\" + ShellFileCopy.contentAddressedName("quota.bat", content),
+			updatedCommand
+		);
+	}
+
+	@Test
 	void parsesCertutilDigestOutputs() {
 		final String modern = "SHA256 hash of file C:\\x:\r\nAB12cd34AB12cd34AB12cd34AB12cd34AB12cd34AB12cd34AB12cd34AB12cd34\r\n"
 			+
@@ -367,5 +518,11 @@ class ShellFileCopyTest {
 
 		assertEquals(Optional.empty(), ShellFileCopy.parseCertutilDigest("no digest here", "SHA256"));
 		assertEquals(Optional.empty(), ShellFileCopy.parseCertutilDigest(null, "SHA256"));
+
+		// The combined probe hashes with every supported algorithm in a single command leg
+		assertEquals(
+			"certutil -hashfile \"C:\\f\" SHA256 & certutil -hashfile \"C:\\f\" SHA1",
+			ShellFileCopy.digestProbe("C:\\f")
+		);
 	}
 }

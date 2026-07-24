@@ -82,6 +82,19 @@ public class ShellFileCopy {
 	 */
 	private static final String[] CERTUTIL_ALGORITHMS = { "SHA256", "SHA1" };
 
+	/** WSManFault code for "the maximum number of concurrent operations for this user has been exceeded". */
+	private static final String FAULT_OPERATION_QUOTA = "2150859174";
+
+	/** How many times a transfer command is retried after an operation-quota rejection. */
+	private static final int QUOTA_RETRIES = 4;
+
+	/**
+	 * Base delay before retrying after an operation-quota rejection; each retry waits one step
+	 * longer. Measured on Windows 2008 R2 (quota 15 per user): the budget fully recovers within
+	 * 30 seconds, so the escalating delays (5+10+15+20&nbsp;s) comfortably bridge it.
+	 */
+	private static final long QUOTA_RETRY_DELAY_MILLIS = 5_000L;
+
 	/**
 	 * Copy the specified local files to a temporary directory on the remote host through the
 	 * WinRM command shell, and return the command updated so that each reference to a local
@@ -122,10 +135,12 @@ public class ShellFileCopy {
 			WindowsTempShare.buildShareName()
 		);
 
-		WindowsTempShare.createRemoteDirectory(
+		// Through the local, quota-retrying runChecked rather than WindowsTempShare.createRemoteDirectory
+		runChecked(
 			windowsRemoteExecutor,
-			remoteDirectory,
-			TimeoutHelper.getRemainingTime(timeout, start, "No time left to create the remote temporary directory"),
+			WindowsTempShare.buildCreateRemoteDirectoryCommand(remoteDirectory),
+			"create the remote temporary directory",
+			timeout,
 			start
 		);
 
@@ -171,26 +186,35 @@ public class ShellFileCopy {
 		// the digest verification and the command execution.
 		final String remoteFile = remoteDirectory + "\\" + contentAddressedName(fileName, content);
 
-		// Skip the transfer if the remote host already has an identical copy
+		// Skip the transfer if the remote host already has an identical copy. A destination that
+		// exists with a DIFFERENT digest (e.g. a cached copy corrupted or modified in place) is
+		// remembered: it must be repaired by replacement, not trusted.
 		final Optional<RemoteDigest> existing = remoteDigest(windowsRemoteExecutor, remoteFile, timeout, start);
 		if (existing.isPresent() && existing.get().matches(content)) {
 			return remoteFile;
 		}
+		final boolean mismatchedDestination = existing.isPresent();
 
 		if (content.length == 0) {
-			// Nothing to stage: create the empty file only if absent, and verify it
-			runChecked(
+			// Nothing to stage: create the empty file (truncating a mismatched pre-existing copy)
+			// and verify its digest in the same command leg
+			final WindowsRemoteCommandResult created = run(
 				windowsRemoteExecutor,
-				String.format("IF NOT EXIST \"%s\" TYPE NUL >\"%s\"", remoteFile, remoteFile),
+				(mismatchedDestination
+					? String.format("TYPE NUL >\"%s\"", remoteFile)
+					: String.format("IF NOT EXIST \"%s\" TYPE NUL >\"%s\"", remoteFile, remoteFile)) +
+					" & " +
+					digestProbe(remoteFile),
 				"create an empty file",
 				timeout,
 				start
 			);
 
-			final Optional<RemoteDigest> uploaded = remoteDigest(windowsRemoteExecutor, remoteFile, timeout, start);
-			if (!uploaded.isPresent() || !uploaded.get().matches(content)) {
-				bestEffortDelete(windowsRemoteExecutor, timeout, start, remoteFile);
-
+			// The destination itself must carry the expected digest — never return (and let the
+			// caller execute) a file whose content wasn't proven. On failure the destination is
+			// left in place: the next transfer detects the mismatch and repairs it.
+			final Optional<RemoteDigest> published = parseAnyDigest(created.getStdout());
+			if (!published.isPresent() || !published.get().matches(content)) {
 				throw integrityCheckFailure(localPath, remoteFile, windowsRemoteExecutor);
 			}
 
@@ -198,18 +222,22 @@ public class ShellFileCopy {
 		}
 
 		// Upload and verify in an operation-unique staging file, then publish: the shared,
-		// content-addressed destination is never rewritten once it exists, so a concurrent
-		// operation can never invalidate a copy another operation has already verified.
+		// content-addressed destination is never rewritten once it carries the right content,
+		// so a concurrent operation can never invalidate a copy another operation verified.
 		final String stagingFile = String.format("%s.%s.part", remoteFile, uniqueSuffix());
 		try {
-			upload(windowsRemoteExecutor, content, stagingFile, timeout, start);
+			upload(windowsRemoteExecutor, content, stagingFile, localPath, timeout, start);
 
-			final Optional<RemoteDigest> staged = remoteDigest(windowsRemoteExecutor, stagingFile, timeout, start);
-			if (!staged.isPresent() || !staged.get().matches(content)) {
-				throw integrityCheckFailure(localPath, stagingFile, windowsRemoteExecutor);
-			}
-
-			publish(windowsRemoteExecutor, stagingFile, remoteFile, timeout, start);
+			publish(
+				windowsRemoteExecutor,
+				stagingFile,
+				remoteFile,
+				mismatchedDestination,
+				content,
+				localPath,
+				timeout,
+				start
+			);
 		} catch (final TimeoutException | WindowsRemoteException | RuntimeException e) {
 			bestEffortDelete(windowsRemoteExecutor, timeout, start, stagingFile);
 
@@ -235,47 +263,58 @@ public class ShellFileCopy {
 	}
 
 	/**
-	 * Publish the verified staging file as the content-addressed destination without ever
-	 * replacing an existing file: if a concurrent operation already published the destination
-	 * (whose content is identical by construction of the name), the staging copy is simply
-	 * discarded. The publication is confirmed with an existence check, so the loser of a
-	 * publish race succeeds as long as the destination is there.
+	 * Publish the verified staging file as the content-addressed destination and verify the
+	 * destination digest in the same command leg. When the destination was seen with a
+	 * mismatched digest, it is force-replaced (repair); otherwise an existing destination is
+	 * left untouched — a concurrent operation already published the identical content — and the
+	 * staging copy is discarded. The exit code is deliberately ignored: in a publish race the
+	 * loser's {@code MOVE} may fail, and only the destination digest decides success. Never
+	 * return (and let the caller execute) a file whose content wasn't proven; on failure the
+	 * destination is left in place, so the next transfer detects the mismatch and repairs it.
 	 *
 	 * @param windowsRemoteExecutor Executor connected to the remote host
 	 * @param stagingFile The verified, operation-unique staging file
 	 * @param remoteFile The content-addressed destination
+	 * @param replaceMismatched Whether the destination pre-existed with a mismatched digest and
+	 *        must be replaced
+	 * @param content The expected file content
+	 * @param localPath The local file, for the failure message
 	 * @param timeout Timeout in milliseconds
 	 * @param start Operation start time in milliseconds
 	 * @throws TimeoutException To notify userName of timeout
-	 * @throws WindowsRemoteException When the destination is missing after publication
+	 * @throws WindowsRemoteException When the published destination does not carry the digest
+	 *         of the local file
 	 */
 	private static void publish(
 		final WindowsRemoteExecutor windowsRemoteExecutor,
 		final String stagingFile,
 		final String remoteFile,
+		final boolean replaceMismatched,
+		final byte[] content,
+		final Path localPath,
 		final long timeout,
 		final long start
 	) throws TimeoutException, WindowsRemoteException {
-		// Unchecked: in a publish race, the loser's MOVE may fail — the confirmation below decides
-		run(
+		final WindowsRemoteCommandResult result = run(
 			windowsRemoteExecutor,
-			String.format(
-				"IF EXIST \"%2$s\" (DEL /F /Q \"%1$s\") ELSE (MOVE /Y \"%1$s\" \"%2$s\")",
-				stagingFile,
-				remoteFile
-			),
+			(replaceMismatched
+				? String.format("MOVE /Y \"%s\" \"%s\"", stagingFile, remoteFile)
+				: String.format(
+					"IF EXIST \"%2$s\" (DEL /F /Q \"%1$s\") ELSE (MOVE /Y \"%1$s\" \"%2$s\")",
+					stagingFile,
+					remoteFile
+				)) +
+				" & " +
+				digestProbe(remoteFile),
 			"publish the transferred file",
 			timeout,
 			start
 		);
 
-		runChecked(
-			windowsRemoteExecutor,
-			String.format("IF NOT EXIST \"%s\" EXIT /B 1", remoteFile),
-			"confirm the published file",
-			timeout,
-			start
-		);
+		final Optional<RemoteDigest> published = parseAnyDigest(result.getStdout());
+		if (!published.isPresent() || !published.get().matches(content)) {
+			throw integrityCheckFailure(localPath, remoteFile, windowsRemoteExecutor);
+		}
 	}
 
 	/** Compact operation-unique suffix for staging file names. */
@@ -285,12 +324,15 @@ public class ShellFileCopy {
 	}
 
 	/**
-	 * Transfer the file content to the remote path: chunked base64 {@code echo} legs, then a
-	 * single {@code certutil -decode} that also removes the intermediate base64 file.
+	 * Transfer the file content to the remote (staging) path: chunked base64 {@code echo} legs,
+	 * then a single leg that decodes with {@code certutil -decode}, removes the intermediate
+	 * base64 file, and reports the digest of the decoded file — which is verified against the
+	 * local content before returning.
 	 *
 	 * @param windowsRemoteExecutor Executor connected to the remote host
 	 * @param content The file content
 	 * @param remoteFile The target path on the remote host
+	 * @param localPath The local file, for the failure message
 	 * @param timeout Timeout in milliseconds
 	 * @param start Operation start time in milliseconds
 	 * @throws TimeoutException To notify userName of timeout
@@ -300,6 +342,7 @@ public class ShellFileCopy {
 		final WindowsRemoteExecutor windowsRemoteExecutor,
 		final byte[] content,
 		final String remoteFile,
+		final Path localPath,
 		final long timeout,
 		final long start
 	) throws TimeoutException, WindowsRemoteException {
@@ -314,13 +357,30 @@ public class ShellFileCopy {
 				runChecked(windowsRemoteExecutor, uploadCommand, "upload the file content", timeout, start);
 			}
 
-			runChecked(
+			final WindowsRemoteCommandResult decoded = run(
 				windowsRemoteExecutor,
-				String.format("certutil -f -decode \"%s\" \"%s\" && DEL /F /Q \"%s\"", base64File, remoteFile, base64File),
+				String.format("certutil -f -decode \"%s\" \"%s\" && DEL /F /Q \"%s\"", base64File, remoteFile, base64File) +
+					" & " +
+					digestProbe(remoteFile),
 				"decode the transferred file",
 				timeout,
 				start
 			);
+
+			final Optional<RemoteDigest> staged = parseAnyDigest(decoded.getStdout());
+			if (!staged.isPresent()) {
+				throw new WindowsRemoteException(
+					String.format(
+						"Failed to decode the transferred file %s on %s: %s",
+						remoteFile,
+						windowsRemoteExecutor.getHostname(),
+						Utils.isNotBlank(decoded.getStderr()) ? decoded.getStderr().trim() : decoded.getStdout().trim()
+					)
+				);
+			}
+			if (!staged.get().matches(content)) {
+				throw integrityCheckFailure(localPath, remoteFile, windowsRemoteExecutor);
+			}
 		} catch (final TimeoutException | WindowsRemoteException | RuntimeException e) {
 			bestEffortDelete(windowsRemoteExecutor, timeout, start, base64File, remoteFile);
 
@@ -362,8 +422,9 @@ public class ShellFileCopy {
 	}
 
 	/**
-	 * Get the digest of a remote file with {@code certutil -hashfile}, trying each supported
-	 * algorithm in order.
+	 * Get the digest of a remote file: a single command leg runs {@code certutil -hashfile} for
+	 * every supported algorithm (one round trip; old certutil versions without SHA256 simply
+	 * fail that part), and the output is parsed by algorithm preference.
 	 *
 	 * @param windowsRemoteExecutor Executor connected to the remote host
 	 * @param remoteFile The remote file to hash
@@ -380,20 +441,51 @@ public class ShellFileCopy {
 		final long timeout,
 		final long start
 	) throws TimeoutException, WindowsRemoteException {
-		for (final String algorithm : CERTUTIL_ALGORITHMS) {
-			final WindowsRemoteCommandResult result = run(
-				windowsRemoteExecutor,
-				String.format("certutil -hashfile \"%s\" %s", remoteFile, algorithm),
-				"hash the remote file",
-				timeout,
-				start
-			);
+		final WindowsRemoteCommandResult result = run(
+			windowsRemoteExecutor,
+			digestProbe(remoteFile),
+			"hash the remote file",
+			timeout,
+			start
+		);
 
-			if (result.getStatusCode() == 0) {
-				final Optional<String> digest = parseCertutilDigest(result.getStdout(), algorithm);
-				if (digest.isPresent()) {
-					return Optional.of(new RemoteDigest(algorithm, digest.get()));
-				}
+		return parseAnyDigest(result.getStdout());
+	}
+
+	/**
+	 * Build the command that prints the digest of the given remote file with every supported
+	 * algorithm in one go. Appending the probe (with {@code " & "}) to a transfer command saves
+	 * a WinRM operation per step, which both speeds the transfer up and relieves the
+	 * server-side concurrent-operation quota that old Windows versions set very low (15 per
+	 * user on Windows 2008 R2).
+	 *
+	 * @param remoteFile The remote file to hash
+	 * @return the digest-probing command
+	 */
+	static String digestProbe(final String remoteFile) {
+		final StringBuilder probe = new StringBuilder();
+		for (final String algorithm : CERTUTIL_ALGORITHMS) {
+			if (probe.length() > 0) {
+				probe.append(" & ");
+			}
+			probe.append(String.format("certutil -hashfile \"%s\" %s", remoteFile, algorithm));
+		}
+
+		return probe.toString();
+	}
+
+	/**
+	 * Extract the first digest found in a {@code certutil -hashfile} output, trying each
+	 * supported algorithm in preference order.
+	 *
+	 * @param output The command standard output
+	 * @return the digest, or an empty Optional if none was found
+	 */
+	static Optional<RemoteDigest> parseAnyDigest(final String output) {
+		for (final String algorithm : CERTUTIL_ALGORITHMS) {
+			final Optional<String> digest = parseCertutilDigest(output, algorithm);
+			if (digest.isPresent()) {
+				return Optional.of(new RemoteDigest(algorithm, digest.get()));
 			}
 		}
 
@@ -461,12 +553,56 @@ public class ShellFileCopy {
 		final long timeout,
 		final long start
 	) throws TimeoutException, WindowsRemoteException {
-		return windowsRemoteExecutor.executeCommand(
-			command,
-			null,
-			null,
-			TimeoutHelper.getRemainingTime(timeout, start, "No time left to " + description)
-		);
+		for (int attempt = 0;; attempt++) {
+			try {
+				return windowsRemoteExecutor.executeCommand(
+					command,
+					null,
+					null,
+					TimeoutHelper.getRemainingTime(timeout, start, "No time left to " + description)
+				);
+			} catch (final WindowsRemoteException e) {
+				if (attempt >= QUOTA_RETRIES || !isRetryableQuotaRejection(e)) {
+					throw e;
+				}
+
+				// The quota rejection happened while the operation was being CREATED — before the
+				// command could run — so retrying cannot duplicate a side effect. Old Windows
+				// versions cap concurrent operations very low (15 per user on 2008 R2) and reap
+				// completed ones lazily: give the server increasingly more time to recover.
+				try {
+					Utils.sleep(
+						Math.min(
+							QUOTA_RETRY_DELAY_MILLIS * (attempt + 1),
+							TimeoutHelper.getRemainingTime(timeout, start, "No time left to retry after a quota rejection")
+						)
+					);
+				} catch (final InterruptedException interrupted) {
+					Thread.currentThread().interrupt();
+					throw e;
+				}
+			}
+		}
+	}
+
+	/**
+	 * Whether the exception is a server-side operation-quota rejection that occurred while the
+	 * operation was being created (shell creation or command start), i.e. before the command
+	 * could produce any side effect — the only situation where a retry is safe. A quota fault
+	 * on a later protocol step (e.g. Receive) means the command may already be running and is
+	 * never retried.
+	 *
+	 * @param exception The exception reported by the executor
+	 * @return whether the failed command can safely be retried
+	 */
+	static boolean isRetryableQuotaRejection(final Exception exception) {
+		final String message = exception.getMessage();
+
+		return (message != null
+			&&
+			message.contains(FAULT_OPERATION_QUOTA)
+			&&
+			(message.contains("Command failed") || message.contains("Create shell failed")));
 	}
 
 	/**

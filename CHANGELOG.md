@@ -27,11 +27,17 @@ Consequences:
   name (e.g. `WScript.ScriptName`) will see the digest fragment. Overlong names are truncated to
   stay below the NTFS path-component limit (the digest keeps them unique).
 - The transfer is decoded into an operation-unique staging file, verified there, and only then
-  published as the content-addressed destination — never replacing an existing file — so
-  concurrent transfers of the same content cannot invalidate a copy already verified by another
-  operation.
+  published as the content-addressed destination. A destination that already carries the
+  expected digest is never rewritten (so concurrent transfers of the same content cannot
+  invalidate a copy already verified by another operation), while a mismatched pre-existing
+  copy (e.g. corrupted in place) is repaired by replacement. In every case, the destination's
+  digest is verified last: the operation fails rather than execute unproven bytes.
 - The transfer is designed for the small script files this API is meant for; base64 over SOAP is
   not suited to bulk data.
+- Transfer steps are batched to minimize WinRM operations (the digest probe rides the same
+  command leg as the decode and publish steps), and a command rejected by the server-side
+  concurrent-operation quota — very low on old hosts (15 per user on Windows 2008 R2) — is
+  retried with a delay when the rejection happened before the command could run.
 - `SmbTempShare` (class) and `WindowsRemoteProcessUtils.copyLocalFilesToShare(...)` were removed.
   `WindowsTempShare` is unchanged.
 

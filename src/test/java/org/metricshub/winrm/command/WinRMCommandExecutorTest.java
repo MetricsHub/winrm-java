@@ -209,12 +209,10 @@ class WinRMCommandExecutorTest {
 			.expectWql("WindowsDirectory", List.of(Map.of("WindowsDirectory", "C:\\Windows")))
 			.expectWql("CodeSet", List.of(Map.of("CodeSet", "65001")))
 			.expectCommand("MKDIR", success)
-			.expectCommand(" SHA256", failure, remoteHash)
-			.expectCommand(" SHA1", failure)
 			.expectCommand(" echo ", success)
-			.expectCommand("certutil -f -decode", success)
-			.expectCommand("MOVE /Y", success)
-			.expectCommand("EXIT /B 1", success)
+			.expectCommand("certutil -f -decode", remoteHash)
+			.expectCommand("MOVE /Y", remoteHash)
+			.expectCommand("certutil -hashfile", failure)
 			.expectCommand("CSCRIPT", expected);
 
 		try (final MockedStatic<WinRMExecutorFactory> mockedFactory = mockStatic(WinRMExecutorFactory.class)) {
