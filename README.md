@@ -35,7 +35,85 @@ The client is dependency-free (no Apache CXF / JAX-WS / JAXB — the only runtim
 (with message encryption) and HTTPS** and **Kerberos (SPNEGO) over HTTPS**. Over HTTPS it
 validates the certificate and verifies the hostname by default (see the upgrade warning above);
 `-Dorg.metricshub.winrm.tls.insecure=true` trusts all certificates (insecure, testing only).
-Kerberos uses the ambient Kerberos configuration (`krb5.conf` / `-Djava.security.krb5.*`).
+Kerberos uses the ambient Kerberos configuration (`krb5.conf` / `-Djava.security.krb5.*`) unless
+the command-line KDC and realm options described below are used.
+
+## Command-line client
+
+Every build produces the regular library JAR and an additional self-contained executable:
+
+```text
+target/winrm-java-<version>.jar
+target/winrm-java-<version>-standalone.jar
+```
+
+Run a WQL query:
+
+```bash
+java -jar target/winrm-java-<version>-standalone.jar \
+  --hostname server.example.net --username 'DOMAIN\user' \
+  --password-file password.txt --ntlm \
+  wql 'SELECT Name,State FROM Win32_Service'
+```
+
+Run a remote command (`cmd`, `exec`, and `run` are aliases for `command`):
+
+```bash
+java -jar target/winrm-java-<version>-standalone.jar \
+  -h server.example.net -u Administrator -pf password.txt --https \
+  exec ipconfig /all
+```
+
+Use `--help` for the complete option list and `--version` for the build version. HTTP is the
+default transport and uses port 5985; `--https` uses port 5986. `-P`/`--port` overrides either
+default, and `-t`/`--timeout` sets the operation timeout in milliseconds (60,000 by default).
+
+NTLM is used when neither authentication flag is supplied. `--ntlm` and `--kerberos` are mutually
+exclusive. Kerberos requires HTTPS. By default it uses the ambient JDK Kerberos configuration. The
+CLI can instead configure the JDK for the current invocation with `--kerberos-kdc <host>`. If no
+`--kerberos-realm <realm>` is supplied, the realm is inferred by removing the KDC hostname's first
+DNS label and uppercasing the remaining suffix. For example:
+
+```bash
+java -jar target/winrm-java-<version>-standalone.jar \
+  -h server.internal.sentrysoftware.net -u 'DOMAIN\user' -pf password.txt \
+  --https --kerberos --kerberos-kdc camus.internal.sentrysoftware.net \
+  command whoami
+```
+
+This infers `INTERNAL.SENTRYSOFTWARE.NET`. The inference follows a common Active Directory DNS
+naming convention; it is not guaranteed by Kerberos. Specify `--kerberos-realm` when the realm does
+not match the KDC's DNS suffix or when the KDC is not a fully qualified DNS name. Both options are
+valid only with `--kerberos`, and `--kerberos-realm` requires `--kerberos-kdc`.
+
+HTTPS validates the certificate and hostname by default. `--https-permissive` trusts any
+certificate and hostname; it is intentionally insecure and should only be used for testing or
+isolated hosts.
+
+`-p`/`--password` is convenient for interactive use, but command-line arguments may be visible to
+other local processes. Prefer `-pf`/`--password-file` for automation. Password files are decoded as
+UTF-8. Exactly one final LF, CRLF, or CR is removed; all other bytes, including whitespace and
+earlier line endings, are part of the password. The two password options are mutually exclusive.
+If neither is supplied, the CLI securely requests the password from the interactive console without
+echoing it. Non-interactive runs must use `--password-file` (or, less securely, `--password`).
+
+WQL writes one compact UTF-8 JSON object per row to stdout
+([JSON Lines](https://jsonlines.org/)); property order follows the WinRM response. Diagnostics go
+only to stderr. Remote command stdout and stderr are forwarded to the corresponding local streams.
+The current backend buffers an operation's result; the CLI output boundary is ready to consume the
+streaming API when it becomes available.
+
+Exit behavior is stable:
+
+| Exit code | Meaning |
+| ---: | --- |
+| `0` | Successful WQL query or remote command |
+| `0`–`255` | Remote command exit code, when representable |
+| `64` | Invalid CLI usage |
+| `69` | Connection, DNS, socket, or TLS failure |
+| `70` | WinRM protocol or other remote failure |
+| `77` | Authentication failure |
+| `124` | Operation timeout |
 
 ## Build instructions
 

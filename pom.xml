@@ -121,6 +121,46 @@
 		<!-- Actual build plugins -->
 		<plugins>
 
+			<!-- standalone CLI JAR -->
+			<plugin>
+				<artifactId>maven-shade-plugin</artifactId>
+				<executions>
+					<execution>
+						<phase>package</phase>
+						<goals>
+							<goal>shade</goal>
+						</goals>
+						<configuration>
+							<shadedArtifactAttached>true</shadedArtifactAttached>
+							<shadedClassifierName>standalone</shadedClassifierName>
+							<createDependencyReducedPom>false</createDependencyReducedPom>
+							<filters>
+								<filter>
+									<artifact>*:*</artifact>
+									<excludes>
+										<exclude>META-INF/*.SF</exclude>
+										<exclude>META-INF/*.DSA</exclude>
+										<exclude>META-INF/*.RSA</exclude>
+										<exclude>module-info.class</exclude>
+										<exclude>META-INF/versions/*/module-info.class</exclude>
+									</excludes>
+								</filter>
+							</filters>
+							<transformers>
+								<transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer" />
+								<transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+									<mainClass>org.metricshub.winrm.cli.WinRmCli</mainClass>
+									<manifestEntries>
+										<Implementation-Title>${project.name}</Implementation-Title>
+										<Implementation-Version>${project.version}</Implementation-Version>
+									</manifestEntries>
+								</transformer>
+							</transformers>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+
 			<!-- formatter -->
 			<plugin>
 				<groupId>net.revelc.code.formatter</groupId>
@@ -145,6 +185,26 @@
 					<configFile>metricshub-eclipse-formatter.xml</configFile>
 					<lineEnding>KEEP</lineEnding>
 				</configuration>
+			</plugin>
+
+			<!-- launch the packaged CLI in a separate JVM -->
+			<plugin>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<executions>
+					<execution>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+						<configuration>
+							<systemPropertyVariables>
+								<projectVersion>${project.version}</projectVersion>
+								<regularJar>${project.build.directory}/${project.build.finalName}.jar</regularJar>
+								<standaloneJar>${project.build.directory}/${project.build.finalName}-standalone.jar</standaloneJar>
+							</systemPropertyVariables>
+						</configuration>
+					</execution>
+				</executions>
 			</plugin>
 
 		</plugins>
