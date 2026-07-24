@@ -79,7 +79,7 @@ public class ShellFileCopy {
 	/** The traditional Windows MAX_PATH limit (260 including the terminator) still enforced on old hosts. */
 	private static final int MAX_WINDOWS_PATH_LENGTH = 259;
 
-	/** Space reserved for the ".&lt;unique&gt;.part" and ".b64" staging suffixes (at most 26 characters). */
+	/** Space reserved for the ".&lt;unique&gt;.part" and ".b64" staging suffixes (at most 30 characters). */
 	private static final int STAGING_SUFFIX_BUDGET = 30;
 
 	/**
@@ -347,10 +347,19 @@ public class ShellFileCopy {
 		}
 	}
 
-	/** Compact operation-unique suffix for staging file names. */
+	/** Process-wide counter distinguishing concurrent staging files from the same JVM. */
+	private static final java.util.concurrent.atomic.AtomicLong STAGING_COUNTER = new java.util.concurrent.atomic.AtomicLong();
+
+	/** Random source for the cross-process part of the staging suffix (thread-safe). */
+	private static final java.security.SecureRandom STAGING_RANDOM = new java.security.SecureRandom();
+
+	/**
+	 * Compact operation-unique suffix for staging file names: a process-wide counter makes
+	 * same-JVM collisions impossible, and 64 random bits make cross-process collisions
+	 * negligible — at most 20 characters, fitting the {@link #STAGING_SUFFIX_BUDGET}.
+	 */
 	private static String uniqueSuffix() {
-		return (Long.toHexString(Utils.getCurrentTimeMillis()) + "-"
-			+ Integer.toHexString((int) (Math.random() * 0x10000)));
+		return String.format("%x-%016x", STAGING_COUNTER.incrementAndGet() & 0xFFF, STAGING_RANDOM.nextLong());
 	}
 
 	/**

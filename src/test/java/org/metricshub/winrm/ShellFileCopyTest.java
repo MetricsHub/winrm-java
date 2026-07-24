@@ -441,7 +441,7 @@ class ShellFileCopyTest {
 		final int budget = ShellFileCopy.maxRemoteNameLength(longDirectory);
 		final String bounded = ShellFileCopy.contentAddressedName("x".repeat(300) + ".vbs", content, budget);
 		assertTrue(
-			longDirectory.length() + 1 + bounded.length() + ".0123456789a-bcde.part".length() + ".b64".length() <= 259
+			longDirectory.length() + 1 + bounded.length() + ".fff-0123456789abcdef.part".length() + ".b64".length() <= 259
 		);
 		assertTrue(bounded.endsWith(".ba7816bf8f01.vbs"));
 
