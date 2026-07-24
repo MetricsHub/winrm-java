@@ -4,7 +4,7 @@ package org.metricshub.winrm.light;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2026 MetricsHub
+ * Copyright (C) 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,8 +59,7 @@ final class Envelopes {
 	// --- WQL ---------------------------------------------------------------
 
 	static String enumerateWql(final String url, final String namespace, final String wql, final long timeoutMs) {
-		return (
-			envelopeOpen(false) +
+		return (envelopeOpen(false) +
 			header(url, wmiResourceUri(namespace), ACTION_ENUMERATE, timeoutMs, null, null) +
 			"<s:Body><wsen:Enumerate>" +
 			"<wsman:OptimizeEnumeration/>" +
@@ -68,88 +67,73 @@ final class Envelopes {
 			"<wsman:Filter Dialect=\"http://schemas.microsoft.com/wbem/wsman/1/WQL\">" +
 			escape(wql) +
 			"</wsman:Filter>" +
-			"</wsen:Enumerate></s:Body></s:Envelope>"
-		);
+			"</wsen:Enumerate></s:Body></s:Envelope>");
 	}
 
 	static String pull(final String url, final String namespace, final String context, final long timeoutMs) {
-		return (
-			envelopeOpen(false) +
+		return (envelopeOpen(false) +
 			header(url, wmiResourceUri(namespace), ACTION_PULL, timeoutMs, null, null) +
 			"<s:Body><wsen:Pull>" +
 			"<wsen:EnumerationContext>" +
 			escape(context) +
 			"</wsen:EnumerationContext>" +
 			"<wsen:MaxElements>32000</wsen:MaxElements>" +
-			"</wsen:Pull></s:Body></s:Envelope>"
-		);
+			"</wsen:Pull></s:Body></s:Envelope>");
 	}
 
 	// --- Command shell -----------------------------------------------------
 
 	static String createShell(final String url, final String workingDirectory, final long timeoutMs) {
-		final String optionSet =
-			"<wsman:OptionSet>" +
+		final String optionSet = "<wsman:OptionSet>" +
 			"<wsman:Option Name=\"WINRS_NOPROFILE\">TRUE</wsman:Option>" +
 			"<wsman:Option Name=\"WINRS_CODEPAGE\">437</wsman:Option>" +
 			"</wsman:OptionSet>";
 		final String workingDir = (workingDirectory == null || workingDirectory.trim().isEmpty())
 			? ""
 			: "<rsp:WorkingDirectory>" + escape(workingDirectory) + "</rsp:WorkingDirectory>";
-		return (
-			envelopeOpen(true) +
+		return (envelopeOpen(true) +
 			header(url, SHELL_RESOURCE_URI, ACTION_CREATE, timeoutMs, null, optionSet) +
 			"<s:Body><rsp:Shell>" +
 			"<rsp:InputStreams>stdin</rsp:InputStreams>" +
 			"<rsp:OutputStreams>stdout stderr</rsp:OutputStreams>" +
 			workingDir +
-			"</rsp:Shell></s:Body></s:Envelope>"
-		);
+			"</rsp:Shell></s:Body></s:Envelope>");
 	}
 
 	static String command(final String url, final String shellId, final String commandLine, final long timeoutMs) {
-		final String optionSet =
-			"<wsman:OptionSet>" +
+		final String optionSet = "<wsman:OptionSet>" +
 			"<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">TRUE</wsman:Option>" +
 			"<wsman:Option Name=\"WINRS_SKIP_CMD_SHELL\">FALSE</wsman:Option>" +
 			"</wsman:OptionSet>";
-		return (
-			envelopeOpen(true) +
+		return (envelopeOpen(true) +
 			header(url, SHELL_RESOURCE_URI, ACTION_COMMAND, timeoutMs, shellSelector(shellId), optionSet) +
 			"<s:Body><rsp:CommandLine><rsp:Command>" +
 			escape(commandLine) +
-			"</rsp:Command></rsp:CommandLine></s:Body></s:Envelope>"
-		);
+			"</rsp:Command></rsp:CommandLine></s:Body></s:Envelope>");
 	}
 
 	static String receive(final String url, final String shellId, final String commandId, final long timeoutMs) {
-		return (
-			envelopeOpen(true) +
+		return (envelopeOpen(true) +
 			header(url, SHELL_RESOURCE_URI, ACTION_RECEIVE, timeoutMs, shellSelector(shellId), null) +
 			"<s:Body><rsp:Receive><rsp:DesiredStream CommandId=\"" +
 			escape(commandId) +
-			"\">stdout stderr</rsp:DesiredStream></rsp:Receive></s:Body></s:Envelope>"
-		);
+			"\">stdout stderr</rsp:DesiredStream></rsp:Receive></s:Body></s:Envelope>");
 	}
 
 	static String signal(final String url, final String shellId, final String commandId, final long timeoutMs) {
-		return (
-			envelopeOpen(true) +
+		return (envelopeOpen(true) +
 			header(url, SHELL_RESOURCE_URI, ACTION_SIGNAL, timeoutMs, shellSelector(shellId), null) +
 			"<s:Body><rsp:Signal CommandId=\"" +
 			escape(commandId) +
 			"\"><rsp:Code>" +
 			TERMINATE_CODE +
-			"</rsp:Code></rsp:Signal></s:Body></s:Envelope>"
-		);
+			"</rsp:Code></rsp:Signal></s:Body></s:Envelope>");
 	}
 
 	static String deleteShell(final String url, final String shellId, final long timeoutMs) {
-		return (
-			envelopeOpen(true) +
+		return (envelopeOpen(true) +
 			header(url, SHELL_RESOURCE_URI, ACTION_DELETE, timeoutMs, shellSelector(shellId), null) +
-			"<s:Body/></s:Envelope>"
-		);
+			"<s:Body/></s:Envelope>");
 	}
 
 	// --- helpers -----------------------------------------------------------
@@ -159,9 +143,8 @@ final class Envelopes {
 	}
 
 	private static String shellSelector(final String shellId) {
-		return (
-			"<wsman:SelectorSet><wsman:Selector Name=\"ShellId\">" + escape(shellId) + "</wsman:Selector></wsman:SelectorSet>"
-		);
+		return ("<wsman:SelectorSet><wsman:Selector Name=\"ShellId\">" + escape(shellId)
+			+ "</wsman:Selector></wsman:SelectorSet>");
 	}
 
 	/**
@@ -182,8 +165,7 @@ final class Envelopes {
 		final String selectorSet,
 		final String optionSet
 	) {
-		return (
-			"<s:Header>" +
+		return ("<s:Header>" +
 			"<wsa:To>" +
 			url +
 			"</wsa:To>" +
@@ -208,13 +190,11 @@ final class Envelopes {
 			"<wsman:OperationTimeout>" +
 			operationTimeout(timeoutMs) +
 			"</wsman:OperationTimeout>" +
-			"</s:Header>"
-		);
+			"</s:Header>");
 	}
 
 	private static String envelopeOpen(final boolean shell) {
-		return (
-			"<s:Envelope xmlns:s=\"" +
+		return ("<s:Envelope xmlns:s=\"" +
 			SOAP +
 			"\" xmlns:wsa=\"" +
 			WSA +
@@ -224,8 +204,7 @@ final class Envelopes {
 			WSEN +
 			"\"" +
 			(shell ? " xmlns:rsp=\"" + RSP + "\"" : "") +
-			">"
-		);
+			">");
 	}
 
 	private static String escape(final String s) {

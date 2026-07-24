@@ -4,7 +4,7 @@ package org.metricshub.winrm;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2024 Metricshub
+ * Copyright 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@ public class WindowsRemoteCommandResult {
 
 	/**
 	 * Get the stdout of the command.
+	 *
 	 * @return
 	 */
 	public String getStdout() {
@@ -57,6 +58,7 @@ public class WindowsRemoteCommandResult {
 
 	/**
 	 * Get the stderr of the command.
+	 *
 	 * @return
 	 */
 	public String getStderr() {
@@ -65,6 +67,7 @@ public class WindowsRemoteCommandResult {
 
 	/**
 	 * Get the execution time of the command in seconds.
+	 *
 	 * @return
 	 */
 	public float getExecutionTime() {
@@ -73,6 +76,7 @@ public class WindowsRemoteCommandResult {
 
 	/**
 	 * Get the return status code of the command
+	 *
 	 * @return
 	 */
 	public int getStatusCode() {

@@ -52,110 +52,104 @@ class WinRMCommandExecutorTest {
 		// check arguments
 		assertThrows(
 			IllegalArgumentException.class,
-			() ->
-				execute(
-					null,
-					HTTPS,
-					hostname,
-					5986,
-					username,
-					password,
-					workingDirectory,
-					timeout,
-					localFileToCopyList,
-					ticketCache,
-					authentications
-				)
+			() -> execute(
+				null,
+				HTTPS,
+				hostname,
+				5986,
+				username,
+				password,
+				workingDirectory,
+				timeout,
+				localFileToCopyList,
+				ticketCache,
+				authentications
+			)
 		);
 
 		assertThrows(
 			IllegalArgumentException.class,
-			() ->
-				execute(
-					command,
-					HTTPS,
-					null,
-					5986,
-					username,
-					password,
-					workingDirectory,
-					timeout,
-					localFileToCopyList,
-					ticketCache,
-					authentications
-				)
+			() -> execute(
+				command,
+				HTTPS,
+				null,
+				5986,
+				username,
+				password,
+				workingDirectory,
+				timeout,
+				localFileToCopyList,
+				ticketCache,
+				authentications
+			)
 		);
 
 		assertThrows(
 			IllegalArgumentException.class,
-			() ->
-				execute(
-					command,
-					HTTPS,
-					hostname,
-					5986,
-					null,
-					password,
-					workingDirectory,
-					timeout,
-					localFileToCopyList,
-					ticketCache,
-					authentications
-				)
+			() -> execute(
+				command,
+				HTTPS,
+				hostname,
+				5986,
+				null,
+				password,
+				workingDirectory,
+				timeout,
+				localFileToCopyList,
+				ticketCache,
+				authentications
+			)
 		);
 
 		assertThrows(
 			IllegalArgumentException.class,
-			() ->
-				execute(
-					command,
-					HTTPS,
-					hostname,
-					5986,
-					username,
-					null,
-					workingDirectory,
-					timeout,
-					localFileToCopyList,
-					ticketCache,
-					authentications
-				)
+			() -> execute(
+				command,
+				HTTPS,
+				hostname,
+				5986,
+				username,
+				null,
+				workingDirectory,
+				timeout,
+				localFileToCopyList,
+				ticketCache,
+				authentications
+			)
 		);
 
 		assertThrows(
 			IllegalArgumentException.class,
-			() ->
-				execute(
-					command,
-					HTTPS,
-					hostname,
-					5986,
-					username,
-					password,
-					workingDirectory,
-					-1L,
-					localFileToCopyList,
-					ticketCache,
-					authentications
-				)
+			() -> execute(
+				command,
+				HTTPS,
+				hostname,
+				5986,
+				username,
+				password,
+				workingDirectory,
+				-1L,
+				localFileToCopyList,
+				ticketCache,
+				authentications
+			)
 		);
 
 		assertThrows(
 			IllegalArgumentException.class,
-			() ->
-				execute(
-					command,
-					HTTPS,
-					hostname,
-					5986,
-					username,
-					password,
-					workingDirectory,
-					0L,
-					localFileToCopyList,
-					ticketCache,
-					authentications
-				)
+			() -> execute(
+				command,
+				HTTPS,
+				hostname,
+				5986,
+				username,
+				password,
+				workingDirectory,
+				0L,
+				localFileToCopyList,
+				ticketCache,
+				authentications
+			)
 		);
 
 		// case localFileToCopyList null or empty
@@ -163,8 +157,7 @@ class WinRMCommandExecutorTest {
 			final MockedStatic<WindowsRemoteProcessUtils> mockedWindowsRemoteProcessUtils = mockStatic(
 				WindowsRemoteProcessUtils.class
 			);
-			final MockedStatic<WinRMExecutorFactory> mockedFactory = mockStatic(WinRMExecutorFactory.class)
-		) {
+			final MockedStatic<WinRMExecutorFactory> mockedFactory = mockStatic(WinRMExecutorFactory.class)) {
 			mockedWindowsRemoteProcessUtils.when(() -> getWindowsEncodingCharset(any(), anyLong())).thenReturn(UTF_8);
 
 			final WindowsRemoteExecutor executor = mock(WindowsRemoteExecutor.class);
@@ -191,8 +184,7 @@ class WinRMCommandExecutorTest {
 			final MockedStatic<WindowsRemoteProcessUtils> mockedWindowsRemoteProcessUtils = mockStatic(
 				WindowsRemoteProcessUtils.class
 			);
-			final MockedStatic<SmbTempShare> mockedSmbTempShare = mockStatic(SmbTempShare.class)
-		) {
+			final MockedStatic<SmbTempShare> mockedSmbTempShare = mockStatic(SmbTempShare.class)) {
 			mockedWindowsRemoteProcessUtils.when(() -> getWindowsEncodingCharset(any(), anyLong())).thenReturn(UTF_8);
 
 			mockedWindowsRemoteProcessUtils

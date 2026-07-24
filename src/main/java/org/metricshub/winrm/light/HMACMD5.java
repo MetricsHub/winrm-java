@@ -4,7 +4,7 @@ package org.metricshub.winrm.light;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2026 MetricsHub
+ * Copyright (C) 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ import java.security.MessageDigest;
 /**
  * Cryptography support - HMACMD5 - algorithmically based on various web
  * resources by Karl Wright
- *
  * Code from io.cloudsoft.winrm4j.client.ntlm.forks.httpclient.NTLMEngineImpl
  * release 0.12.3 @link https://github.com/cloudsoft/winrm4j
  * io.cloudsoft.winrm4j.client.ntlm.forks.httpclient is a fork of apache-httpclient 4.5.13

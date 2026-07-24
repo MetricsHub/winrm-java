@@ -4,7 +4,7 @@ package org.metricshub.winrm.light;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2026 MetricsHub
+ * Copyright (C) 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,9 +32,12 @@ final class NtlmAuthScheme implements AuthScheme {
 
 	// Type 1 flags over plain HTTP: engine defaults + SIGN | SEAL | KEY_EXCH (matches
 	// NtlmMasqAsSpnegoScheme). Message sealing is what protects the SOAP over an unencrypted transport.
-	private static final int TYPE1_FLAGS_ENCRYPTED = (int) (Type1Message.getDefaultFlags() |
-		NTLMEngineUtils.NTLMSSP_NEGOTIATE_SIGN |
-		NTLMEngineUtils.NTLMSSP_NEGOTIATE_SEAL |
+	private static final int TYPE1_FLAGS_ENCRYPTED = (int) (Type1Message.getDefaultFlags()
+		|
+		NTLMEngineUtils.NTLMSSP_NEGOTIATE_SIGN
+		|
+		NTLMEngineUtils.NTLMSSP_NEGOTIATE_SEAL
+		|
 		NTLMEngineUtils.NTLMSSP_NEGOTIATE_KEY_EXCH);
 
 	// Type 1 flags over HTTPS: engine defaults only. TLS already provides confidentiality/integrity, so

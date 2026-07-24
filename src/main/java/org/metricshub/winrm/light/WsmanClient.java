@@ -4,7 +4,7 @@ package org.metricshub.winrm.light;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2026 MetricsHub
+ * Copyright (C) 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -350,10 +350,9 @@ final class WsmanClient implements AutoCloseable {
 	 * backend does.
 	 */
 	static boolean hasEnumerationElement(final Document doc, final String localName) {
-		return (
-			doc.getElementsByTagNameNS(WS_ENUMERATION_NS, localName).getLength() > 0 ||
-			doc.getElementsByTagNameNS(WSMAN_NS, localName).getLength() > 0
-		);
+		return (doc.getElementsByTagNameNS(WS_ENUMERATION_NS, localName).getLength() > 0
+			||
+			doc.getElementsByTagNameNS(WSMAN_NS, localName).getLength() > 0);
 	}
 
 	/** First text content of an element matched by both namespace and local name. */

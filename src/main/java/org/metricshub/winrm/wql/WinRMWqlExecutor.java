@@ -4,7 +4,7 @@ package org.metricshub.winrm.wql;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2026 MetricsHub
+ * Copyright (C) 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,6 +57,7 @@ public class WinRMWqlExecutor {
 
 	/**
 	 * Get the execution time of the query.
+	 *
 	 * @return
 	 */
 	public long getExecutionTime() {
@@ -65,6 +66,7 @@ public class WinRMWqlExecutor {
 
 	/**
 	 * Get the headers of the query.
+	 *
 	 * @return
 	 */
 	public List<String> getHeaders() {
@@ -73,6 +75,7 @@ public class WinRMWqlExecutor {
 
 	/**
 	 * Get the result rows of the query.
+	 *
 	 * @return
 	 */
 	public List<List<String>> getRows() {
@@ -92,9 +95,7 @@ public class WinRMWqlExecutor {
 	 * @param timeout The timeout in milliseconds (throws an IllegalArgumentException if negative or zero)
 	 * @param ticketCache The Ticket Cache path
 	 * @param authentications List of authentications. only NTLM if absent
-	 *
 	 * @return WinRMWqlExecutor result instance with header, rows and execution time.
-	 *
 	 * @throws WinRMException For any problem encountered on remote
 	 * @throws WqlQuerySyntaxException On WQL syntax errors
 	 * @throws TimeoutException To notify userName of timeout
@@ -124,8 +125,7 @@ public class WinRMWqlExecutor {
 				timeout,
 				ticketCache,
 				authentications
-			)
-		) {
+			)) {
 			final List<Map<String, Object>> result = winRMService.executeWql(wqlQuery, timeout);
 
 			// Extract the list of properties from the result, with same order as in the WQL query

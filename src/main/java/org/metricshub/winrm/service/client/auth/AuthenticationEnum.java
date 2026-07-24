@@ -4,7 +4,7 @@ package org.metricshub.winrm.service.client.auth;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2024 Metricshub
+ * Copyright 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,7 +38,6 @@ public enum AuthenticationEnum {
 	 * Get the value of the enum Name regardless the cardinality.
 	 *
 	 * @param name The enum value name
-	 *
 	 * @return An optional with the enum value if found empty otherwise
 	 */
 	public static Optional<AuthenticationEnum> getValueOf(final String name) {

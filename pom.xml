@@ -121,28 +121,30 @@
 		<!-- Actual build plugins -->
 		<plugins>
 
-			<!-- Prettier -->
+			<!-- formatter -->
 			<plugin>
-				<groupId>com.hubspot.maven.plugins</groupId>
-				<artifactId>prettier-maven-plugin</artifactId>
-				<version>0.22</version>
-				<configuration>
-					<prettierJavaVersion>2.5.0</prettierJavaVersion>
-					<ignoreConfigFile>false</ignoreConfigFile>
-					<ignoreEditorConfig>false</ignoreEditorConfig>
-					<inputGlobs>
-						<inputGlob>src/main/java/**/*.java</inputGlob>
-						<inputGlob>src/test/java/**/*.java</inputGlob>
-					</inputGlobs>
-				</configuration>
+				<groupId>net.revelc.code.formatter</groupId>
+				<artifactId>formatter-maven-plugin</artifactId>
+				<version>2.29.0</version>
 				<executions>
 					<execution>
 						<phase>validate</phase>
 						<goals>
-							<goal>check</goal>
+							<goal>validate</goal>
 						</goals>
 					</execution>
 				</executions>
+				<configuration>
+					<directories>
+						<directory>${project.build.sourceDirectory}</directory>
+						<directory>${project.build.testSourceDirectory}</directory>
+					</directories>
+					<includes>
+						<include>**/*.java</include>
+					</includes>
+					<configFile>metricshub-eclipse-formatter.xml</configFile>
+					<lineEnding>KEEP</lineEnding>
+				</configuration>
 			</plugin>
 
 		</plugins>

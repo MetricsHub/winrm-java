@@ -4,7 +4,7 @@ package org.metricshub.winrm.light;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2026 MetricsHub
+ * Copyright (C) 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,7 +66,8 @@ public class ByteArrayUtils {
 						final byte c = array[rowOffset + index];
 						builder.append((c >= 20 && c < 127) ? (char) c : '.');
 
-						if (index % 8 == 7) builder.append(" ");
+						if (index % 8 == 7)
+							builder.append(" ");
 					}
 				}
 			}

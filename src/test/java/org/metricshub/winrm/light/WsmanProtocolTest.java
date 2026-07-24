@@ -70,41 +70,41 @@ class WsmanProtocolTest {
 				200,
 				envelope(
 					"<wsen:EnumerateResponse xmlns:wsen=\"" +
-					WSEN +
-					"\" xmlns:wsman=\"" +
-					WSMAN +
-					"\">" +
-					"<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" +
-					"<wsman:Items>" +
-					service("Spooler", "Running") +
-					"</wsman:Items>" +
-					"</wsen:EnumerateResponse>"
+						WSEN +
+						"\" xmlns:wsman=\"" +
+						WSMAN +
+						"\">" +
+						"<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" +
+						"<wsman:Items>" +
+						service("Spooler", "Running") +
+						"</wsman:Items>" +
+						"</wsen:EnumerateResponse>"
 				)
 			)
 			.enqueue(
 				200,
 				envelope(
 					"<wsen:PullResponse xmlns:wsen=\"" +
-					WSEN +
-					"\">" +
-					"<wsen:EnumerationContext>uuid:CTX-2</wsen:EnumerationContext>" +
-					"<wsen:Items>" +
-					service("WinRM", "Running") +
-					service("Wecsvc", "Stopped") +
-					"</wsen:Items>" +
-					"</wsen:PullResponse>"
+						WSEN +
+						"\">" +
+						"<wsen:EnumerationContext>uuid:CTX-2</wsen:EnumerationContext>" +
+						"<wsen:Items>" +
+						service("WinRM", "Running") +
+						service("Wecsvc", "Stopped") +
+						"</wsen:Items>" +
+						"</wsen:PullResponse>"
 				)
 			)
 			.enqueue(
 				200,
 				envelope(
 					"<wsen:PullResponse xmlns:wsen=\"" +
-					WSEN +
-					"\" xmlns:wsman=\"" +
-					WSMAN +
-					"\">" +
-					"<wsman:EndOfSequence/>" +
-					"</wsen:PullResponse>"
+						WSEN +
+						"\" xmlns:wsman=\"" +
+						WSMAN +
+						"\">" +
+						"<wsman:EndOfSequence/>" +
+						"</wsen:PullResponse>"
 				)
 			);
 
@@ -290,19 +290,16 @@ class WsmanProtocolTest {
 	}
 
 	private static String service(final String name, final String state) {
-		return (
-			"<p:Win32_Service xmlns:p=\"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/Win32_Service\">" +
+		return ("<p:Win32_Service xmlns:p=\"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/Win32_Service\">" +
 			"<p:Name>" +
 			name +
 			"</p:Name><p:State>" +
 			state +
-			"</p:State></p:Win32_Service>"
-		);
+			"</p:State></p:Win32_Service>");
 	}
 
 	private static String resourceCreated(final String shellId) {
-		return (
-			"<x:ResourceCreated xmlns:x=\"http://schemas.xmlsoap.org/ws/2004/09/transfer\"" +
+		return ("<x:ResourceCreated xmlns:x=\"http://schemas.xmlsoap.org/ws/2004/09/transfer\"" +
 			" xmlns:wsa=\"http://schemas.xmlsoap.org/ws/2004/08/addressing\" xmlns:wsman=\"" +
 			WSMAN +
 			"\">" +
@@ -314,51 +311,42 @@ class WsmanProtocolTest {
 			"<wsman:SelectorSet><wsman:Selector Name=\"ShellId\">" +
 			shellId +
 			"</wsman:Selector></wsman:SelectorSet>" +
-			"</wsa:ReferenceParameters></x:ResourceCreated>"
-		);
+			"</wsa:ReferenceParameters></x:ResourceCreated>");
 	}
 
 	private static String commandResponse(final String commandId) {
-		return (
-			"<rsp:CommandResponse xmlns:rsp=\"" +
+		return ("<rsp:CommandResponse xmlns:rsp=\"" +
 			RSP +
 			"\"><rsp:CommandId>" +
 			commandId +
-			"</rsp:CommandId></rsp:CommandResponse>"
-		);
+			"</rsp:CommandId></rsp:CommandResponse>");
 	}
 
 	private static String receiveResponse(final String commandId, final String streams, final String commandState) {
-		return (
-			"<rsp:ReceiveResponse xmlns:rsp=\"" +
+		return ("<rsp:ReceiveResponse xmlns:rsp=\"" +
 			RSP +
 			"\">" +
 			streams +
 			(commandState == null ? "" : commandState) +
-			"</rsp:ReceiveResponse>"
-		);
+			"</rsp:ReceiveResponse>");
 	}
 
 	private static String stream(final String name, final byte[] content) {
-		return (
-			"<rsp:Stream Name=\"" +
+		return ("<rsp:Stream Name=\"" +
 			name +
 			"\" CommandId=\"CMD-1\">" +
 			Base64.getEncoder().encodeToString(content) +
-			"</rsp:Stream>"
-		);
+			"</rsp:Stream>");
 	}
 
 	private static String done(final String commandId, final int exitCode) {
-		return (
-			"<rsp:CommandState CommandId=\"" +
+		return ("<rsp:CommandState CommandId=\"" +
 			commandId +
 			"\" State=\"" +
 			RSP +
 			"/CommandState/Done\"><rsp:ExitCode>" +
 			exitCode +
-			"</rsp:ExitCode></rsp:CommandState>"
-		);
+			"</rsp:ExitCode></rsp:CommandState>");
 	}
 
 	private static String fault(final String code, final String reason) {
@@ -366,8 +354,7 @@ class WsmanProtocolTest {
 	}
 
 	private static String fault(final String code, final String reason, final String detailMessage) {
-		return (
-			"<s:Envelope xmlns:s=\"" +
+		return ("<s:Envelope xmlns:s=\"" +
 			SOAP_NS +
 			"\"><s:Body><s:Fault>" +
 			"<s:Code><s:Value>s:Receiver</s:Value></s:Code>" +
@@ -382,7 +369,6 @@ class WsmanProtocolTest {
 			"<f:Message>" +
 			(detailMessage == null ? reason : detailMessage) +
 			"</f:Message></f:WSManFault></s:Detail>" +
-			"</s:Fault></s:Body></s:Envelope>"
-		);
+			"</s:Fault></s:Body></s:Envelope>");
 	}
 }

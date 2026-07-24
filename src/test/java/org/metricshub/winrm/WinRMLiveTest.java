@@ -19,8 +19,8 @@ import org.metricshub.winrm.wql.WinRMWqlExecutor;
  * differential harness (the CXF baseline was removed with the backend; result parity was
  * proven and gated before removal). Disabled unless {@code winrm.live.host} is set, so it
  * never runs in CI.
- *
- * <p>One-command run against a lab host:
+ * <p>
+ * One-command run against a lab host:
  *
  * <pre>
  * mvn test -Dtest=WinRMLiveTest \
@@ -29,8 +29,8 @@ import org.metricshub.winrm.wql.WinRMWqlExecutor;
  *   -Dwinrm.live.username='MYDOMAIN\myuser' \
  *   -Dwinrm.live.password-file=/path/to/password.txt
  * </pre>
- *
- * <p>Optional properties: {@code winrm.live.port} (defaults to 5985/5986 by protocol),
+ * <p>
+ * Optional properties: {@code winrm.live.port} (defaults to 5985/5986 by protocol),
  * {@code winrm.live.password} (inline, instead of the file), {@code winrm.live.namespace},
  * {@code winrm.live.wql}, {@code winrm.live.command}, and {@code winrm.live.tls.insecure=true}
  * to skip TLS validation for hosts with self-signed certificates.
@@ -50,10 +50,9 @@ class WinRMLiveTest {
 	@BeforeAll
 	static void readConfiguration() throws Exception {
 		host = System.getProperty("winrm.live.host");
-		protocol =
-			"https".equalsIgnoreCase(System.getProperty("winrm.live.protocol", "http"))
-				? WinRMHttpProtocolEnum.HTTPS
-				: WinRMHttpProtocolEnum.HTTP;
+		protocol = "https".equalsIgnoreCase(System.getProperty("winrm.live.protocol", "http"))
+			? WinRMHttpProtocolEnum.HTTPS
+			: WinRMHttpProtocolEnum.HTTP;
 		final String portProperty = System.getProperty("winrm.live.port");
 		port = portProperty == null ? null : Integer.valueOf(portProperty);
 		username = System.getProperty("winrm.live.username");

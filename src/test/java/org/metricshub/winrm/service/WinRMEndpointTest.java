@@ -22,7 +22,7 @@ class WinRMEndpointTest {
 
 	@Test
 	void testWinRMEndpoint() {
-		//check arguments
+		// check arguments
 		assertThrows(IllegalArgumentException.class, () -> new WinRMEndpoint(HTTP, null, 5985, USER, PASSWORD, null));
 
 		assertThrows(IllegalArgumentException.class, () -> new WinRMEndpoint(HTTP, HOSTNAME, 5985, null, PASSWORD, null));
@@ -130,7 +130,7 @@ class WinRMEndpointTest {
 		assertEquals("ROOT/CIMV2", buildNamespace(EMPTY));
 		assertEquals("ROOT/CIMV2", buildNamespace(" \t\r\n "));
 
-		//case namespace provided
+		// case namespace provided
 		assertEquals("root", buildNamespace("root"));
 		assertEquals("root/cimv2", buildNamespace(" \t\r\n root \t\r\n / \t\r\n cimv2 \t\r\n "));
 		assertEquals("Srv/StandardCimv2", buildNamespace("Srv\\StandardCimv2"));

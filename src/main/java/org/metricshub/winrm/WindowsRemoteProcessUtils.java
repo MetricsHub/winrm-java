@@ -4,7 +4,7 @@ package org.metricshub.winrm;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2024 Metricshub
+ * Copyright 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,8 +51,7 @@ public class WindowsRemoteProcessUtils {
 	 *
 	 * @see <a href="https://en.wikipedia.org/wiki/Windows_code_page">Windows code page</a>
 	 * @see <a href="https://docs.oracle.com/javase/8/docs/technotes/guides/intl/encoding.doc.html">
-	 * Supported Encodings</a>
-	 *
+	 *      Supported Encodings</a>
 	 */
 	private static final Map<String, Charset> CODESET_MAP;
 
@@ -87,16 +86,12 @@ public class WindowsRemoteProcessUtils {
 	 *
 	 * @param windowsRemoteExecutor WindowsRemoteExecutor instance
 	 * @param timeout Timeout in milliseconds.
-	 *
 	 * @return the encoding charset from Win32_OperatingSystem
-	 *
 	 * @throws TimeoutException To notify userName of timeout
 	 * @throws WqlQuerySyntaxException On WQL syntax errors
 	 * @throws WindowsRemoteException For any problem encountered on remote
-	 *
 	 * @see <a href="https://docs.microsoft.com/en-us/windows/win32/cimwin32prov/win32-operatingsystem">
-	 * Win32_OperatingSystem class</a>
-	 *
+	 *      Win32_OperatingSystem class</a>
 	 */
 	public static Charset getWindowsEncodingCharset(
 		final WindowsRemoteExecutor windowsRemoteExecutor,
@@ -143,9 +138,7 @@ public class WindowsRemoteProcessUtils {
 	 * @param localFiles The local files to copy list
 	 * @param uncSharePath The UNC path of the share
 	 * @param remotePath The remote path
-	 *
 	 * @return The updated command.
-	 *
 	 * @throws IOException If an I/O error occurs.
 	 */
 	public static String copyLocalFilesToShare(
@@ -189,7 +182,6 @@ public class WindowsRemoteProcessUtils {
 
 	/**
 	 * Copy a file to the share.
-	 *
 	 * If the same file is already present on the share, the copy is not performed.
 	 * The "last-modified" time is used to determine whether the file needs to be
 	 * copied or not.
@@ -197,9 +189,7 @@ public class WindowsRemoteProcessUtils {
 	 * @param localFilePath The path to the file to copy
 	 * @param uncSharePath The UNC path of the share
 	 * @param remotePath The remote path
-	 *
 	 * @return the path to the copied file, as seen in the remote system
-	 *
 	 * @throws IOException If an I/O error occurs.
 	 */
 	static Path copyToShare(final Path localFilePath, final String uncSharePath, final String remotePath)
@@ -226,13 +216,11 @@ public class WindowsRemoteProcessUtils {
 	/**
 	 * Perform a case-insensitive replace of all occurrences of <em>target</em> string with
 	 * specified <em>replacement</em>
-	 *
 	 * Similar to <code>String.replace(target, replacement)</code>
 	 *
 	 * @param string The string to parse
 	 * @param target The string to replace
 	 * @param replacement The replacement string
-	 *
 	 * @return updated string
 	 */
 	static String caseInsensitiveReplace(final String string, final String target, final String replacement) {
