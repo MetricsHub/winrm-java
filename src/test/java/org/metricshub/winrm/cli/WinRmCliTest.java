@@ -3,22 +3,34 @@ package org.metricshub.winrm.cli;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.net.ConnectException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
+import org.metricshub.winrm.WindowsRemoteProcessUtils;
+import org.metricshub.winrm.light.LightWinRMService;
 
 class WinRmCliTest {
 
 	private static final String[] REQUIRED = { "-h", "host", "-u", "user", "-p", "secret" };
+	private static final String INSECURE_TLS_PROPERTY = "org.metricshub.winrm.tls.insecure";
 	private static final String KERBEROS_KDC_PROPERTY = "java.security.krb5.kdc";
 	private static final String KERBEROS_REALM_PROPERTY = "java.security.krb5.realm";
 
@@ -201,6 +213,46 @@ class WinRmCliTest {
 		} finally {
 			restoreProperty(KERBEROS_KDC_PROPERTY, originalKdc);
 			restoreProperty(KERBEROS_REALM_PROPERTY, originalRealm);
+		}
+	}
+
+	@Test
+	void honorsAnAmbientInsecureTlsProperty() throws Exception {
+		final String original = System.getProperty(INSECURE_TLS_PROPERTY);
+		System.setProperty(INSECURE_TLS_PROPERTY, Boolean.TRUE.toString());
+		try {
+			final Invocation invocation = invoke(
+				concat(REQUIRED, "--https", "command", "whoami"),
+				arguments -> {
+					assertEquals(Boolean.TRUE.toString(), System.getProperty(INSECURE_TLS_PROPERTY));
+					return new FakeRemote();
+				}
+			);
+
+			assertEquals(0, invocation.exitCode);
+			assertEquals(Boolean.TRUE.toString(), System.getProperty(INSECURE_TLS_PROPERTY));
+		} finally {
+			restoreProperty(INSECURE_TLS_PROPERTY, original);
+		}
+	}
+
+	@Test
+	void decodesCommandOutputUsingTheRemoteWindowsCodePage() throws Exception {
+		final LightWinRMService service = mock(LightWinRMService.class);
+		final Charset windowsCharset = Charset.forName("windows-1251");
+		final WindowsRemoteCommandResult expected = new WindowsRemoteCommandResult("Результат", "", 0.0f, 0);
+		final long timeout = 1_234L;
+		when(service.executeCommand("whoami", null, windowsCharset, timeout)).thenReturn(expected);
+
+		try (MockedStatic<WindowsRemoteProcessUtils> processUtils = mockStatic(WindowsRemoteProcessUtils.class)) {
+			processUtils
+				.when(() -> WindowsRemoteProcessUtils.getWindowsEncodingCharset(service, timeout))
+				.thenReturn(windowsCharset);
+			final WinRmCli.LightRemoteOperations remote = new WinRmCli.LightRemoteOperations(service);
+
+			assertSame(expected, remote.executeCommand("whoami", timeout));
+			processUtils.verify(() -> WindowsRemoteProcessUtils.getWindowsEncodingCharset(service, timeout));
+			verify(service).executeCommand(eq("whoami"), isNull(), eq(windowsCharset), eq(timeout));
 		}
 	}
 

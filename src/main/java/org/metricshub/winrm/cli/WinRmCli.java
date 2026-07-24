@@ -27,13 +27,14 @@ import java.net.ConnectException;
 import java.net.NoRouteToHostException;
 import java.net.SocketException;
 import java.net.UnknownHostException;
-import java.nio.charset.StandardCharsets;
+import java.nio.charset.Charset;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import javax.net.ssl.SSLException;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
+import org.metricshub.winrm.WindowsRemoteProcessUtils;
 import org.metricshub.winrm.exceptions.WindowsRemoteException;
 import org.metricshub.winrm.light.LightWinRMService;
 import org.metricshub.winrm.service.WinRMEndpoint;
@@ -41,8 +42,8 @@ import org.metricshub.winrm.service.WinRMEndpoint;
 /**
  * Command-line interface for WQL queries and remote command execution through WinRM.
  * <p>
- * WQL results are emitted as JSON Lines on standard output. Remote command output is forwarded to
- * the matching local output stream. Diagnostics are written only to standard error.
+ * WQL results are emitted as UTF-8 JSON Lines on standard output. Remote command output is
+ * forwarded to the matching local output stream. Diagnostics are written only to standard error.
  * <p>
  * NTLM is the default authentication scheme. Kerberos requires HTTPS. HTTPS validates certificates
  * and hostnames unless the explicitly insecure {@code --https-permissive} option is used.
@@ -240,8 +241,6 @@ public final class WinRmCli {
 	private static void setPermissiveHttps(final boolean permissive) {
 		if (permissive) {
 			System.setProperty(INSECURE_TLS_PROPERTY, Boolean.TRUE.toString());
-		} else {
-			System.clearProperty(INSECURE_TLS_PROPERTY);
 		}
 	}
 
@@ -305,7 +304,7 @@ public final class WinRmCli {
 			"LF, CRLF, or CR removed; every other byte is part of the UTF-8 password.\n" +
 			"Kerberos KDC/realm options set the JDK Kerberos configuration for this invocation.\n" +
 			"Without them, the ambient JDK Kerberos configuration is used.\n" +
-			"WQL rows are written to stdout as JSON Lines. Command stdout and stderr are forwarded\n" +
+			"WQL rows are written to stdout as UTF-8 JSON Lines. Command stdout and stderr are forwarded\n" +
 			"to the corresponding local streams.\n" +
 			"\n" +
 			"Exit codes: 0 success; remote command code 0..255 when available; 64 usage;\n" +
@@ -331,11 +330,11 @@ public final class WinRmCli {
 		void close();
 	}
 
-	private static final class LightRemoteOperations implements RemoteOperations {
+	static final class LightRemoteOperations implements RemoteOperations {
 
 		private final LightWinRMService service;
 
-		private LightRemoteOperations(final LightWinRMService service) {
+		LightRemoteOperations(final LightWinRMService service) {
 			this.service = service;
 		}
 
@@ -346,7 +345,8 @@ public final class WinRmCli {
 
 		@Override
 		public WindowsRemoteCommandResult executeCommand(final String command, final long timeout) throws Exception {
-			return service.executeCommand(command, null, StandardCharsets.UTF_8, timeout);
+			final Charset charset = WindowsRemoteProcessUtils.getWindowsEncodingCharset(service, timeout);
+			return service.executeCommand(command, null, charset, timeout);
 		}
 
 		@Override

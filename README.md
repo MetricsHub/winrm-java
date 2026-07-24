@@ -97,7 +97,7 @@ earlier line endings, are part of the password. The two password options are mut
 If neither is supplied, the CLI securely requests the password from the interactive console without
 echoing it. Non-interactive runs must use `--password-file` (or, less securely, `--password`).
 
-WQL writes one compact JSON object per row to stdout
+WQL writes one compact UTF-8 JSON object per row to stdout
 ([JSON Lines](https://jsonlines.org/)); property order follows the WinRM response. Diagnostics go
 only to stderr. Remote command stdout and stderr are forwarded to the corresponding local streams.
 The current backend buffers an operation's result; the CLI output boundary is ready to consume the

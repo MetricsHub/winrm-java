@@ -21,6 +21,7 @@ package org.metricshub.winrm.cli;
  */
 
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 final class JsonLinesWriter {
@@ -28,64 +29,67 @@ final class JsonLinesWriter {
 	private JsonLinesWriter() {}
 
 	static void write(final Map<String, Object> row, final PrintStream output) {
-		output.print('{');
+		final StringBuilder json = new StringBuilder();
+		json.append('{');
 		boolean first = true;
 		for (final Map.Entry<String, Object> entry : row.entrySet()) {
 			if (!first) {
-				output.print(',');
+				json.append(',');
 			}
-			writeString(entry.getKey(), output);
-			output.print(':');
+			writeString(entry.getKey(), json);
+			json.append(':');
 			final Object value = entry.getValue();
 			if (value == null) {
-				output.print("null");
+				json.append("null");
 			} else {
-				writeString(String.valueOf(value), output);
+				writeString(String.valueOf(value), json);
 			}
 			first = false;
 		}
-		output.println('}');
+		json.append('}').append(System.lineSeparator());
+		final byte[] utf8 = json.toString().getBytes(StandardCharsets.UTF_8);
+		output.write(utf8, 0, utf8.length);
 	}
 
-	private static void writeString(final String value, final PrintStream output) {
-		output.print('"');
+	private static void writeString(final String value, final StringBuilder output) {
+		output.append('"');
 		for (int index = 0; index < value.length(); index++) {
 			final char character = value.charAt(index);
 			switch (character) {
 			case '"':
-				output.print("\\\"");
+				output.append("\\\"");
 				break;
 			case '\\':
-				output.print("\\\\");
+				output.append("\\\\");
 				break;
 			case '\b':
-				output.print("\\b");
+				output.append("\\b");
 				break;
 			case '\f':
-				output.print("\\f");
+				output.append("\\f");
 				break;
 			case '\n':
-				output.print("\\n");
+				output.append("\\n");
 				break;
 			case '\r':
-				output.print("\\r");
+				output.append("\\r");
 				break;
 			case '\t':
-				output.print("\\t");
+				output.append("\\t");
 				break;
 			default:
 				writeOrdinaryCharacter(character, output);
 				break;
 			}
 		}
-		output.print('"');
+		output.append('"');
 	}
 
-	private static void writeOrdinaryCharacter(final char character, final PrintStream output) {
+	private static void writeOrdinaryCharacter(final char character, final StringBuilder output) {
 		if (character < 0x20) {
-			output.printf("\\u%04x", (int) character);
+			output.append(String.format("\\u%04x", (int) character));
 		} else {
-			output.print(character);
+			output.append(character);
 		}
 	}
 }
