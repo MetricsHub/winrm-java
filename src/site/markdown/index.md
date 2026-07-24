@@ -12,9 +12,7 @@ The Windows Remote Management (WinRM) Java Client is a library that enables to:
 > **WinRM-over-HTTPS connections to hosts with self-signed or untrusted certificates will fail**
 > during the TLS handshake. To restore connectivity, either install the certificate into a Java
 > trust store or set `-Dorg.metricshub.winrm.tls.insecure=true` (insecure — for testing only).
-> The client supports NTLM over HTTP/HTTPS and Kerberos (SPNEGO) over HTTPS. Setting
-> `-Dorg.metricshub.winrm.backend=cxf` now fails with a clear error; remove the property (or stay
-> on winrm-java 1.x).
+> The client supports NTLM over HTTP/HTTPS and Kerberos (SPNEGO) over HTTPS.
 
 # How to run the WinRM Client inside Java
 

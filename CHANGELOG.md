@@ -56,8 +56,6 @@ unaffected. Consequences:
     (`-Djavax.net.ssl.trustStore=...`); or
   - disable TLS validation with `-Dorg.metricshub.winrm.tls.insecure=true`
     (**insecure — for testing only**).
-- Setting `-Dorg.metricshub.winrm.backend=cxf` now fails with a clear error instead of selecting
-  the removed backend: remove the property (or stay on winrm-java 1.x).
 - The jar shrinks dramatically: the Apache CXF / JAX-WS / JAXB stack is gone, and with the SMB
   file copy replaced by a WinRM-native transfer (see above), the library has **zero runtime
   dependencies**.
