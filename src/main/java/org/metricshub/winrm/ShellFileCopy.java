@@ -695,16 +695,29 @@ public class ShellFileCopy {
 		// Bound the name so that even with the ".<unique>.part.b64" staging suffixes the remote
 		// path component stays well below the NTFS 255-character limit. Truncating never causes
 		// collisions: the digest fragment keeps the name unique per content.
-		if (extension.length() > MAX_EXTENSION_LENGTH) {
-			extension = extension.substring(0, MAX_EXTENSION_LENGTH);
-		}
+		extension = truncateAtCodePoint(extension, MAX_EXTENSION_LENGTH);
 
 		final int maxBaseLength = Math.max(1, maxLength - digest.length() - 1 - extension.length());
-		if (base.length() > maxBaseLength) {
-			base = base.substring(0, maxBaseLength);
-		}
+		base = truncateAtCodePoint(base, maxBaseLength);
 
 		return base + "." + digest + extension;
+	}
+
+	/**
+	 * Truncate a string on a Unicode code-point boundary: cutting between the two UTF-16 chars
+	 * of a surrogate pair (e.g. in the middle of an emoji) would leave a malformed character
+	 * that turns into {@code ?} — illegal, and a wildcard — when the command is UTF-8 encoded.
+	 *
+	 * @param value The string to truncate
+	 * @param maxLength Maximum length, in UTF-16 chars
+	 * @return the truncated string
+	 */
+	private static String truncateAtCodePoint(final String value, final int maxLength) {
+		if (value.length() <= maxLength) {
+			return value;
+		}
+
+		return value.substring(0, Character.isHighSurrogate(value.charAt(maxLength - 1)) ? maxLength - 1 : maxLength);
 	}
 
 	/**

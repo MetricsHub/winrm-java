@@ -423,6 +423,14 @@ class ShellFileCopyTest {
 		assertTrue(longExtension.length() <= 180);
 		assertTrue(longExtension.contains(".ba7816bf8f01."));
 
+		// Truncation never splits a surrogate pair: a malformed half would become "?" (illegal
+		// and a wildcard in Windows paths) once the command is UTF-8 encoded
+		final String emojiExtension = ShellFileCopy.contentAddressedName("f." + "😀".repeat(15), content);
+		assertEquals(emojiExtension, new String(emojiExtension.getBytes(UTF_8), UTF_8));
+		final String emojiBase = ShellFileCopy.contentAddressedName("😀".repeat(300) + ".vbs", content);
+		assertEquals(emojiBase, new String(emojiBase.getBytes(UTF_8), UTF_8));
+		assertTrue(emojiBase.length() <= 180);
+
 		// The explicit bound derived from the directory keeps the COMPLETE staging path (with
 		// the ".<unique>.part.b64" suffixes) within the traditional Windows MAX_PATH limit,
 		// even for the longest allowed (64-character) client computer name
