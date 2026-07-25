@@ -1,36 +1,71 @@
-<?xml version="1.0" encoding="ISO-8859-1"?>
-<project name="${project.name}">
+<?xml version="1.0" encoding="UTF-8"?>
+<site name="WinRM Java Client" xmlns="http://maven.apache.org/SITE/2.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/SITE/2.0.0 https://maven.apache.org/xsd/site-2.0.0.xsd">
 
 	<skin>
 		<groupId>org.sentrysoftware.maven</groupId>
 		<artifactId>sentry-maven-skin</artifactId>
-		<version>6.4.01</version>
+		<version>8.0.00</version>
 	</skin>
 
 	<custom>
 		<noDefaultLinks>true</noDefaultLinks>
-		<keywords>winrm</keywords>
+		<keywords>winrm, wql, wmi, windows, ntlm, kerberos, java, remote management</keywords>
+		<social>
+			<custom>
+				<title>WinRM Java Client on GitHub</title>
+				<href>https://github.com/metricshub/winrm-java</href>
+				<icon>fa-brands fa-github</icon>
+			</custom>
+		</social>
+		<additionalLinks>
+			<link>
+				<name>Issue Tracker</name>
+				<href>https://github.com/metricshub/winrm-java/issues</href>
+			</link>
+			<link>
+				<name>Licenses</name>
+				<href>licenses.html</href>
+			</link>
+			<link>
+				<name>Releases</name>
+				<href>https://github.com/metricshub/winrm-java/releases</href>
+			</link>
+		</additionalLinks>
 	</custom>
 
-	<bannerLeft>
-		<src>images/metricshub-logo-only.png</src>
-		<href>https://metricshub.org</href>
+	<bannerLeft href="https://metricshub.org">
+		<image src="images/metricshub-logo-only.png" alt="MetricsHub" />
 	</bannerLeft>
 
 	<body>
 
 		<links>
-			<item name="Fork on GitHub" href="${project.scm.url}" />
+			<item name="GitHub" href="https://github.com/metricshub/winrm-java" />
+			<item name="Releases" href="https://github.com/metricshub/winrm-java/releases/latest" />
+			<item name="Issue Tracker" href="https://github.com/metricshub/winrm-java/issues" />
 			<item name="MetricsHub&reg;" href="https://metricshub.com" />
-			
 		</links>
 
-		<menu name="User Documentation">
-			<item name="Getting Started" href="index.html" />
-			<item name="Javadoc" href="apidocs/index.html" />
+		<menu name="Getting Started">
+			<item name="Overview" href="index.html" />
+			<item name="Installation" href="installation.html" />
+		</menu>
+
+		<menu name="Usage">
+			<item name="WQL Queries" href="wql.html" />
+			<item name="Remote Commands" href="commands.html" />
+			<item name="Authentication" href="authentication.html" />
+			<item name="TLS / HTTPS" href="tls.html" />
+			<item name="Timeouts and Errors" href="timeouts-and-errors.html" />
+		</menu>
+
+		<menu name="Reference">
+			<item name="Migrating from 1.x" href="migrating-from-1x.html" />
+			<item name="Javadoc (API)" href="apidocs/index.html" />
 		</menu>
 
 		<menu ref="reports" />
 	</body>
 
-</project>
+</site>

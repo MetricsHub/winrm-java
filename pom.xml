@@ -77,7 +77,8 @@
 
 		<!-- Reproducible Build -->
 		<!-- See https://maven.apache.org/guides/mini/guide-reproducible-builds.html -->
-		<project.build.outputTimestamp>2025-04-03T12:15:29Z</project.build.outputTimestamp>
+		<!-- Also drives the Maven site copyright year and "Documentation as of" date; bump at release. -->
+		<project.build.outputTimestamp>2026-07-24T00:00:00Z</project.build.outputTimestamp>
 	</properties>
 
 	<dependencyManagement>
@@ -227,11 +228,81 @@
 				</configuration>
 			</plugin>
 
+			<!-- site: pin a recent maven-site-plugin (the version inherited from oss-parent is too old
+			     for the Doxia 2.0 report plugins and raises a project-info-reports LinkageError) and add
+			     the Sentry skin's companion maven-skin-tools -->
+			<plugin>
+				<artifactId>maven-site-plugin</artifactId>
+				<version>4.0.0-M16</version>
+				<dependencies>
+					<dependency>
+						<groupId>org.sentrysoftware.maven</groupId>
+						<artifactId>maven-skin-tools</artifactId>
+						<version>1.8.00</version>
+					</dependency>
+				</dependencies>
+			</plugin>
+
 		</plugins>
 	</build>
 
 	<reporting>
 		<plugins>
+
+			<!-- Most report plugins (checkstyle, spotbugs, project-info-reports, jxr, javadoc) are
+			     inherited from the oss-parent POM. The project-info-reports, jxr, javadoc and
+			     surefire-report plugins below are declared (or their versions pinned) so the site
+			     builds cleanly on the Doxia 2.0 stack that maven-site-plugin 4.0.0-M16 brings in, and
+			     so the reports menu is fully populated. -->
+
+			<!-- Default project-info-reports (Summary, Dependencies, SCM, Licenses, Team, ...) -->
+			<plugin>
+				<artifactId>maven-project-info-reports-plugin</artifactId>
+				<version>3.9.0</version>
+				<reportSets>
+					<reportSet>
+						<reports>
+							<report>ci-management</report>
+							<report>dependencies</report>
+							<report>dependency-info</report>
+							<report>distribution-management</report>
+							<report>issue-management</report>
+							<report>licenses</report>
+							<report>plugins</report>
+							<report>scm</report>
+							<report>summary</report>
+							<report>team</report>
+						</reports>
+					</reportSet>
+				</reportSets>
+			</plugin>
+
+			<!-- jxr: cross-referenced HTML source, linked from the checkstyle/pmd reports -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-jxr-plugin</artifactId>
+				<version>3.6.0</version>
+			</plugin>
+
+			<!-- javadoc report (published at apidocs/) -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-javadoc-plugin</artifactId>
+				<reportSets>
+					<reportSet>
+						<reports>
+							<report>javadoc</report>
+						</reports>
+					</reportSet>
+				</reportSets>
+			</plugin>
+
+			<!-- surefire report: renders the unit-test results from target/surefire-reports -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-report-plugin</artifactId>
+				<version>3.5.6</version>
+			</plugin>
 
 			<!-- pmd -->
 			<plugin>
@@ -245,6 +316,17 @@
 						<ruleset>pmd.xml</ruleset>
 					</rulesets>
 				</configuration>
+			</plugin>
+
+			<!-- changelog: the inherited maven-changelog-plugin 3.0.0-M1 predates Doxia 2.0 and is not
+			     part of the curated reports menu; disable it with an empty report set -->
+			<plugin>
+				<artifactId>maven-changelog-plugin</artifactId>
+				<reportSets>
+					<reportSet>
+						<reports />
+					</reportSet>
+				</reportSets>
 			</plugin>
 
 		</plugins>

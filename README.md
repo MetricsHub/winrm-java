@@ -5,8 +5,6 @@
 ![GitHub top language](https://img.shields.io/github/languages/top/metricshub/winrm-java)
 ![License](https://img.shields.io/github/license/metricshub/winrm-java)
 
-This project uses [WS-Man Client](https://github.com/OpenNMS/wsman) and [winrm4j](https://github.com/cloudsoft/winrm4j/)
-
 See **[Project Documentation](https://metricshub.org/winrm-java)** and the [Javadoc](https://metricshub.org/winrm-java/apidocs) for more information on how to use this library in your code.
 
 The Windows Remote Management (WinRM) Java Client is a library that enables to:
@@ -16,7 +14,8 @@ The Windows Remote Management (WinRM) Java Client is a library that enables to:
 > ## ⚠️ Upgrading from 1.x
 >
 > Version 2.0.0 **removed the legacy Apache CXF backend**: the dependency-free **light** client is
-> the only implementation (same public API — calling code is unaffected). Two consequences:
+> the only implementation (same documented entry points; a few CXF/SMB-only public types were
+> removed). The main consequence:
 >
 > * Unlike the CXF-based client, which silently trusted every TLS certificate, the light client
 >   **validates the server certificate and verifies the hostname by default**.
@@ -24,8 +23,6 @@ The Windows Remote Management (WinRM) Java Client is a library that enables to:
 >   will fail** during the TLS handshake unless you install the server certificate (or its issuing
 >   CA) into a Java trust store (e.g. `-Djavax.net.ssl.trustStore=...`) or disable TLS validation
 >   with `-Dorg.metricshub.winrm.tls.insecure=true` (**insecure — for testing only**).
-> * Setting `-Dorg.metricshub.winrm.backend=cxf` now fails with a clear error instead of selecting
->   the removed backend. Remove the property (or stay on winrm-java 1.x).
 
 ## The WinRM client
 
