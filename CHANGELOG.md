@@ -45,8 +45,9 @@ Consequences:
 ### ⚠️ Breaking — the CXF backend was removed
 
 Version 2.0.0 removes the legacy Apache CXF backend. The dependency-free client introduced in the
-previous release is the only implementation; the public API is unchanged, so calling code is
-unaffected. Consequences:
+previous release is the only implementation; the documented entry points are unchanged, so typical
+calling code is unaffected (though a few CXF/SMB-only public types were removed — see Removed).
+Consequences:
 
 - **WinRM over HTTPS with self-signed certificates**: unlike the CXF-based client — which silently
   trusted every TLS certificate and skipped hostname verification — this client **validates the
