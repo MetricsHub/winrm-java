@@ -53,7 +53,6 @@ final class HttpTransport implements AutoCloseable {
 
 	private final String host;
 	private final int port;
-	private final int timeoutMillis;
 	// Non-null => HTTPS: the socket is wrapped in TLS. Null => plain HTTP.
 	private final SSLSocketFactory sslSocketFactory;
 	private final boolean verifyHostname;
@@ -61,8 +60,9 @@ final class HttpTransport implements AutoCloseable {
 	private OutputStream out;
 	private BufferedInputStream in;
 	private long lastActivityMillis;
-	// Read timeout for the current operation; starts at the connection default and follows the
-	// per-operation timeout (see operationTimeout(int)).
+	// Connect and read timeouts for the current operation; they start at the construction default
+	// and follow each operation's own timeout (see operationTimeout(int)).
+	private int connectTimeoutMillis;
 	private int readTimeoutMillis;
 
 	HttpTransport(final String host, final int port, final int timeoutMillis) {
@@ -78,22 +78,24 @@ final class HttpTransport implements AutoCloseable {
 	) {
 		this.host = host;
 		this.port = port;
-		this.timeoutMillis = timeoutMillis;
 		this.sslSocketFactory = sslSocketFactory;
 		this.verifyHostname = verifyHostname;
+		this.connectTimeoutMillis = timeoutMillis;
 		// Read timeout slightly above the caller's timeout so the WSMan OperationTimeout fault
 		// (which the Receive loop retries) reliably arrives before a socket read times out.
 		this.readTimeoutMillis = timeoutMillis + 10_000;
 	}
 
 	/**
-	 * Align the socket read timeout with the current operation's timeout (plus headroom, so the
-	 * WSMan OperationTimeout fault arrives before the socket read gives up). Applies to the live
-	 * connection immediately and to any future reconnection.
+	 * Align the socket timeouts with the current operation's timeout: the connect timeout for a
+	 * (re)connection made on behalf of this operation, and the read timeout (plus headroom, so
+	 * the WSMan OperationTimeout fault arrives before the socket read gives up). Applies to the
+	 * live connection immediately and to any future reconnection.
 	 *
 	 * @param operationTimeoutMillis the current operation's timeout in milliseconds
 	 */
 	void operationTimeout(final int operationTimeoutMillis) {
+		connectTimeoutMillis = operationTimeoutMillis;
 		readTimeoutMillis = operationTimeoutMillis + 10_000;
 		if (socket != null && !socket.isClosed()) {
 			try {
@@ -223,7 +225,7 @@ final class HttpTransport implements AutoCloseable {
 				params.setEndpointIdentificationAlgorithm("HTTPS");
 				sslSocket.setSSLParameters(params);
 			}
-			newSocket.connect(new InetSocketAddress(host, port), timeoutMillis);
+			newSocket.connect(new InetSocketAddress(host, port), connectTimeoutMillis);
 			newSocket.setSoTimeout(readTimeoutMillis);
 			if (newSocket instanceof SSLSocket) {
 				// Force the TLS handshake now so certificate/hostname failures surface here, not on

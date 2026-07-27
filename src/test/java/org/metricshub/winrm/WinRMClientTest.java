@@ -412,6 +412,57 @@ class WinRMClientTest {
 	}
 
 	@Test
+	void receivePollingStopsWhenTheTimeoutFiresMidCommand() throws Exception {
+		// The command times out while a Receive read is blocked; the late response carries only
+		// PARTIAL output (no Done state). The abandoned worker must not re-issue Receive until the
+		// remote command eventually ends — it must stop, terminate the command, and release the
+		// serial connection for the next operation.
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueueDelayed(
+				200,
+				envelope(receiveResponse(stream("stdout", "CMD-1", "partial".getBytes(StandardCharsets.UTF_8)), null)),
+				2_000
+			)
+			// The abandoned worker's terminate Signal for CMD-1...
+			.enqueue(200, envelope(signalResponse()))
+			// ...then the follow-up command, proving the connection was released and stays usable.
+			.enqueue(200, envelope(commandResponse("CMD-2")))
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(stream("stdout", "CMD-2", "second".getBytes(StandardCharsets.UTF_8)), done("CMD-2", 0))
+				)
+			)
+			.enqueue(200, envelope(signalResponse()));
+
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			assertThrows(
+				WinRMTimeoutException.class,
+				() -> client.command("first.exe").charset(StandardCharsets.UTF_8).timeout(Duration.ofMillis(500)).execute()
+			);
+
+			// Blocks until the abandoned worker sees the late partial response, aborts, and unlocks.
+			assertEquals("second", client.command("second.exe").charset(StandardCharsets.UTF_8).execute().stdout());
+		}
+
+		final List<String> requests = server.decryptedRequests();
+		// Exactly one Receive was issued for the abandoned command — no polling after the timeout —
+		// and its terminate Signal was still sent, so the remote command does not keep running.
+		assertEquals(
+			1,
+			requests.stream().filter(r -> r.contains("CommandId=\"CMD-1\">stdout stderr</rsp:DesiredStream>")).count(),
+			() -> String.join("\n---\n", requests)
+		);
+		assertEquals(
+			1,
+			requests.stream().filter(r -> r.contains("Signal CommandId=\"CMD-1\"")).count(),
+			() -> String.join("\n---\n", requests)
+		);
+	}
+
+	@Test
 	void closedClientRejectsOperationsAndCloseIsIdempotent() {
 		final WinRMClient client = builder(PASSWORD).build();
 		client.close();

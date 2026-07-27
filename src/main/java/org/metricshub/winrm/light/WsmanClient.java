@@ -276,6 +276,10 @@ final class WsmanClient implements AutoCloseable {
 		final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
 		final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
 		while (true) {
+			// A late non-final response (or an op-timeout fault) must not keep an abandoned worker
+			// re-issuing Receive — and holding the serial connection — until the remote command ends.
+			// Aborting here still runs the finally-block Signal, which terminates the remote command.
+			checkNotCancelled();
 			final Decoded resp = request(Envelopes.receive(url, shellId, commandId, timeoutMs));
 			if (resp.status != 200) {
 				final String faultCode = wsmanFaultCode(resp.document);
