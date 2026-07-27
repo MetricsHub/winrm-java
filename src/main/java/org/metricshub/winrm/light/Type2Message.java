@@ -20,6 +20,8 @@ package org.metricshub.winrm.light;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 /**
  * Type 2 message class
  * Code from io.cloudsoft.winrm4j.client.ntlm.forks.httpclient.NTLMEngineImpl
@@ -33,10 +35,18 @@ class Type2Message extends NTLMMessage {
 	private byte[] targetInfo;
 	private final int flags;
 
+	@SuppressFBWarnings(value = "CT_CONSTRUCTOR_THROW", justification = "Parse-in-constructor is the upstream NTLM engine design: rejecting a malformed "
+		+
+		"server challenge must abort construction. The class is package-private, so no attacker subclass " +
+		"can mount a finalizer attack on the partially-built instance")
 	Type2Message(final String messageBody) throws NtlmException {
 		this(java.util.Base64.getDecoder().decode(messageBody.getBytes(NTLMEngineUtils.DEFAULT_CHARSET)));
 	}
 
+	@SuppressFBWarnings(value = "CT_CONSTRUCTOR_THROW", justification = "Parse-in-constructor is the upstream NTLM engine design: rejecting a malformed "
+		+
+		"server challenge must abort construction. The class is package-private, so no attacker subclass " +
+		"can mount a finalizer attack on the partially-built instance")
 	private Type2Message(final byte[] message) throws NtlmException {
 		super(message, 2);
 		// Type 2 message is laid out as follows:

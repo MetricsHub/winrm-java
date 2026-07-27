@@ -94,6 +94,14 @@
 	</dependencyManagement>
 
 	<dependencies>
+		<!-- @SuppressFBWarnings for the justified SpotBugs suppressions; compile-time only
+		     (provided scope), so the library stays dependency-free at runtime -->
+		<dependency>
+			<groupId>com.github.spotbugs</groupId>
+			<artifactId>spotbugs-annotations</artifactId>
+			<version>4.9.3</version>
+			<scope>provided</scope>
+		</dependency>
 		<dependency>
 			<groupId>org.junit.platform</groupId>
 			<artifactId>junit-platform-launcher</artifactId>
@@ -204,9 +212,10 @@
 			</plugin>
 
 			<!--
-				pmd: fail the build on any violation of pmd.xml, so the PMD report stays clean.
-				Version pinned to the one the parent manages for the site report, so the gate and
-				the report always run the same PMD.
+				pmd: fail the build on any violation of pmd.xml and on any CPD duplication, so the
+				PMD and CPD reports stay clean. Version pinned to the one the parent manages for the
+				site report, so the gate and the report always run the same PMD. minimumTokens matches
+				the reporting configuration so the CPD gate and the CPD report agree.
 			-->
 			<plugin>
 				<artifactId>maven-pmd-plugin</artifactId>
@@ -216,16 +225,58 @@
 						<phase>verify</phase>
 						<goals>
 							<goal>check</goal>
+							<goal>cpd-check</goal>
 						</goals>
 					</execution>
 				</executions>
 				<configuration>
 					<targetJdk>${maven.compiler.release}</targetJdk>
+					<minimumTokens>50</minimumTokens>
 					<rulesets>
 						<ruleset>pmd.xml</ruleset>
 					</rulesets>
 					<printFailingErrors>true</printFailingErrors>
 				</configuration>
+			</plugin>
+
+			<!--
+				checkstyle: fail the build on any violation of checkstyle.xml, so the Checkstyle
+				report stays clean. Version and configLocation match the parent's reporting
+				configuration, so the gate and the report always agree.
+			-->
+			<plugin>
+				<artifactId>maven-checkstyle-plugin</artifactId>
+				<version>3.6.0</version>
+				<executions>
+					<execution>
+						<phase>verify</phase>
+						<goals>
+							<goal>check</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<configLocation>checkstyle.xml</configLocation>
+				</configuration>
+			</plugin>
+
+			<!--
+				spotbugs: fail the build on any SpotBugs finding, so the SpotBugs report stays clean.
+				Version pinned to the one the parent manages for the site report, so the gate and the
+				report always run the same SpotBugs.
+			-->
+			<plugin>
+				<groupId>com.github.spotbugs</groupId>
+				<artifactId>spotbugs-maven-plugin</artifactId>
+				<version>4.9.3.0</version>
+				<executions>
+					<execution>
+						<phase>verify</phase>
+						<goals>
+							<goal>check</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 
 			<!-- site: pin a recent maven-site-plugin (the version inherited from oss-parent is too old

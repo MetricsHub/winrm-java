@@ -23,6 +23,10 @@ The Windows Remote Management (WinRM) Java Client is a library that enables to:
 >   will fail** during the TLS handshake unless you install the server certificate (or its issuing
 >   CA) into a Java trust store (e.g. `-Djavax.net.ssl.trustStore=...`) or disable TLS validation
 >   with `-Dorg.metricshub.winrm.tls.insecure=true` (**insecure — for testing only**).
+> * The collections returned by `WinRMWqlExecutor.getHeaders()`/`getRows()` and
+>   `WqlQuery.getSelectedProperties()`/`getSubPropertiesMap()` are now **unmodifiable views**
+>   (and `WinRMWqlExecutor` copies the lists passed to its constructor): callers that mutated
+>   the returned collections must now copy them first.
 
 ## The WinRM client
 

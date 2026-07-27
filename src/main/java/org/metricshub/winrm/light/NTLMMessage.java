@@ -20,6 +20,8 @@ package org.metricshub.winrm.light;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 /**
  * NTLM message generation, base class
  * Code from io.cloudsoft.winrm4j.client.ntlm.forks.httpclient.NTLMEngineImpl
@@ -50,6 +52,10 @@ class NTLMMessage {
 	NTLMMessage() {}
 
 	/** Constructor to use when message bytes are known */
+	@SuppressFBWarnings(value = "CT_CONSTRUCTOR_THROW", justification = "Parse-in-constructor is the upstream NTLM engine design: rejecting a malformed "
+		+
+		"message must abort construction. The class is package-private, so no attacker subclass can " +
+		"mount a finalizer attack on the partially-built instance")
 	NTLMMessage(final byte[] message, final int expectedType) throws NtlmException {
 		messageContents = message;
 		// Look for NTLM message

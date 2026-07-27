@@ -63,7 +63,6 @@ public class MD4 {
 			final int transferAmt = input.length - inputIndex;
 			System.arraycopy(input, inputIndex, dataBuffer, curBufferPos, transferAmt);
 			count += transferAmt;
-			curBufferPos += transferAmt;
 		}
 	}
 

@@ -349,6 +349,19 @@ class ShellFileCopyTest {
 	}
 
 	@Test
+	void rejectsPathWithoutFileName() {
+		// No handler registered: any remote interaction would fail the test
+		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor();
+
+		// A root path has no file name component (Path.getFileName() is null)
+		assertThrows(
+			IllegalArgumentException.class,
+			() -> ShellFileCopy.copyFile(executor, Path.of("C:\\"), "C:\\Windows\\Temp", TIMEOUT, 0L)
+		);
+		assertTrue(executor.getExecutedCommands().isEmpty());
+	}
+
+	@Test
 	void rejectsFileNamesUnsafeForTheCommandShell() {
 		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("we%ird.txt"));
 		assertThrows(IllegalArgumentException.class, () -> ShellFileCopy.checkTransferableFileName("quo\"te.txt"));

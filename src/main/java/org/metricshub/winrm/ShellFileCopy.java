@@ -4,7 +4,7 @@ package org.metricshub.winrm;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2026 MetricsHub
+ * Copyright (C) 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -203,7 +203,14 @@ public class ShellFileCopy {
 		final long timeout,
 		final long start
 	) throws IOException, TimeoutException, WindowsRemoteException {
-		final String fileName = localPath.getFileName().toString();
+		// Path.getFileName() is null for a root path such as "C:\" — which has no name to stage under
+		final Path fileNamePath = localPath.getFileName();
+		if (fileNamePath == null) {
+			throw new IllegalArgumentException(
+				String.format("Path %s has no file name and cannot be transferred to a Windows host.", localPath)
+			);
+		}
+		final String fileName = fileNamePath.toString();
 		checkTransferableFileName(fileName);
 
 		final byte[] content = Files.readAllBytes(localPath);
