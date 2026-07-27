@@ -83,8 +83,10 @@ public final class RemoteProcess implements AutoCloseable {
 	private final BufferedReader stdout;
 	private final BufferedReader stderr;
 
+	// finished = no more protocol fetches may happen: the command completed OR the process was
+	// closed early. exitCode is non-null only when completion was actually observed.
 	private boolean finished;
-	private int exitCode;
+	private Integer exitCode;
 
 	RemoteProcess(final CommandCursor cursor, final Charset charset, final String hostname, final Duration timeout) {
 		this.cursor = cursor;
@@ -130,7 +132,7 @@ public final class RemoteProcess implements AutoCloseable {
 		while (!finished) {
 			fetchOnce();
 		}
-		return exitCode;
+		return exitCodeValue();
 	}
 
 	/**
@@ -152,6 +154,9 @@ public final class RemoteProcess implements AutoCloseable {
 		while (!finished && Utils.getCurrentTimeMillis() - start < deadlineMillis) {
 			fetchOnce();
 		}
+		if (finished && exitCode == null) {
+			throw new IllegalStateException("The process was closed before the command completed.");
+		}
 		return finished;
 	}
 
@@ -160,23 +165,48 @@ public final class RemoteProcess implements AutoCloseable {
 	 *
 	 * @return the exit code
 	 * @throws IllegalStateException when the command has not completed yet — wait for completion
-	 *         with {@link #waitFor()}, or read the output streams to their end first
+	 *         with {@link #waitFor()}, or read the output streams to their end first — or when the
+	 *         process was closed before the command completed
 	 */
 	public synchronized int exitCode() {
-		if (!finished) {
-			throw new IllegalStateException("The command has not completed yet.");
-		}
-		return exitCode;
+		return exitCodeValue();
 	}
 
 	/**
 	 * Terminate the command (when it is still running) and release the client's connection.
-	 * Idempotent; a no-op when the command already completed. Buffered output remains readable
-	 * after closing.
+	 * Idempotent; a no-op when the command already completed. Output buffered before the close
+	 * remains readable, then the readers report end of stream; {@link #waitFor()} and
+	 * {@link #exitCode()} throw {@link IllegalStateException} when the close preceded completion —
+	 * a terminated command has no exit code.
 	 */
 	@Override
 	public synchronized void close() {
+		if (!finished) {
+			// No protocol fetch may happen after the close: the cursor signals the command and
+			// releases the connection, so this handle must never touch it again. The decoders are
+			// flushed so a trailing partial character surfaces (as a replacement) instead of vanishing.
+			finished = true;
+			try {
+				// The command may in fact have completed (its final chunk was received) without this
+				// handle having observed the end-of-stream fetch: the exit code is then already known.
+				exitCode = cursor.exitCode();
+			} catch (final IllegalStateException ignored) {
+				// Genuinely closed before completion: there is no exit code.
+			}
+			stdoutPending.append(stdoutDecoder.finish());
+			stderrPending.append(stderrDecoder.finish());
+		}
 		cursor.close();
+	}
+
+	/** The observed exit code, or the explanation of why there is none. */
+	private int exitCodeValue() {
+		if (exitCode == null) {
+			throw new IllegalStateException(
+				finished ? "The process was closed before the command completed." : "The command has not completed yet."
+			);
+		}
+		return exitCode;
 	}
 
 	/** One Receive round trip: decode what arrived into the per-channel buffers. Holds the monitor. */

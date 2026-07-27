@@ -148,6 +148,22 @@ final class WsmanClient implements AutoCloseable {
 		return (int) Math.min(millis, Integer.MAX_VALUE - 10_000L);
 	}
 
+	/**
+	 * Align the transport's socket timeouts with the operation being opened. Blocking operations
+	 * keep the read-timeout headroom (their caller's wall-clock deadline governs, and the WSMan
+	 * op-timeout fault must arrive before the socket gives up so the Receive loop can retry);
+	 * streaming operations must observe the configured inactivity timeout on the socket itself —
+	 * a server that stops answering entirely would otherwise be detected ten seconds late.
+	 */
+	private void configureTimeouts(final long operationTimeoutMs, final boolean failOnQuietTimeout) {
+		final int millis = toSocketTimeoutMillis(operationTimeoutMs);
+		if (failOnQuietTimeout) {
+			transport.inactivityTimeout(millis);
+		} else {
+			transport.operationTimeout(millis);
+		}
+	}
+
 	/** A decrypted WSMan response: HTTP status plus the (decrypted) SOAP body. */
 	private static final class Decoded {
 
@@ -218,7 +234,7 @@ final class WsmanClient implements AutoCloseable {
 		lockAbortably();
 		boolean opened = false;
 		try {
-			transport.operationTimeout(toSocketTimeoutMillis(operationTimeoutMs));
+			configureTimeouts(operationTimeoutMs, failOnQuietTimeout);
 			// WMI namespaces are case-insensitive, but preserve the caller's case to match the CXF backend.
 			final String ns = namespace.replace('\\', '/');
 			final WqlEnumeration enumeration = new WqlEnumeration(
@@ -454,7 +470,7 @@ final class WsmanClient implements AutoCloseable {
 		lockAbortably();
 		boolean opened = false;
 		try {
-			transport.operationTimeout(toSocketTimeoutMillis(operationTimeoutMs));
+			configureTimeouts(operationTimeoutMs, failOnQuietTimeout);
 			if (!shellWorkingDirectoryPinned) {
 				shellWorkingDirectory = workingDirectory;
 				shellWorkingDirectoryPinned = true;
@@ -530,6 +546,11 @@ final class WsmanClient implements AutoCloseable {
 		 * {@link #close()}; the exit code is then available from {@link #exitCode()}.
 		 */
 		Chunk nextChunk() throws Exception {
+			if (finished) {
+				// Already signaled — normally after completion, but also after an early close(): the
+				// connection was released either way, so never touch it again from this handle.
+				return null;
+			}
 			if (exitCode != null) {
 				// The command completed with the previous chunk: Signal it and release the connection.
 				finish();

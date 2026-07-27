@@ -223,6 +223,31 @@ class StreamingApiTest {
 	}
 
 	@Test
+	void totalServerSilenceIsBoundedByTheInactivityTimeout() throws Exception {
+		server
+			.enqueue(200, envelope(enumeratePage("uuid:CTX-1", service("Spooler", "Running"))))
+			// The Pull response arrives way past the inactivity timeout — a server that stopped
+			// answering entirely (no op-timeout fault). The socket read itself must give up at the
+			// inactivity bound, not 10 seconds later (the headroom the blocking paths keep).
+			.enqueueDelayed(200, envelope(pullDone(service("WinRM", "Running"))), 5_000);
+
+		try (WinRMClient client = builder().timeout(Duration.ofMillis(300)).build()) {
+			try (Stream<WqlRow> rows = client.wql("SELECT Name FROM Win32_Service").stream()) {
+				final Iterator<WqlRow> iterator = rows.iterator();
+				assertEquals("Spooler", iterator.next().string("Name"));
+
+				final long start = System.nanoTime();
+				assertThrows(WinRMTimeoutException.class, iterator::next);
+				final long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+				assertTrue(
+					elapsedMillis < 4_000,
+					"silence must be detected at the inactivity timeout, not " + elapsedMillis + " ms later"
+				);
+			}
+		}
+	}
+
+	@Test
 	void wqlStreamRejectsInvalidQueryBeforeSendingAnything() throws Exception {
 		try (WinRMClient client = builder().build()) {
 			assertThrows(WqlSyntaxException.class, () -> client.wql("Not a WQL query").stream());
@@ -328,6 +353,12 @@ class StreamingApiTest {
 
 			process.close();
 
+			// The handle is inert after closing: buffered output only, then end of stream — reads
+			// and waits must not issue any further protocol request on a connection they no longer own.
+			assertNull(process.stdout().readLine());
+			assertThrows(IllegalStateException.class, process::waitFor);
+			assertThrows(IllegalStateException.class, process::exitCode);
+
 			final List<String> requests = server.decryptedRequests();
 			assertEquals(4, requests.size());
 			assertTrue(requests.get(3).contains("signal/terminate"), "early close must Signal the command");
@@ -335,6 +366,27 @@ class StreamingApiTest {
 			// The connection is free again after the early termination.
 			server.enqueue(200, envelope(enumerationDone(service("WinRM", "Running"))));
 			assertEquals(1, client.wql("SELECT Name FROM Win32_Service").execute().size());
+		}
+	}
+
+	@Test
+	void closingAfterTheFinalChunkStillExposesTheExitCode() throws Exception {
+		enqueueCommandStartup();
+		server
+			.enqueue(200, envelope(receiveResponse(stdoutChunk("all\n"), done(COMMAND_ID, 5))))
+			.enqueue(200, envelope(signalResponse()));
+
+		try (WinRMClient client = builder().build()) {
+			final RemoteProcess process = client.command("quick.exe").charset(StandardCharsets.UTF_8).start();
+			// The final chunk (carrying the exit state) was received, but the end-of-stream fetch
+			// never ran: closing must still expose the exit code the command actually reported.
+			assertEquals("all", process.stdout().readLine());
+			process.close();
+
+			assertEquals(5, process.exitCode());
+			assertEquals(5, process.waitFor());
+			assertNull(process.stdout().readLine());
+			assertEquals(4, server.decryptedRequests().size());
 		}
 	}
 

@@ -87,16 +87,36 @@ final class HttpTransport implements AutoCloseable {
 	}
 
 	/**
-	 * Align the socket timeouts with the current operation's timeout: the connect timeout for a
-	 * (re)connection made on behalf of this operation, and the read timeout (plus headroom, so
-	 * the WSMan OperationTimeout fault arrives before the socket read gives up). Applies to the
-	 * live connection immediately and to any future reconnection.
+	 * Align the socket timeouts with the current blocking operation's timeout: the connect timeout
+	 * for a (re)connection made on behalf of this operation, and the read timeout (plus headroom,
+	 * so the WSMan OperationTimeout fault the Receive loop retries on reliably arrives before the
+	 * socket read gives up — the blocking paths are bounded by their caller's wall-clock deadline,
+	 * not by the socket). Applies to the live connection immediately and to any future
+	 * reconnection.
 	 *
 	 * @param operationTimeoutMillis the current operation's timeout in milliseconds
 	 */
 	void operationTimeout(final int operationTimeoutMillis) {
-		connectTimeoutMillis = operationTimeoutMillis;
-		readTimeoutMillis = operationTimeoutMillis + 10_000;
+		applyTimeouts(operationTimeoutMillis, operationTimeoutMillis + 10_000);
+	}
+
+	/**
+	 * Align the socket timeouts with a STREAMING operation's inactivity timeout. Unlike
+	 * {@link #operationTimeout(int)} the read timeout gets NO headroom: the streaming paths have
+	 * no outer wall-clock timer, and a read timeout there means "the server stayed silent too
+	 * long" — so the socket must give up at the inactivity bound itself, not ten seconds later.
+	 * A server that enforces the WSMan OperationTimeout by answering with the op-timeout fault
+	 * reaches the caller through that fault instead; both surface as the same timeout.
+	 *
+	 * @param inactivityTimeoutMillis the longest tolerated silence in milliseconds
+	 */
+	void inactivityTimeout(final int inactivityTimeoutMillis) {
+		applyTimeouts(inactivityTimeoutMillis, inactivityTimeoutMillis);
+	}
+
+	private void applyTimeouts(final int connectMillis, final int readMillis) {
+		connectTimeoutMillis = connectMillis;
+		readTimeoutMillis = readMillis;
 		if (socket != null && !socket.isClosed()) {
 			try {
 				socket.setSoTimeout(readTimeoutMillis);

@@ -63,9 +63,11 @@ public interface CommandCursor extends AutoCloseable {
 
 	/**
 	 * Terminate the command (when it is still running) with the WinRM terminate Signal and release
-	 * the executor's connection. Idempotent; a no-op when the command already completed. May throw
-	 * an unchecked {@link org.metricshub.winrm.exceptions.WinRMClientException} when the Signal
-	 * itself fails — the remote command may then still be running.
+	 * the executor's connection. Idempotent; a no-op when the command already completed. After an
+	 * early close, {@link #next()} returns {@code null} without touching the connection again (and
+	 * no exit code is available, since the command never completed). May throw an unchecked
+	 * {@link org.metricshub.winrm.exceptions.WinRMClientException} when the Signal itself fails —
+	 * the remote command may then still be running.
 	 */
 	@Override
 	void close();
