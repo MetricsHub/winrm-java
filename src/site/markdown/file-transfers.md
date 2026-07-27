@@ -46,9 +46,12 @@ remote host:
 * `<windir>` is discovered on the remote host with the WQL query
   `SELECT WindowsDirectory FROM Win32_OperatingSystem` — typically `C:\Windows`.
 * `<CLIENT-COMPUTER-NAME>` is the name of the machine **running the client** (the `COMPUTERNAME`
-  environment variable, or the local host name), so different client machines never share a
-  directory. The name and the trailing `$` are kept from the pre-2.0.0 SMB implementation, which
-  used this directory as a hidden share — no share is created anymore.
+  environment variable, or the local host name), which usually gives each client machine its own
+  directory. Clients that report the same computer name (cloned machines, containers) share one —
+  which is safe, because the content-addressed file names below prevent them from ever
+  overwriting each other's payloads; they simply also share the cache and the 30-day cleanup.
+  The name and the trailing `$` are kept from the pre-2.0.0 SMB implementation, which used this
+  directory as a hidden share — no share is created anymore.
 * The directory is created if missing (`IF NOT EXIST ... MKDIR ...`).
 
 Inside that directory the remote file name is **content-addressed**: a 12-hex-digit fragment of
@@ -81,10 +84,11 @@ shell — every step below is an ordinary remote command:
 
 1. **Skip check.** The destination is hashed on the host
    (`certutil -hashfile <dest> SHA256`, with a `SHA1` fallback for pre-2012 hosts in the same
-   command). If it already carries the digest of the local file, the transfer is **skipped
-   entirely** — re-running the same script costs one round trip. A destination present with a
-   *different* digest (e.g. corrupted in place) is remembered and repaired by replacement in
-   step 4.
+   command). If it already carries the digest of the local file, the **upload is skipped
+   entirely** — re-running an identical script costs only the fixed bookkeeping (the
+   directory-discovery query, the cleanup/`MKDIR` leg, and this digest probe), never the upload
+   legs. A destination present with a *different* digest (e.g. corrupted in place) is remembered
+   and repaired by replacement in step 4.
 2. **Upload.** The file content is base64-encoded locally (76-character lines) and appended to a
    remote **base64 sidecar file** with chunked `echo` commands, batched into as few command legs
    as possible, each under cmd.exe's command-line length limit (~8&nbsp;kB per leg).
@@ -101,7 +105,11 @@ shell — every step below is an ordinary remote command:
 
    The same command leg hashes the destination one last time: **the operation only succeeds if
    the destination provably contains the local bytes**. On any failure the temporary files are
-   deleted (best effort) and the destination is left alone — never trusted unverified.
+   deleted (best effort). A destination that already carried the correct content is never
+   touched; but when a *mismatched* destination is being repaired, the replacement happens before
+   the final verification — so a failure during a repair can leave the destination already
+   replaced (and still unverified). Either way an unverified destination is never silently
+   trusted: the failure is reported, and the next transfer detects the mismatch and repairs it.
 
 An empty local file skips steps 2–4: the destination is created with `TYPE NUL` and verified the
 same way.
