@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -167,24 +168,17 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 
 		// Enforce the caller's timeout as a wall-clock deadline (throwing TimeoutException), matching
 		// the CXF WinRMService and bounding the WSMan Pull loop.
-		try {
-			return Utils.execute(
-				() -> {
-					final List<Map<String, String>> rows = client.wql(winRMEndpoint.getNamespace(), wqlQuery);
-					final List<Map<String, Object>> result = new ArrayList<>(rows.size());
-					for (final Map<String, String> row : rows) {
-						result.add(new LinkedHashMap<>(row));
-					}
-					return result;
-				},
-				timeout
-			);
-		} catch (final InterruptedException | ExecutionException e) {
-			if (e.getCause() != null) {
-				throw new WinRMException(e.getCause(), e.getCause().getMessage());
-			}
-			throw new WinRMException(e);
-		}
+		return executeWithTimeout(
+			() -> {
+				final List<Map<String, String>> rows = client.wql(winRMEndpoint.getNamespace(), wqlQuery);
+				final List<Map<String, Object>> result = new ArrayList<>(rows.size());
+				for (final Map<String, String> row : rows) {
+					result.add(new LinkedHashMap<>(row));
+				}
+				return result;
+			},
+			timeout
+		);
 	}
 
 	@Override
@@ -200,16 +194,34 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 
 		// Enforce the caller's timeout as a wall-clock deadline (throwing TimeoutException), matching
 		// the CXF WinRMService and bounding the WSMan Receive loop.
+		return executeWithTimeout(
+			() -> {
+				final long start = Utils.getCurrentTimeMillis();
+				final WsmanClient.CommandOutput output = client.executeCommand(command, workingDirectory, charset);
+				final float executionTime = (Utils.getCurrentTimeMillis() - start) / 1000.0f;
+				return new WindowsRemoteCommandResult(output.stdout, output.stderr, executionTime, output.exitCode);
+			},
+			timeout
+		);
+	}
+
+	/**
+	 * Run the task through {@link Utils#execute(Callable, long)} under the caller's wall-clock
+	 * timeout, converting the executor's checked exceptions into {@link WinRMException} — the
+	 * task's own failure is unwrapped from {@link ExecutionException} so the caller sees the real
+	 * cause and its message.
+	 *
+	 * @param task the operation to run
+	 * @param timeout timeout in milliseconds
+	 * @param <T> the task's result type
+	 * @return the task's result
+	 * @throws TimeoutException when the deadline elapses first
+	 * @throws WinRMException when the task fails or the wait is interrupted
+	 */
+	private static <T> T executeWithTimeout(final Callable<T> task, final long timeout)
+		throws TimeoutException, WinRMException {
 		try {
-			return Utils.execute(
-				() -> {
-					final long start = Utils.getCurrentTimeMillis();
-					final WsmanClient.CommandOutput output = client.executeCommand(command, workingDirectory, charset);
-					final float executionTime = (Utils.getCurrentTimeMillis() - start) / 1000.0f;
-					return new WindowsRemoteCommandResult(output.stdout, output.stderr, executionTime, output.exitCode);
-				},
-				timeout
-			);
+			return Utils.execute(task, timeout);
 		} catch (final InterruptedException | ExecutionException e) {
 			if (e.getCause() != null) {
 				throw new WinRMException(e.getCause(), e.getCause().getMessage());
