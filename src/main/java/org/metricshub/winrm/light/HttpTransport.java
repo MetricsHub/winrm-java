@@ -65,6 +65,10 @@ final class HttpTransport implements AutoCloseable {
 	private int connectTimeoutMillis;
 	private int readTimeoutMillis;
 
+	// Absolute bound (epoch ms, 0 = none) on every socket wait while a deadline-bounded poll is
+	// active — see pollTimeout(int). Cleared by the other timeout modes.
+	private long deadlineEpochMillis;
+
 	HttpTransport(final String host, final int port, final int timeoutMillis) {
 		this(host, port, timeoutMillis, null, false);
 	}
@@ -97,7 +101,7 @@ final class HttpTransport implements AutoCloseable {
 	 * @param operationTimeoutMillis the current operation's timeout in milliseconds
 	 */
 	void operationTimeout(final int operationTimeoutMillis) {
-		applyTimeouts(operationTimeoutMillis, operationTimeoutMillis + 10_000);
+		applyTimeouts(operationTimeoutMillis, operationTimeoutMillis + 10_000, 0);
 	}
 
 	/**
@@ -106,11 +110,16 @@ final class HttpTransport implements AutoCloseable {
 	 * the moment the requested wait expires) to cross the network, yet small enough that a peer
 	 * that stopped answering entirely cannot hold a deadline-bounded wait hostage the way the
 	 * blocking paths' ten-second headroom would.
+	 * The wait-plus-headroom also becomes an ABSOLUTE deadline shared by every socket operation
+	 * until the next timeout-mode switch: one poll may span several HTTP round trips (a dropped
+	 * connection forces a reconnect and a whole re-authentication exchange), and each leg must
+	 * only get what is left of the poll's budget — not a fresh full timeout each, which would let
+	 * a slow peer stretch a deadline-bounded wait to several multiples of the requested duration.
 	 *
 	 * @param waitMillis the bounded wait of this round trip in milliseconds
 	 */
 	void pollTimeout(final int waitMillis) {
-		applyTimeouts(waitMillis, waitMillis + 1_000);
+		applyTimeouts(waitMillis, waitMillis + 1_000, Utils.getCurrentTimeMillis() + waitMillis + 1_000L);
 	}
 
 	/**
@@ -124,19 +133,33 @@ final class HttpTransport implements AutoCloseable {
 	 * @param inactivityTimeoutMillis the longest tolerated silence in milliseconds
 	 */
 	void inactivityTimeout(final int inactivityTimeoutMillis) {
-		applyTimeouts(inactivityTimeoutMillis, inactivityTimeoutMillis);
+		applyTimeouts(inactivityTimeoutMillis, inactivityTimeoutMillis, 0);
 	}
 
-	private void applyTimeouts(final int connectMillis, final int readMillis) {
+	private void applyTimeouts(final int connectMillis, final int readMillis, final long deadline) {
+		deadlineEpochMillis = deadline;
 		connectTimeoutMillis = connectMillis;
 		readTimeoutMillis = readMillis;
 		if (socket != null && !socket.isClosed()) {
 			try {
-				socket.setSoTimeout(readTimeoutMillis);
+				socket.setSoTimeout(boundedByDeadline(readTimeoutMillis));
 			} catch (final IOException ignored) {
 				// the next read fails and request() re-establishes the connection
 			}
 		}
+	}
+
+	/**
+	 * Cap a configured timeout by what is left of the poll deadline, when one is active. The 1 ms
+	 * floor keeps an already-expired deadline from disabling the timeout (0 would mean "infinite"
+	 * to a socket): the next blocking operation then fails almost immediately instead.
+	 */
+	private int boundedByDeadline(final int timeoutMillis) {
+		if (deadlineEpochMillis == 0) {
+			return timeoutMillis;
+		}
+		final long remaining = deadlineEpochMillis - Utils.getCurrentTimeMillis();
+		return (int) Math.max(1, Math.min(timeoutMillis, remaining));
 	}
 
 	static final class Response {
@@ -258,8 +281,8 @@ final class HttpTransport implements AutoCloseable {
 				params.setEndpointIdentificationAlgorithm("HTTPS");
 				sslSocket.setSSLParameters(params);
 			}
-			newSocket.connect(new InetSocketAddress(host, port), connectTimeoutMillis);
-			newSocket.setSoTimeout(readTimeoutMillis);
+			newSocket.connect(new InetSocketAddress(host, port), boundedByDeadline(connectTimeoutMillis));
+			newSocket.setSoTimeout(boundedByDeadline(readTimeoutMillis));
 			if (newSocket instanceof SSLSocket) {
 				// Force the TLS handshake now so certificate/hostname failures surface here, not on
 				// the first read after we have already sent the request.
@@ -289,6 +312,12 @@ final class HttpTransport implements AutoCloseable {
 		throws IOException {
 		ensureConnected();
 		try {
+			if (deadlineEpochMillis != 0) {
+				// Several HTTP legs can run under one poll deadline (reconnect, authentication
+				// exchange, the request itself): re-cap the read wait to what is left of the budget
+				// at the start of every leg.
+				socket.setSoTimeout(boundedByDeadline(readTimeoutMillis));
+			}
 			final StringBuilder head = new StringBuilder();
 			head.append("POST ").append(path).append(" HTTP/1.1\r\n");
 			head.append("Accept: */*\r\n");
