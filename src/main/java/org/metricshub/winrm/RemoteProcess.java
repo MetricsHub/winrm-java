@@ -146,7 +146,9 @@ public final class RemoteProcess implements AutoCloseable {
 	 * @param deadline how long to wait (at least one millisecond)
 	 * @return {@code true} when the command completed within the given duration — the exit code is
 	 *         then available from {@link #exitCode()} — {@code false} when the wait expired first
-	 * @throws WinRMTimeoutException when the server does not even answer the bounded requests
+	 * @throws WinRMTimeoutException when the server does not even answer the bounded requests — a
+	 *         peer that stopped answering is detected within the remaining wait plus a small
+	 *         network headroom, not the full inactivity timeout
 	 * @throws org.metricshub.winrm.exceptions.WinRMClientException for any other failure
 	 */
 	public synchronized boolean waitFor(final Duration deadline) {

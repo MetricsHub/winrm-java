@@ -573,16 +573,22 @@ final class WsmanClient implements AutoCloseable {
 				return null;
 			}
 			final long wait = Math.max(1, Math.min(maxWaitMs, operationTimeoutMs));
-			// The socket gets the blocking-style headroom on purpose: the expected answer to an
-			// expired bounded Receive is the op-timeout FAULT, and it must win the race against the
-			// socket timeout or the poll would desync the connection it is supposed to leave intact.
-			transport.operationTimeout(toSocketTimeoutMillis(wait));
+			// The socket gets a small fault headroom on purpose: the expected answer to an expired
+			// bounded Receive is the op-timeout FAULT, and it must win the race against the socket
+			// timeout or the poll would desync the connection it is supposed to leave intact. It is
+			// deliberately much smaller than the blocking paths' headroom, so a peer that stopped
+			// answering entirely cannot hold a deadline-bounded wait far past its deadline.
+			transport.pollTimeout(toSocketTimeoutMillis(wait));
 			try {
 				checkNotCancelled();
 				final Decoded resp;
 				try {
 					resp = request(Envelopes.receive(url, shellId, commandId, wait));
 				} catch (final SocketTimeoutException e) {
+					// The peer did not even answer the bounded request it was asked to answer within
+					// the wait. The Receive is abandoned mid-flight, so drop the connection outright:
+					// a late response must not be readable as the answer to a LATER request.
+					transport.close();
 					throw quietTimeout("No response from the WinRM service", wait, e);
 				}
 				if (resp.status != 200) {

@@ -101,6 +101,19 @@ final class HttpTransport implements AutoCloseable {
 	}
 
 	/**
+	 * Socket timeouts for one deadline-bounded poll round trip: the read timeout is the wait plus
+	 * a small fault headroom — enough for the server's "nothing yet" op-timeout fault (generated
+	 * the moment the requested wait expires) to cross the network, yet small enough that a peer
+	 * that stopped answering entirely cannot hold a deadline-bounded wait hostage the way the
+	 * blocking paths' ten-second headroom would.
+	 *
+	 * @param waitMillis the bounded wait of this round trip in milliseconds
+	 */
+	void pollTimeout(final int waitMillis) {
+		applyTimeouts(waitMillis, waitMillis + 1_000);
+	}
+
+	/**
 	 * Align the socket timeouts with a STREAMING operation's inactivity timeout. Unlike
 	 * {@link #operationTimeout(int)} the read timeout gets NO headroom: the streaming paths have
 	 * no outer wall-clock timer, and a read timeout there means "the server stayed silent too

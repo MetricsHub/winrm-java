@@ -500,6 +500,32 @@ class StreamingApiTest {
 	}
 
 	@Test
+	void deadPeerCannotHoldABoundedWaitHostage() throws Exception {
+		enqueueCommandStartup();
+		server
+			// The peer answers the bounded Receive long after the wait AND its small fault headroom:
+			// a peer that stopped answering. The wait must fail at wait + headroom (~1.2 s here),
+			// not at the blocking paths' ten-second socket headroom.
+			.enqueueDelayed(500, fault(FAULT_OPERATION_TIMEOUT, "The operation timed out."), 4_000)
+			.enqueue(200, envelope(signalResponse()));
+
+		try (WinRMClient client = builder().build()) {
+			try (RemoteProcess process = client.command("dead.exe").charset(StandardCharsets.UTF_8).start()) {
+				final long start = System.nanoTime();
+				assertThrows(WinRMTimeoutException.class, () -> process.waitFor(Duration.ofMillis(200)));
+				final long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+				assertTrue(
+					elapsedMillis < 3_000,
+					"a dead peer must be detected near the bounded wait, not " + elapsedMillis + " ms later"
+				);
+			}
+			// close() terminated the command over a fresh connection (the abandoned one was dropped).
+			final List<String> requests = server.decryptedRequests();
+			assertTrue(requests.get(requests.size() - 1).contains("signal/terminate"));
+		}
+	}
+
+	@Test
 	void commandSilenceBeyondTheTimeoutSurfacesAsInactivityTimeout() throws Exception {
 		enqueueCommandStartup();
 		server
