@@ -213,7 +213,7 @@
 					<dependency>
 						<groupId>org.sentrysoftware.maven</groupId>
 						<artifactId>maven-skin-tools</artifactId>
-						<version>1.8.00</version>
+						<version>1.8.01</version>
 					</dependency>
 				</dependencies>
 			</plugin>
