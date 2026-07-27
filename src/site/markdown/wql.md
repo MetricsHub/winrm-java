@@ -1,5 +1,5 @@
 keywords: wql, wmi, query, win32, namespace, root cimv2, cim
-description: Run WQL / WMI queries with WinRMWqlExecutor and read the result rows.
+description: Run WQL / WMI queries with the fluent WinRMClient API and read the result rows.
 
 # WQL Queries
 
@@ -8,73 +8,85 @@ description: Run WQL / WMI queries with WinRMWqlExecutor and read the result row
 WQL (WMI Query Language) is the SQL-like language used to query the Windows Management
 Instrumentation (WMI) repository. The client runs a query on the remote host and returns the rows.
 
-## `WinRMWqlExecutor.executeWql(...)`
+## Running a query
 
-A query is executed with the static method
-[`WinRMWqlExecutor.executeWql(...)`](apidocs/org/metricshub/winrm/wql/WinRMWqlExecutor.html). It
-opens a connection, runs the query, collects every row, closes the connection, and returns a
-[`WinRMWqlExecutor`](apidocs/org/metricshub/winrm/wql/WinRMWqlExecutor.html) holding the result.
+Build a [`WinRMClient`](apidocs/org/metricshub/winrm/WinRMClient.html), then prepare the query
+with `wql(...)` and run it with `execute()`:
 
 ```java
-import static java.util.Collections.singletonList;
-import static org.metricshub.winrm.WinRMHttpProtocolEnum.HTTP;
-import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.NTLM;
-import static org.metricshub.winrm.wql.WinRMWqlExecutor.executeWql;
+import java.time.Duration;
+import org.metricshub.winrm.WinRMClient;
+import org.metricshub.winrm.WqlResult;
+import org.metricshub.winrm.WqlRow;
 
-import org.metricshub.winrm.wql.WinRMWqlExecutor;
+try (WinRMClient client = WinRMClient.builder("server.example.com")
+        .credentials("DOMAIN\\Administrator", password)
+        .timeout(Duration.ofSeconds(30))
+        .build()) {
 
-WinRMWqlExecutor result = executeWql(
-    HTTP,                                        // protocol
-    "server.example.com",                        // hostname
-    null,                                        // port (null → 5985 for HTTP, 5986 for HTTPS)
-    "DOMAIN\\Administrator",                      // username
-    "the-password".toCharArray(),                // password
-    "ROOT\\CIMV2",                               // namespace (null → ROOT\CIMV2)
-    "SELECT Name, State FROM Win32_Service",     // WQL query
-    30_000L,                                     // timeout in milliseconds
-    null,                                        // Kerberos ticket cache (null for NTLM)
-    singletonList(NTLM)                          // authentication schemes
-);
-```
+    WqlResult result = client.wql("SELECT Name, State FROM Win32_Service").execute();
 
-### Parameters
-
-| Parameter | Type | Notes |
-| --- | --- | --- |
-| `protocol` | [`WinRMHttpProtocolEnum`](apidocs/org/metricshub/winrm/WinRMHttpProtocolEnum.html) | `HTTP` or `HTTPS`. `null` defaults to `HTTP`. |
-| `hostname` | `String` | Host name or IP address. **Mandatory.** |
-| `port` | `Integer` | `null` uses the protocol default (5985 for HTTP, 5986 for HTTPS). |
-| `username` | `String` | `DOMAIN\user` or `user`. **Mandatory.** See [Authentication](authentication.html). |
-| `password` | `char[]` | The password. |
-| `namespace` | `String` | WMI namespace. `null` or blank defaults to `ROOT\CIMV2`. Backslashes and forward slashes are both accepted. |
-| `wqlQuery` | `String` | The WQL query. **Mandatory.** |
-| `timeout` | `long` | Timeout in milliseconds. Must be **greater than zero** (an `IllegalArgumentException` is thrown otherwise). See [Timeouts and Errors](timeouts-and-errors.html). |
-| `ticketCache` | `java.nio.file.Path` | Kerberos ticket cache path. `null` for NTLM. See [Authentication](authentication.html). |
-| `authentications` | `List<`[`AuthenticationEnum`](apidocs/org/metricshub/winrm/service/client/auth/AuthenticationEnum.html)`>` | Requested schemes. `null` or empty means NTLM only. |
-
-## Reading the result
-
-The returned [`WinRMWqlExecutor`](apidocs/org/metricshub/winrm/wql/WinRMWqlExecutor.html) exposes:
-
-| Method | Returns | Description |
-| --- | --- | --- |
-| `getHeaders()` | `List<String>` | The property (column) names. |
-| `getRows()` | `List<List<String>>` | One `List<String>` per row, with values in the same order as the headers. |
-| `getExecutionTime()` | `long` | Wall-clock time of the whole call, in milliseconds. |
-
-```java
-List<String> headers = result.getHeaders();       // e.g. [Name, State]
-for (List<String> row : result.getRows()) {
-    System.out.println(headers + " = " + row);
+    for (WqlRow row : result) {
+        System.out.println(row.string("Name") + " is " + row.string("State"));
+    }
 }
 ```
 
+One client can run any number of queries (and [commands](commands.html)) over the same
+authenticated connection — see the [Overview](index.html) for the builder options.
+
+### Query options
+
+Everything between `wql(...)` and `execute()` is optional:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `namespace(String)` | the client's namespace (`ROOT\CIMV2` unless set on the builder) | The WMI namespace to query. |
+| `timeout(Duration)` | the client's timeout | Wall-clock deadline for the whole query. See [Timeouts and Errors](timeouts-and-errors.html). |
+| `pageSize(int)` | 32000 | WS-Enumeration `MaxElements`: how many rows the server may return per protocol round trip. |
+| `pullTimeout(Duration)` | server default | WS-Enumeration `MaxTime`: how long the server may hold a single `Pull` open before answering with the rows it has. |
+
+```java
+WqlResult events = client.wql("SELECT * FROM Win32_NTLogEvent")
+    .namespace("root\\cimv2")
+    .pageSize(5000)
+    .pullTimeout(Duration.ofSeconds(10))
+    .timeout(Duration.ofMinutes(2))
+    .execute();
+```
+
+`pageSize` and `pullTimeout` matter for very large result sets (for example Windows event logs):
+a smaller page bounds each response's size, and a pull timeout keeps the server from holding a
+`Pull` open past your deadline while it gathers rows.
+
+## Reading the result
+
+[`WqlResult`](apidocs/org/metricshub/winrm/WqlResult.html) is immutable and iterable:
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `columns()` | `List<String>` | The property (column) names, in query order. |
+| `rows()` | `List<`[`WqlRow`](apidocs/org/metricshub/winrm/WqlRow.html)`>` | The result rows. |
+| `size()` / `isEmpty()` | `int` / `boolean` | Row count. |
+| `elapsed()` | `java.time.Duration` | Wall-clock time of the query. |
+
+Each [`WqlRow`](apidocs/org/metricshub/winrm/WqlRow.html) exposes the instance properties:
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `string(String)` | `String` | The property value as a string, or `null`. |
+| `get(String)` | `Object` | The raw property value, or `null`. |
+| `asMap()` | `Map<String, Object>` | All properties, in server order (unmodifiable). |
+
+Property lookup is **case-insensitive**, matching WMI semantics: `row.string("name")` and
+`row.string("Name")` return the same value.
+
 ### Property order and case
 
-* When you select explicit properties (`SELECT Name, State FROM ...`), the headers keep the **order
+* When you select explicit properties (`SELECT Name, State FROM ...`), the columns keep the **order
   of the query** and the **exact case reported by WMI**.
 * With `SELECT * FROM ...`, the properties are returned in **alphabetical order** (case-insensitive).
-* If the query returns no rows, the headers fall back to the property names exactly as written in
+* If the query returns no rows, the columns fall back to the property names exactly as written in
   the query (WMI's own casing cannot be recovered from an empty result set).
 
 ## Supported WQL syntax
@@ -90,23 +102,29 @@ SELECT Name FROM Win32_Process WHERE Name = 'explorer.exe'
 The grammar is a single `SELECT` of either `*` or a comma-separated property list, a `FROM` clause,
 and an optional `WHERE` clause. Joins, sub-selects, and other advanced constructs are not part of
 the supported syntax. An invalid query raises a
-[`WqlQuerySyntaxException`](apidocs/org/metricshub/winrm/exceptions/WqlQuerySyntaxException.html).
+[`WqlSyntaxException`](apidocs/org/metricshub/winrm/exceptions/WqlSyntaxException.html) before
+anything is sent to the host.
 
 ## Choosing a namespace
 
 Most Windows classes live under the default `ROOT\CIMV2` namespace. To query a different one — for
-example `ROOT\Microsoft\SqlServer` or `ROOT\WMI` — pass it as the `namespace` argument. Both
-`ROOT\WMI` and `ROOT/WMI` are accepted.
+example `ROOT\Microsoft\SqlServer` or `ROOT\WMI` — set it per query with `namespace(...)`, or set a
+client-wide default with `namespace(...)` on the builder. Both `ROOT\WMI` and `ROOT/WMI` are
+accepted.
 
 ## Exceptions
 
-`executeWql(...)` declares three checked exceptions:
+`execute()` reports failures through the unchecked
+[`WinRMClientException`](apidocs/org/metricshub/winrm/exceptions/WinRMClientException.html)
+hierarchy:
 
 | Exception | When |
 | --- | --- |
-| [`WqlQuerySyntaxException`](apidocs/org/metricshub/winrm/exceptions/WqlQuerySyntaxException.html) | The query does not match the supported `SELECT` syntax. |
-| [`WinRMException`](apidocs/org/metricshub/winrm/exceptions/WinRMException.html) | Any WinRM/WSMan problem on the remote host (authentication, WMI error, protocol fault, ...). |
-| `java.util.concurrent.TimeoutException` | The operation did not complete within `timeout`. |
+| [`WqlSyntaxException`](apidocs/org/metricshub/winrm/exceptions/WqlSyntaxException.html) | The query does not match the supported `SELECT` syntax. |
+| [`WinRMAuthenticationException`](apidocs/org/metricshub/winrm/exceptions/WinRMAuthenticationException.html) | The credentials were rejected. |
+| [`WinRMFaultException`](apidocs/org/metricshub/winrm/exceptions/WinRMFaultException.html) | The remote service answered with a WSMan fault (e.g. an unknown class or namespace) — the fault code and detail are available as fields. |
+| [`WinRMTimeoutException`](apidocs/org/metricshub/winrm/exceptions/WinRMTimeoutException.html) | The query did not complete within its timeout. |
+| [`WinRMClientException`](apidocs/org/metricshub/winrm/exceptions/WinRMClientException.html) | Any other failure (connection, TLS, protocol). |
 
 See [Timeouts and Errors](timeouts-and-errors.html) for the full exception surface.
 

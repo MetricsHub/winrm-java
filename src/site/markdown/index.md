@@ -107,4 +107,5 @@ remain available and unchanged, with their checked exceptions.
 * [Authentication](authentication.html) — NTLM and Kerberos
 * [TLS / HTTPS](tls.html) — certificate validation and trust stores
 * [Timeouts and Errors](timeouts-and-errors.html) — timeout semantics and the exception surface
-* [Migrating from 1.x](migrating-from-1x.html) — the 2.0.0 breaking changes
+* [Migrating from 1.x](migrating-from-1x.html) — the 2.0.0 breaking changes, and moving to the fluent API
+* [Legacy API](legacy.html) — the static one-shot helpers that predate `WinRMClient`

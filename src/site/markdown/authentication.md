@@ -1,24 +1,33 @@
 keywords: authentication, ntlm, kerberos, spnego, domain, realm, kdc, krb5, ticket cache
-description: Authenticate to WinRM with NTLM or Kerberos (SPNEGO), including domain accounts and Kerberos configuration.
+description: Authenticate to WinRM with NTLM or Kerberos (SPNEGO), including domain accounts, ordered fallback, and Kerberos configuration.
 
 # Authentication
 
 <!-- MACRO{toc|fromDepth=2|toDepth=3|id=toc} -->
 
-The client authenticates with either **NTLM** or **Kerberos (SPNEGO)**. The scheme is chosen by the
-`authentications` argument, a
-`List<`[`AuthenticationEnum`](apidocs/org/metricshub/winrm/service/client/auth/AuthenticationEnum.html)`>`
-that both `executeWql(...)` and `WinRMCommandExecutor.execute(...)` accept.
+The client authenticates with either **NTLM** or **Kerberos (SPNEGO)**. The scheme is chosen with
+`authentication(...)` on the [`WinRMClient`](apidocs/org/metricshub/winrm/WinRMClient.html)
+builder, which takes one or more [`AuthScheme`](apidocs/org/metricshub/winrm/AuthScheme.html)
+values:
 
 ```java
-import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.KERBEROS;
-import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.NTLM;
+import org.metricshub.winrm.AuthScheme;
 
-singletonList(NTLM);        // NTLM only (also the default when null or empty)
-singletonList(KERBEROS);    // Kerberos only
+WinRMClient.builder("server.example.com")
+    .credentials("DOMAIN\\Administrator", password)
+    .authentication(AuthScheme.NTLM)                       // NTLM only (also the default)
+    // .authentication(AuthScheme.KERBEROS)                // Kerberos only
+    // .authentication(AuthScheme.KERBEROS, AuthScheme.NTLM) // ordered fallback
+    .build();
 ```
 
-If the list is `null` or empty, **NTLM** is used.
+When `authentication(...)` is not called, **NTLM** is used.
+
+### Ordered fallback
+
+Several schemes form an **ordered fallback list**: each is tried in the given order until one
+succeeds. `authentication(KERBEROS, NTLM)` attempts Kerberos first and falls back to NTLM — for
+example when the KDC is unreachable or the clock skew is too large.
 
 ## User name and domain
 
@@ -30,6 +39,9 @@ remember to escape the backslash in a string literal:
 "DOMAIN\\Administrator"   // domain = DOMAIN, user = Administrator
 "Administrator"           // no domain
 ```
+
+The password is a `char[]`, and the builder deliberately does **not** copy it: after closing the
+client you can wipe the single authoritative copy of the secret (`Arrays.fill(password, '\0')`).
 
 ## NTLM
 
@@ -43,21 +55,22 @@ NTLM needs no extra configuration beyond the user name and password.
 
 ## Kerberos (SPNEGO)
 
-Kerberos authentication uses SPNEGO through the JDK's GSS-API and **requires HTTPS**.
+Kerberos authentication uses SPNEGO through the JDK's GSS-API and **requires HTTPS**. Connect by
+the **FQDN the KDC knows** (the service principal is `HTTP/<hostname>`), not by IP address:
 
 ```java
-import static org.metricshub.winrm.WinRMHttpProtocolEnum.HTTPS;
-import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.KERBEROS;
-
-executeWql(
-    HTTPS, "server.example.com", null,
-    "DOMAIN\\Administrator", password, null,
-    "SELECT Name FROM Win32_ComputerSystem",
-    30_000L,
-    ticketCache,                 // optional java.nio.file.Path to a ticket cache
-    singletonList(KERBEROS)
-);
+try (WinRMClient client = WinRMClient.builder("server.internal.example.com")
+        .https()
+        .credentials("DOMAIN\\Administrator", password)
+        .authentication(AuthScheme.KERBEROS)
+        // .ticketCache(Path.of("/tmp/krb5cc_1000"))   // optional
+        .build()) {
+    ...
+}
 ```
+
+Requesting Kerberos on a plain-HTTP client fails at `build()` with a clear message: there is no
+Kerberos message encryption over HTTP.
 
 ### Kerberos configuration
 
@@ -71,7 +84,14 @@ java -Djava.security.krb5.realm=EXAMPLE.COM \
      -cp ... MyApp
 ```
 
-The optional `ticketCache` parameter points to a Kerberos ticket cache to use for the connection.
+The optional `ticketCache(Path)` builder option points at a Kerberos ticket cache to use for the
+connection; without it, Kerberos logs in with the user name and password.
+
+## Authentication failures
+
+A rejected credential (after every scheme of the fallback list was tried) surfaces as a
+[`WinRMAuthenticationException`](apidocs/org/metricshub/winrm/exceptions/WinRMAuthenticationException.html)
+whose message has the stable form `Authentication error on <endpoint> with user name "<user>"`.
 
 ## Choosing the scheme on the command line
 
