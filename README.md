@@ -88,7 +88,9 @@ remote host **through the WinRM channel itself** (chunked base64 through the com
 decoded with `certutil` and verified with a digest): no SMB, no TCP port 445, no administrative
 share — and it works from any client OS. A file already present on the remote host with an
 identical digest is not transferred again. This transport is designed for small script files, not
-bulk data. Over HTTPS it validates the certificate and verifies the hostname by default (see the
+bulk data. The full mechanics — destination directory, temporary files, integrity verification,
+cleanup, and command-line substitution — are documented on the
+[File Transfers](https://metricshub.org/winrm-java/file-transfers.html) page. Over HTTPS it validates the certificate and verifies the hostname by default (see the
 upgrade warning above); `trustAllCertificates()` on the builder or
 `-Dorg.metricshub.winrm.tls.insecure=true` trusts all certificates (insecure, testing only).
 Kerberos uses the ambient Kerberos configuration (`krb5.conf` / `-Djava.security.krb5.*`) unless

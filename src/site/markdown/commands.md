@@ -104,18 +104,18 @@ copies `c:\MyScript.vbs` to the host and runs the equivalent of:
 CSCRIPT "C:\Windows\Temp\...\MyScript.vbs"
 ```
 
-How the transfer works, and what to keep in mind:
+The fluent API does the same with `upload(...)` on the command builder, and can also copy a file
+to an explicit destination with `WinRMClient.uploadFile(localPath, remotePath)`.
 
-* Files travel **through the WinRM command shell itself** — chunked base64, decoded on the host with
-  `certutil` and verified with a digest. There is **no SMB**: TCP port 445 does not need to be
-  reachable, no administrative share is created, and the copy works from any client OS.
-* The transfer is **content-addressed**: a fragment of the content digest is inserted before the
-  file extension (for example `MyScript.1a2b3c4d.vbs`), so files with the same name but different
-  content never overwrite each other. A script that inspects its own name (`WScript.ScriptName`)
-  therefore sees the digest fragment.
-* A file already present on the host with an identical digest is **not transferred again**.
-* The mechanism is designed for **small script files**, not bulk data — base64 over SOAP is not a
-  fast bulk transport.
+In short: files travel **through the WinRM command shell itself** (chunked base64, decoded with
+`certutil`, digest-verified — no SMB, no TCP port 445, no administrative share), land under a
+**content-addressed name** (e.g. `MyScript.1a2b3c4d5e6f.vbs`), and a file already present with an
+identical digest is **not transferred again**. The mechanism is designed for small script files,
+not bulk data.
+
+See **[File Transfers](file-transfers.html)** for the full mechanics: the exact destination
+directory, the temporary files, the integrity verification, the 30-day cleanup, and the
+command-line substitution rules.
 
 ## Exceptions
 

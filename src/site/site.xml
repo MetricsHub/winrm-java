@@ -55,6 +55,7 @@
 		<menu name="Usage">
 			<item name="WQL Queries" href="wql.html" />
 			<item name="Remote Commands" href="commands.html" />
+			<item name="File Transfers" href="file-transfers.html" />
 			<item name="Authentication" href="authentication.html" />
 			<item name="TLS / HTTPS" href="tls.html" />
 			<item name="Timeouts and Errors" href="timeouts-and-errors.html" />

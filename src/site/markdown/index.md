@@ -103,6 +103,7 @@ remain available and unchanged, with their checked exceptions.
 * [Installation](installation.html) — coordinates, supported JDKs, and the standalone CLI jar
 * [WQL Queries](wql.html) — query WMI and read the result
 * [Remote Commands](commands.html) — run commands and copy files to the host
+* [File Transfers](file-transfers.html) — how files are copied through the WinRM channel
 * [Authentication](authentication.html) — NTLM and Kerberos
 * [TLS / HTTPS](tls.html) — certificate validation and trust stores
 * [Timeouts and Errors](timeouts-and-errors.html) — timeout semantics and the exception surface
