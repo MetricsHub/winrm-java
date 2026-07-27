@@ -31,11 +31,14 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
+import org.metricshub.winrm.CommandCursor;
 import org.metricshub.winrm.Utils;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
 import org.metricshub.winrm.WindowsRemoteExecutor;
 import org.metricshub.winrm.WmiHelper;
+import org.metricshub.winrm.WqlCursor;
+import org.metricshub.winrm.exceptions.WinRMClientException;
 import org.metricshub.winrm.exceptions.WinRMException;
 import org.metricshub.winrm.exceptions.WindowsRemoteException;
 import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
@@ -214,17 +217,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final int maxElements,
 		final long pullTimeout
 	) throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
-		checkNotClosed();
-		Utils.checkNonNull(namespace, "namespace");
-		Utils.checkNonNull(wqlQuery, "wqlQuery");
-		if (!WmiHelper.isValidWql(wqlQuery)) {
-			throw new WqlQuerySyntaxException(wqlQuery);
-		}
-		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
-		Utils.checkArgumentNotZeroOrNegative(maxElements, "maxElements");
-		if (pullTimeout < 0) {
-			throw new IllegalArgumentException("pullTimeout must not be negative.");
-		}
+		checkWqlArguments(namespace, wqlQuery, timeout, maxElements, pullTimeout);
 
 		// Enforce the caller's timeout as a wall-clock deadline (throwing TimeoutException), matching
 		// the CXF WinRMService and bounding the WSMan Pull loop.
@@ -239,6 +232,124 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			},
 			timeout
 		);
+	}
+
+	@Override
+	public WqlCursor streamWql(
+		final String namespace,
+		final String wqlQuery,
+		final long timeout,
+		final int maxElements,
+		final long pullTimeout
+	) throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
+		checkWqlArguments(namespace, wqlQuery, timeout, maxElements, pullTimeout);
+
+		// The initial Enumerate is sent here, on the caller's thread, so configuration and
+		// authentication failures surface immediately rather than on the first row.
+		final WsmanClient.WqlEnumeration enumeration = callStreaming(
+			() -> client.openWql(namespace, wqlQuery, timeout, maxElements, pullTimeout, true)
+		);
+		return new WqlCursor() {
+			@Override
+			public Map<String, Object> next() throws TimeoutException, WindowsRemoteException {
+				final Map<String, String> row = callStreaming(enumeration::next);
+				return row == null ? null : new LinkedHashMap<>(row);
+			}
+
+			@Override
+			public void close() {
+				enumeration.close();
+			}
+		};
+	}
+
+	/** Validate the arguments shared by the blocking and streaming WQL entry points. */
+	private void checkWqlArguments(
+		final String namespace,
+		final String wqlQuery,
+		final long timeout,
+		final int maxElements,
+		final long pullTimeout
+	) throws WqlQuerySyntaxException {
+		checkNotClosed();
+		Utils.checkNonNull(namespace, "namespace");
+		Utils.checkNonNull(wqlQuery, "wqlQuery");
+		if (!WmiHelper.isValidWql(wqlQuery)) {
+			throw new WqlQuerySyntaxException(wqlQuery);
+		}
+		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
+		Utils.checkArgumentNotZeroOrNegative(maxElements, "maxElements");
+		if (pullTimeout < 0) {
+			throw new IllegalArgumentException("pullTimeout must not be negative.");
+		}
+	}
+
+	@Override
+	public CommandCursor startCommand(final String command, final String workingDirectory, final long timeout)
+		throws TimeoutException, WindowsRemoteException {
+		checkNotClosed();
+		Utils.checkNonNull(command, "command");
+		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
+
+		// Shell creation and command startup happen here, on the caller's thread, so failures
+		// surface immediately rather than on the first output chunk.
+		final WsmanClient.RemoteCommand remoteCommand = callStreaming(
+			() -> client.startCommand(command, workingDirectory, timeout, true)
+		);
+		return new CommandCursor() {
+			@Override
+			public Chunk next() throws TimeoutException, WindowsRemoteException {
+				final WsmanClient.RemoteCommand.Chunk chunk = callStreaming(remoteCommand::nextChunk);
+				return chunk == null ? null : new Chunk(chunk.stdout, chunk.stderr);
+			}
+
+			@Override
+			public int exitCode() {
+				return remoteCommand.exitCode();
+			}
+
+			@Override
+			public void close() {
+				try {
+					remoteCommand.close();
+				} catch (final RuntimeException e) {
+					// Typed protocol failures (e.g. a fault answering the terminate Signal) pass through.
+					throw e;
+				} catch (final InterruptedException e) {
+					// Closing on an already-cancelled thread: restore the flag, the connection permit
+					// has been released and the transport is torn down with the executor.
+					Thread.currentThread().interrupt();
+				} catch (final Exception e) {
+					throw new WinRMClientException(e.getMessage(), e);
+				}
+			}
+		};
+	}
+
+	/**
+	 * Run one streaming protocol step on the caller's thread, translating the raw client failures
+	 * the way the blocking operations do. Unlike the blocking operations there is no worker thread
+	 * and no wall-clock deadline: each round trip is bounded by the operation timeout (the WSMan
+	 * OperationTimeout header and the socket read timeout), which acts as the inactivity timeout
+	 * of the stream and surfaces as the {@link TimeoutException} this method lets through.
+	 *
+	 * @param step the protocol step to run
+	 * @param <T> the step's result type
+	 * @return the step's result
+	 * @throws TimeoutException when the step exceeds the inactivity timeout
+	 * @throws WinRMException when the step fails with a checked failure
+	 */
+	private static <T> T callStreaming(final Callable<T> step) throws TimeoutException, WinRMException {
+		try {
+			return step.call();
+		} catch (final TimeoutException | RuntimeException e) {
+			throw e;
+		} catch (final InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new WinRMException(e);
+		} catch (final Exception e) {
+			throw new WinRMException(e, e.getMessage());
+		}
 	}
 
 	@Override

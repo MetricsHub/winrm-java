@@ -87,6 +87,66 @@ public interface WindowsRemoteExecutor extends AutoCloseable {
 	}
 
 	/**
+	 * <p>
+	 * Start a WQL enumeration and return a lazy {@link WqlCursor} over its rows: rows can be
+	 * consumed as the WS-Enumeration pages arrive, and memory stays bounded by one page.
+	 * </p>
+	 * <p>
+	 * The default implementation throws {@link UnsupportedOperationException}: only executors that
+	 * support streaming (such as the built-in lightweight backend) implement this method.
+	 * </p>
+	 *
+	 * @param namespace the WMI namespace to query, e.g. {@code ROOT\CIMV2} (required)
+	 * @param wqlQuery the WQL query (required)
+	 * @param timeout timeout in milliseconds of each WSMan round trip — the inactivity timeout of
+	 *        the stream, not an overall deadline (throws an IllegalArgumentException if negative
+	 *        or zero)
+	 * @param maxElements maximum number of rows per Enumerate/Pull response (throws an
+	 *        IllegalArgumentException if negative or zero); see {@link #DEFAULT_WQL_MAX_ELEMENTS}
+	 * @param pullTimeout maximum time in milliseconds the server may hold a single Pull open before
+	 *        answering with the rows it has ({@code MaxTime}); 0 leaves it to the server default
+	 * @return a cursor over the result rows, owning the executor's connection until exhausted or
+	 *         closed — always close it (try-with-resources)
+	 * @throws TimeoutException when the server does not answer the initial Enumerate in time
+	 * @throws WqlQuerySyntaxException if WQL query syntax is invalid
+	 * @throws WindowsRemoteException For any problem encountered
+	 */
+	default WqlCursor streamWql(
+		final String namespace,
+		final String wqlQuery,
+		final long timeout,
+		final int maxElements,
+		final long pullTimeout
+	) throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
+		throw new UnsupportedOperationException(getClass().getName() + " does not support streaming WQL enumeration.");
+	}
+
+	/**
+	 * <p>
+	 * Start a command on the remote host and return a {@link CommandCursor} over its raw output:
+	 * chunks can be consumed as the WSMan Receive responses arrive, before the command exits.
+	 * </p>
+	 * <p>
+	 * The default implementation throws {@link UnsupportedOperationException}: only executors that
+	 * support streaming (such as the built-in lightweight backend) implement this method.
+	 * </p>
+	 *
+	 * @param command The command to execute
+	 * @param workingDirectory Path of the directory for the spawned process on the remote system (can be null)
+	 * @param timeout timeout in milliseconds of each WSMan round trip — the inactivity timeout of
+	 *        the stream, not an overall deadline (throws an IllegalArgumentException if negative
+	 *        or zero)
+	 * @return a cursor over the command output, owning the executor's connection until the command
+	 *         completes or the cursor is closed — always close it (try-with-resources)
+	 * @throws TimeoutException when the server does not answer the command startup in time
+	 * @throws WindowsRemoteException For any problem encountered
+	 */
+	default CommandCursor startCommand(final String command, final String workingDirectory, final long timeout)
+		throws TimeoutException, WindowsRemoteException {
+		throw new UnsupportedOperationException(getClass().getName() + " does not support streaming command execution.");
+	}
+
+	/**
 	 * Execute the command on the remote
 	 *
 	 * @param command The command to execute

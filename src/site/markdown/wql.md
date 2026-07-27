@@ -42,7 +42,7 @@ Everything between `wql(...)` and `execute()` is optional:
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `namespace(String)` | the client's namespace (`ROOT\CIMV2` unless set on the builder) | The WMI namespace to query. |
-| `timeout(Duration)` | the client's timeout | Wall-clock deadline for the whole query. See [Timeouts and Errors](timeouts-and-errors.html). |
+| `timeout(Duration)` | the client's timeout | Wall-clock deadline for the whole query with `execute()`; inactivity timeout with `stream()`. See [Timeouts and Errors](timeouts-and-errors.html). |
 | `pageSize(int)` | 32000 | WS-Enumeration `MaxElements`: how many rows the server may return per protocol round trip. |
 | `pullTimeout(Duration)` | server default | WS-Enumeration `MaxTime`: how long the server may hold a single `Pull` open before answering with the rows it has. |
 
@@ -58,6 +58,40 @@ WqlResult events = client.wql("SELECT * FROM Win32_NTLogEvent")
 `pageSize` and `pullTimeout` matter for very large result sets (for example Windows event logs):
 a smaller page bounds each response's size, and a pull timeout keeps the server from holding a
 `Pull` open past your deadline while it gathers rows.
+
+## Streaming the rows
+
+`execute()` collects the complete result in memory. For very large result sets — Windows event
+logs, software inventories — end the same request with `stream()` instead: it returns a lazy
+`java.util.stream.Stream` of [`WqlRow`](apidocs/org/metricshub/winrm/WqlRow.html)s that yields
+each row as soon as it is parsed and pulls the next WS-Enumeration page from the server only as
+the stream advances. Memory stays bounded by one page (`pageSize(int)`), not by the whole result
+set.
+
+```java
+try (Stream<WqlRow> rows = client.wql("SELECT * FROM Win32_NTLogEvent")
+        .pageSize(5000)
+        .stream()) {
+
+    rows.filter(row -> "Error".equals(row.string("Type")))
+        .limit(100)
+        .forEach(this::process);
+}
+```
+
+Points to know:
+
+* **Close the stream** — use try-with-resources, exactly like `Files.lines(...)`. Closing before
+  the last row tells the server to free the enumeration immediately (WS-Enumeration `Release`);
+  an exhausted stream cleans up on its own.
+* The stream **holds the client's serial connection** while open: other operations on the same
+  client wait until it is closed or exhausted (the same contract as a JDBC `ResultSet` on its
+  connection).
+* The timeout is an **inactivity** timeout — the longest silence tolerated from the server between
+  two responses — not an overall deadline: consuming a huge result can take arbitrarily long as
+  long as the server keeps answering. See [Timeouts and Errors](timeouts-and-errors.html).
+* The stream is sequential and ordered; failures while iterating are reported through the same
+  unchecked exceptions as `execute()` (see below).
 
 ## Reading the result
 

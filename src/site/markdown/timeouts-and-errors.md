@@ -33,6 +33,18 @@ no part of it (in particular: the command itself) runs afterward.
 The timeout also drives the wire-level behavior: the WSMan `OperationTimeout` header and the
 socket timeouts follow each operation's own deadline.
 
+### Streaming terminals: inactivity timeout
+
+The streaming terminals — `stream()` on a WQL request and `start()` on a command (see
+[WQL Queries](wql.html) and [Remote Commands](commands.html)) — interpret the same `timeout(...)`
+value differently, because an overall deadline would make long-running streams impossible: there
+it is an **inactivity timeout**, the longest silence tolerated from the server between two
+responses. A query result can be consumed, or a command can keep streaming output, for arbitrarily
+long — but as soon as the server stays silent for a whole timeout, the operation fails with
+[`WinRMTimeoutException`](apidocs/org/metricshub/winrm/exceptions/WinRMTimeoutException.html).
+For commands, `RemoteProcess.waitFor(Duration)` provides an overall deadline on top when one is
+needed.
+
 ## The exception surface
 
 The fluent API is **unchecked**: every failure is a

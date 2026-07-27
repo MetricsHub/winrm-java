@@ -73,6 +73,44 @@ Per-operation options: `namespace(...)`, `timeout(...)`, and for WQL enumeration
 from the remote code set by default), and `upload(Path...)` to copy local script files and rewrite
 the command to reference the remote copies.
 
+### Streaming
+
+Both operations also have a streaming terminal for large result sets and long-running commands —
+everything upstream (authentication, TLS, namespace, options) is shared with the blocking
+terminals:
+
+```java
+// WQL rows are pulled from the server page by page as the stream advances:
+// memory stays bounded by one page (pageSize(int)), not by the whole result set.
+try (Stream<WqlRow> rows = client.wql("SELECT * FROM Win32_NTLogEvent").stream()) {
+    rows.filter(r -> "Error".equals(r.string("Type")))
+        .limit(100)
+        .forEach(System.out::println);
+}
+
+// Commands can be consumed while they run, java.lang.Process-style:
+try (RemoteProcess p = client.command("wevtutil qe System /f:text").start()) {
+    try (BufferedReader out = p.stdout()) {
+        out.lines().forEach(System.out::println);
+    }
+    int exitCode = p.waitFor();               // or waitFor(Duration) for a deadline
+}
+
+// Middle ground: tail the output live, keep the blocking terminal and its full result.
+client.command("longRunningThing.exe")
+    .onStdout(chunk -> log.info(chunk))
+    .onStderr(chunk -> log.warn(chunk))
+    .execute();
+```
+
+Streams and processes **must be closed** (try-with-resources): they hold the client's serial
+connection while open, and closing early releases the server-side enumeration (WS-Enumeration
+`Release`) or terminates the remote command (WinRM terminate `Signal`). For the streaming
+terminals the configured timeout is an **inactivity** timeout — the longest silence tolerated from
+the server between two responses — not an overall deadline, so long tails can stream indefinitely.
+Output is decoded incrementally: a multibyte character split across protocol chunks is decoded
+correctly.
+
 The pre-existing static helpers (`WinRMWqlExecutor.executeWql(...)`,
 `WinRMCommandExecutor.execute(...)`) keep working unchanged — see **Legacy API** below.
 

@@ -22,6 +22,7 @@ package org.metricshub.winrm.light;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.net.SocketTimeoutException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -29,7 +30,8 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeoutException;
 import javax.net.ssl.SSLSocketFactory;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
@@ -74,30 +76,34 @@ final class WsmanClient implements AutoCloseable {
 	// The shell's working directory is pinned by the FIRST command on this connection and reused
 	// whenever the shell must be (re)created — e.g. after the server reaped it — so a recreation
 	// stays invisible to the caller instead of silently moving later commands to the default
-	// directory. Guarded by operationLock, like shellId.
+	// directory. Guarded by connectionPermit, like shellId.
 	private String shellWorkingDirectory;
 	private boolean shellWorkingDirectoryPinned;
 
 	// A single NTLM connection is a serial channel: one socket, stateful RC4 ciphers with sequence
 	// numbers, and a single shellId. Concurrent callers (e.g. one executor shared across
 	// threads) MUST NOT interleave, or they read each other's responses and desync the cipher streams.
-	// Every high-level operation (wql/executeCommand) runs while holding this lock; close() only
-	// tries it, so it can still hard-close the transport to unblock an abandoned, timed-out worker.
-	private final ReentrantLock operationLock = new ReentrantLock();
+	// Every high-level operation (wql/executeCommand) and every open streaming handle
+	// (WqlEnumeration/RemoteCommand) runs while holding this single permit; close() only tries it,
+	// so it can still hard-close the transport to unblock an abandoned, timed-out worker. A
+	// Semaphore rather than a ReentrantLock because a streaming handle may legitimately be advanced
+	// and closed by a different thread than the one that opened it (a lock could then not be
+	// released at all — unlock is owner-only).
+	private final Semaphore connectionPermit = new Semaphore(1);
 
 	/**
-	 * Acquire {@link #operationLock}, aborting when this task has been cancelled. A caller's
+	 * Acquire {@link #connectionPermit}, aborting when this task has been cancelled. A caller's
 	 * wall-clock timeout can fire while its operation is still QUEUED behind another one on this
 	 * serial connection; the timeout path then cancels (interrupts) the worker thread, which must
-	 * NOT go on to acquire the lock and execute the operation the caller was already told timed
+	 * NOT go on to acquire the permit and execute the operation the caller was already told timed
 	 * out — a command would run its side effects after the failure was reported. Interruption
 	 * while waiting aborts the acquisition; an interrupt that arrived just before or during the
 	 * acquisition is detected right after it, before anything is sent.
 	 */
 	private void lockAbortably() throws InterruptedException {
-		operationLock.lockInterruptibly();
+		connectionPermit.acquire();
 		if (Thread.interrupted()) {
-			operationLock.unlock();
+			connectionPermit.release();
 			throw new InterruptedException("Operation abandoned: cancelled while waiting for the connection.");
 		}
 	}
@@ -155,7 +161,8 @@ final class WsmanClient implements AutoCloseable {
 	}
 
 	/**
-	 * Run a WQL query and return the rows as ordered property maps.
+	 * Run a WQL query and return the rows as ordered property maps. Implemented as "drain the
+	 * stream" over {@link #openWql} so the blocking and streaming paths cannot drift apart.
 	 *
 	 * @param namespace the WMI namespace
 	 * @param query the WQL query
@@ -171,33 +178,201 @@ final class WsmanClient implements AutoCloseable {
 		final int maxElements,
 		final long maxTimeMs
 	) throws Exception {
-		// Serialize the whole enumeration (Enumerate + all Pulls) against any other operation sharing
-		// this connection; see operationLock.
+		final List<Map<String, String>> rows = new ArrayList<>();
+		try (WqlEnumeration enumeration = openWql(namespace, query, operationTimeoutMs, maxElements, maxTimeMs, false)) {
+			Map<String, String> row;
+			while ((row = enumeration.next()) != null) {
+				rows.add(row);
+			}
+		}
+		return rows;
+	}
+
+	/**
+	 * Start a WQL enumeration and return a lazy handle over its rows. The handle owns the
+	 * connection (see {@link #connectionPermit}) until it is exhausted or closed: no other
+	 * operation can run on this client while it is open.
+	 *
+	 * @param namespace the WMI namespace
+	 * @param query the WQL query
+	 * @param operationTimeoutMs each WSMan round trip's timeout, driving the OperationTimeout
+	 *        header and the socket read timeout — for a streaming consumer this is the inactivity
+	 *        timeout: the longest silence tolerated between two responses
+	 * @param maxElements the WS-Enumeration MaxElements batch size for Enumerate and every Pull
+	 * @param maxTimeMs the WS-Enumeration MaxTime for each Pull in milliseconds; 0 omits the element
+	 * @param failOnQuietTimeout streaming mode: convert a server "no result yet" operation-timeout
+	 *        fault or a socket read timeout on Pull into a {@link TimeoutException} instead of
+	 *        letting the raw fault/IO failure surface (the blocking path is bounded by the caller's
+	 *        wall-clock deadline instead)
+	 */
+	WqlEnumeration openWql(
+		final String namespace,
+		final String query,
+		final long operationTimeoutMs,
+		final int maxElements,
+		final long maxTimeMs,
+		final boolean failOnQuietTimeout
+	) throws Exception {
+		// Serialize the whole enumeration (Enumerate + all Pulls + Release) against any other
+		// operation sharing this connection; see connectionPermit.
 		lockAbortably();
+		boolean opened = false;
 		try {
 			transport.operationTimeout(toSocketTimeoutMillis(operationTimeoutMs));
 			// WMI namespaces are case-insensitive, but preserve the caller's case to match the CXF backend.
 			final String ns = namespace.replace('\\', '/');
-			final List<Map<String, String>> rows = new ArrayList<>();
+			final WqlEnumeration enumeration = new WqlEnumeration(
+				ns,
+				operationTimeoutMs,
+				maxElements,
+				maxTimeMs,
+				failOnQuietTimeout
+			);
+			enumeration.ingest(
+				expectOk(Envelopes.enumerateWql(url, ns, query, operationTimeoutMs, maxElements), "Enumerate")
+			);
+			opened = true;
+			return enumeration;
+		} finally {
+			if (!opened) {
+				connectionPermit.release();
+			}
+		}
+	}
 
-			Document doc = expectOk(Envelopes.enumerateWql(url, ns, query, operationTimeoutMs, maxElements), "Enumerate");
-			collectItems(doc, rows);
+	/**
+	 * A lazily-advancing WQL enumeration: rows are served from the current WS-Enumeration page and
+	 * the next Pull is issued only when the page runs out, so memory stays bounded by one page.
+	 * Holds {@link #connectionPermit} from creation until exhaustion or {@link #close()}; closing
+	 * before the end sends a WS-Enumeration Release so the server frees the enumeration context.
+	 */
+	final class WqlEnumeration implements AutoCloseable {
 
-			// Pull until the server signals EndOfSequence (matching the CXF backend). The aggregate
-			// timeout in LightWinRMService bounds a misbehaving server that never ends the sequence.
-			boolean endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
-			String context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
-			while (!endOfSequence && context != null && !context.isEmpty()) {
+		private final String namespace;
+		private final long operationTimeoutMs;
+		private final int maxElements;
+		private final long maxTimeMs;
+		private final boolean failOnQuietTimeout;
+
+		// The current page only: previous pages (rows and DOM) are unreachable once served.
+		private List<Map<String, String>> page = new ArrayList<>();
+		private int cursor;
+		private String context;
+		private boolean endOfSequence;
+		private boolean finished;
+
+		// Set when an advance failed: the connection state is then unknown (a fault, a half-read
+		// response, a cancellation), so close() must not push a Release into it — it releases the
+		// permit only, exactly like the pre-streaming code did on its error paths.
+		private boolean broken;
+
+		private WqlEnumeration(
+			final String namespace,
+			final long operationTimeoutMs,
+			final int maxElements,
+			final long maxTimeMs,
+			final boolean failOnQuietTimeout
+		) {
+			this.namespace = namespace;
+			this.operationTimeoutMs = operationTimeoutMs;
+			this.maxElements = maxElements;
+			this.maxTimeMs = maxTimeMs;
+			this.failOnQuietTimeout = failOnQuietTimeout;
+		}
+
+		/** Absorb one Enumerate/Pull response: its rows become the current page. */
+		private void ingest(final Document doc) {
+			page = new ArrayList<>();
+			cursor = 0;
+			collectItems(doc, page);
+			endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
+			// Pull only while the server hands back a context (matching the CXF backend).
+			context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
+			if (context == null || context.isEmpty()) {
+				endOfSequence = true;
+			}
+		}
+
+		/**
+		 * The next row, or {@code null} once the enumeration is exhausted. Exhaustion releases the
+		 * connection immediately (no Release is needed — the server discarded the context when it
+		 * sent EndOfSequence), so a fully-consumed enumeration does not depend on {@link #close()}.
+		 */
+		Map<String, String> next() throws Exception {
+			try {
+				return advance();
+			} catch (final Exception e) {
+				broken = true;
+				throw e;
+			}
+		}
+
+		private Map<String, String> advance() throws Exception {
+			if (finished) {
+				return null;
+			}
+			while (cursor >= page.size()) {
+				if (endOfSequence) {
+					finished = true;
+					connectionPermit.release();
+					return null;
+				}
 				// Stop pulling once the caller has been told the operation timed out.
 				checkNotCancelled();
-				doc = expectOk(Envelopes.pull(url, ns, context, operationTimeoutMs, maxElements, maxTimeMs), "Pull");
-				collectItems(doc, rows);
-				endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
-				context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
+				final Decoded resp;
+				try {
+					resp = request(Envelopes.pull(url, namespace, context, operationTimeoutMs, maxElements, maxTimeMs));
+				} catch (final SocketTimeoutException e) {
+					if (failOnQuietTimeout) {
+						throw inactivityTimeout("No response from the WinRM service", e);
+					}
+					throw e;
+				}
+				if (resp.status != 200) {
+					if (failOnQuietTimeout && FAULT_OPERATION_TIMEOUT.equals(wsmanFaultCode(resp.document))) {
+						// The server had no rows to hand out for a whole OperationTimeout: that IS the
+						// streaming inactivity timeout.
+						throw inactivityTimeout("The WQL enumeration produced no rows", null);
+					}
+					throw faultException("Pull", resp);
+				}
+				ingest(resp.document);
 			}
-			return rows;
-		} finally {
-			operationLock.unlock();
+			return page.get(cursor++);
+		}
+
+		private TimeoutException inactivityTimeout(final String what, final Throwable cause) {
+			final TimeoutException timeout = new TimeoutException(
+				what + " within the " + operationTimeoutMs + " ms timeout."
+			);
+			if (cause != null) {
+				timeout.initCause(cause);
+			}
+			return timeout;
+		}
+
+		/**
+		 * Release the enumeration: when the server still holds an enumeration context, a
+		 * best-effort WS-Enumeration Release lets it free the context (and the operation slot it
+		 * counts against server-side quotas) immediately. Always releases the connection; idempotent.
+		 */
+		@Override
+		public void close() {
+			if (finished) {
+				return;
+			}
+			finished = true;
+			try {
+				if (!broken && !endOfSequence && context != null && !context.isEmpty()) {
+					try {
+						request(Envelopes.release(url, namespace, context, operationTimeoutMs));
+					} catch (final Exception ignored) {
+						// Best-effort cleanup: the server reaps an unreleased context on its own timeout.
+					}
+				}
+			} finally {
+				connectionPermit.release();
+			}
 		}
 	}
 
@@ -216,7 +391,12 @@ final class WsmanClient implements AutoCloseable {
 	}
 
 	/**
-	 * Execute a command in the remote command shell, creating the shell on first use.
+	 * Execute a command in the remote command shell, creating the shell on first use. Implemented
+	 * as "drain the stream" over {@link #startCommand} so the blocking and streaming paths cannot
+	 * drift apart: the raw stream BYTES are accumulated and decoded once at the end, because a
+	 * multibyte character (e.g. UTF-8) can be split across Stream elements or Receive responses,
+	 * and decoding each chunk independently would corrupt the boundary bytes into replacement
+	 * characters.
 	 *
 	 * @param commandLine the command line to run
 	 * @param workingDirectory working directory of the shell (only honored when the shell is created)
@@ -230,9 +410,49 @@ final class WsmanClient implements AutoCloseable {
 		final Charset charset,
 		final long operationTimeoutMs
 	) throws Exception {
+		final Charset cs = charset != null ? charset : StandardCharsets.UTF_8;
+		final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+		final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+		try (RemoteCommand command = startCommand(commandLine, workingDirectory, operationTimeoutMs, false)) {
+			RemoteCommand.Chunk chunk;
+			while ((chunk = command.nextChunk()) != null) {
+				stdout.write(chunk.stdout, 0, chunk.stdout.length);
+				stderr.write(chunk.stderr, 0, chunk.stderr.length);
+			}
+			return new CommandOutput(
+				new String(stdout.toByteArray(), cs),
+				new String(stderr.toByteArray(), cs),
+				command.exitCode()
+			);
+		}
+	}
+
+	/**
+	 * Start a command in the remote command shell (creating the shell on first use) and return a
+	 * handle over its raw output chunks. The handle owns the connection (see
+	 * {@link #connectionPermit}) until the command completes or the handle is closed: no other
+	 * operation can run on this client while it is open.
+	 *
+	 * @param commandLine the command line to run
+	 * @param workingDirectory working directory of the shell (only honored when the shell is created)
+	 * @param operationTimeoutMs each WSMan round trip's timeout, driving the OperationTimeout
+	 *        header and the socket read timeout — for a streaming consumer this is the inactivity
+	 *        timeout: the longest silence tolerated between two responses
+	 * @param failOnQuietTimeout streaming mode: convert a server "no output yet" operation-timeout
+	 *        fault or a socket read timeout into a {@link TimeoutException} instead of re-issuing
+	 *        the Receive forever (the blocking path is bounded by the caller's wall-clock deadline
+	 *        instead)
+	 */
+	RemoteCommand startCommand(
+		final String commandLine,
+		final String workingDirectory,
+		final long operationTimeoutMs,
+		final boolean failOnQuietTimeout
+	) throws Exception {
 		// Serialize the whole shell lifecycle (Create + Command + Receive loop + Signal) against any
-		// other operation sharing this connection and the shellId field; see operationLock.
+		// other operation sharing this connection and the shellId field; see connectionPermit.
 		lockAbortably();
+		boolean opened = false;
 		try {
 			transport.operationTimeout(toSocketTimeoutMillis(operationTimeoutMs));
 			if (!shellWorkingDirectoryPinned) {
@@ -242,13 +462,12 @@ final class WsmanClient implements AutoCloseable {
 			if (shellId == null) {
 				createShell(shellWorkingDirectory, operationTimeoutMs);
 			}
-			final Charset cs = charset != null ? charset : StandardCharsets.UTF_8;
 			// The caller's timeout may have fired while the Create response was being awaited (socket
 			// reads do not observe interrupts): never START the command after the reported timeout.
 			checkNotCancelled();
 			String commandId;
 			try {
-				commandId = startCommand(commandLine, operationTimeoutMs);
+				commandId = sendCommand(commandLine, operationTimeoutMs);
 			} catch (final WinRMFaultException e) {
 				if (!FAULT_SHELL_NOT_FOUND.equals(e.getFaultCode())) {
 					throw e;
@@ -259,15 +478,139 @@ final class WsmanClient implements AutoCloseable {
 				shellId = null;
 				createShell(shellWorkingDirectory, operationTimeoutMs);
 				checkNotCancelled();
-				commandId = startCommand(commandLine, operationTimeoutMs);
+				commandId = sendCommand(commandLine, operationTimeoutMs);
 			}
-			try {
-				return receiveLoop(commandId, cs, operationTimeoutMs);
-			} finally {
-				terminate(commandId, operationTimeoutMs);
-			}
+			opened = true;
+			return new RemoteCommand(commandId, operationTimeoutMs, failOnQuietTimeout);
 		} finally {
-			operationLock.unlock();
+			if (!opened) {
+				connectionPermit.release();
+			}
+		}
+	}
+
+	/**
+	 * A running remote command: each {@link #nextChunk()} is one WSMan Receive round trip yielding
+	 * the raw output bytes as the server handed them out, so memory stays bounded by one response.
+	 * Holds {@link #connectionPermit} from creation until completion or {@link #close()}; both
+	 * paths send the terminate Signal, exactly like the pre-streaming receive loop did — Signal
+	 * after completion is part of the shell protocol, and Signal on early close is what actually
+	 * stops the remote command.
+	 */
+	final class RemoteCommand implements AutoCloseable {
+
+		/** One Receive response's worth of raw output bytes, split by stream. */
+		final class Chunk {
+
+			final byte[] stdout;
+			final byte[] stderr;
+
+			Chunk(final byte[] stdout, final byte[] stderr) {
+				this.stdout = stdout;
+				this.stderr = stderr;
+			}
+		}
+
+		private final String commandId;
+		private final long operationTimeoutMs;
+		private final boolean failOnQuietTimeout;
+		private Integer exitCode;
+		private boolean finished;
+
+		private RemoteCommand(final String commandId, final long operationTimeoutMs, final boolean failOnQuietTimeout) {
+			this.commandId = commandId;
+			this.operationTimeoutMs = operationTimeoutMs;
+			this.failOnQuietTimeout = failOnQuietTimeout;
+		}
+
+		/**
+		 * The next chunk of raw output — one Receive round trip, possibly empty — or {@code null}
+		 * once the command has completed. The {@code null} return has already sent the terminate
+		 * Signal and released the connection, so a fully-drained command does not depend on
+		 * {@link #close()}; the exit code is then available from {@link #exitCode()}.
+		 */
+		Chunk nextChunk() throws Exception {
+			if (exitCode != null) {
+				// The command completed with the previous chunk: Signal it and release the connection.
+				finish();
+				return null;
+			}
+			final Decoded resp = receiveOutput();
+			final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+			final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+			collectStreams(resp.document, stdout, stderr);
+			exitCode = doneExitCode(resp.document);
+			return new Chunk(stdout.toByteArray(), stderr.toByteArray());
+		}
+
+		/** Issue Receive until a usable response arrives, honoring the timeout mode. */
+		private Decoded receiveOutput() throws Exception {
+			while (true) {
+				// A late non-final response (or an op-timeout fault) must not keep an abandoned worker
+				// re-issuing Receive — and holding the serial connection — until the remote command ends.
+				// Aborting here still sends the Signal (via close), which terminates the remote command.
+				checkNotCancelled();
+				final Decoded resp;
+				try {
+					resp = request(Envelopes.receive(url, shellId, commandId, operationTimeoutMs));
+				} catch (final SocketTimeoutException e) {
+					if (failOnQuietTimeout) {
+						final TimeoutException timeout = new TimeoutException(
+							"No response from the WinRM service within the " + operationTimeoutMs + " ms timeout."
+						);
+						timeout.initCause(e);
+						throw timeout;
+					}
+					throw e;
+				}
+				if (resp.status == 200) {
+					return resp;
+				}
+				if (!FAULT_OPERATION_TIMEOUT.equals(wsmanFaultCode(resp.document))) {
+					throw faultException("Receive", resp);
+				}
+				// No output before OperationTimeout expired. The blocking path re-issues the Receive
+				// immediately (its caller's wall-clock deadline governs); for a streaming consumer
+				// that silence IS the inactivity timeout.
+				if (failOnQuietTimeout) {
+					throw new TimeoutException(
+						"The command produced no output within the " + operationTimeoutMs + " ms timeout."
+					);
+				}
+			}
+		}
+
+		/**
+		 * The command's exit code, once {@link #nextChunk()} has returned {@code null}.
+		 */
+		int exitCode() {
+			if (exitCode == null) {
+				throw new IllegalStateException("The command has not completed yet.");
+			}
+			return exitCode;
+		}
+
+		/** Signal the command (terminate) and release the connection; runs at most once. */
+		private void finish() throws Exception {
+			if (finished) {
+				return;
+			}
+			finished = true;
+			try {
+				terminate(commandId, operationTimeoutMs);
+			} finally {
+				connectionPermit.release();
+			}
+		}
+
+		/**
+		 * Send the terminate Signal (stopping the remote command when it is still running) and
+		 * release the connection. Idempotent; a no-op when the command already completed and was
+		 * signaled by the final {@link #nextChunk()}.
+		 */
+		@Override
+		public void close() throws Exception {
+			finish();
 		}
 	}
 
@@ -284,46 +627,13 @@ final class WsmanClient implements AutoCloseable {
 		throw new IllegalStateException("Shell ID not found in Create response");
 	}
 
-	private String startCommand(final String commandLine, final long timeoutMs) throws Exception {
+	private String sendCommand(final String commandLine, final long timeoutMs) throws Exception {
 		final Document doc = expectOk(Envelopes.command(url, shellId, commandLine, timeoutMs), "Command");
 		final String commandId = text(doc, "CommandId");
 		if (commandId == null) {
 			throw new IllegalStateException("No CommandId in Command response");
 		}
 		return commandId;
-	}
-
-	private CommandOutput receiveLoop(final String commandId, final Charset charset, final long timeoutMs)
-		throws Exception {
-		// Accumulate the raw stream BYTES and decode once at the end: a multibyte character (e.g. UTF-8)
-		// can be split across Stream elements or Receive responses, and decoding each chunk independently
-		// would corrupt the boundary bytes into replacement characters.
-		final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-		final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
-		while (true) {
-			// A late non-final response (or an op-timeout fault) must not keep an abandoned worker
-			// re-issuing Receive — and holding the serial connection — until the remote command ends.
-			// Aborting here still runs the finally-block Signal, which terminates the remote command.
-			checkNotCancelled();
-			final Decoded resp = request(Envelopes.receive(url, shellId, commandId, timeoutMs));
-			if (resp.status != 200) {
-				final String faultCode = wsmanFaultCode(resp.document);
-				// No output before OperationTimeout → re-issue Receive immediately.
-				if (FAULT_OPERATION_TIMEOUT.equals(faultCode)) {
-					continue;
-				}
-				throw faultException("Receive", resp);
-			}
-			collectStreams(resp.document, stdout, stderr);
-			final Integer exitCode = doneExitCode(resp.document);
-			if (exitCode != null) {
-				return new CommandOutput(
-					new String(stdout.toByteArray(), charset),
-					new String(stderr.toByteArray(), charset),
-					exitCode
-				);
-			}
-		}
 	}
 
 	private void terminate(final String commandId, final long timeoutMs) throws Exception {
@@ -368,8 +678,9 @@ final class WsmanClient implements AutoCloseable {
 
 	/**
 	 * Send one SOAP request (authenticating the connection on first use via the {@link AuthScheme})
-	 * and decode the response. The caller must hold {@link #operationLock}; every path here is reached
-	 * from a locked wql/executeCommand/close, so requests never interleave on the stateful connection.
+	 * and decode the response. The caller must hold {@link #connectionPermit}; every path here is
+	 * reached from an open enumeration/command handle (which owns the permit) or a permit-holding
+	 * close, so requests never interleave on the stateful connection.
 	 */
 	private Decoded request(final String soap) throws Exception {
 		// If the connection was dropped (e.g. the server sent "Connection: close"), the session bound
@@ -602,11 +913,12 @@ final class WsmanClient implements AutoCloseable {
 	@Override
 	public void close() {
 		// Only attempt a graceful shell Delete if no operation is currently using the connection: a
-		// blocking tryLock (never a lock()) keeps close() from waiting on an abandoned, timed-out worker
-		// still holding operationLock while blocked on a socket read. When we cannot acquire the lock,
-		// or a request would otherwise race the worker, we skip the Delete and just hard-close the
-		// transport below — which unblocks that worker's read; the shell is reaped by the server IdleTimeout.
-		final boolean locked = operationLock.tryLock();
+		// non-blocking tryAcquire (never an acquire()) keeps close() from waiting on an abandoned,
+		// timed-out worker — or an open streaming handle — still holding the permit while blocked on
+		// a socket read. When we cannot acquire the permit, or a request would otherwise race the
+		// worker, we skip the Delete and just hard-close the transport below — which unblocks that
+		// worker's read; the shell is reaped by the server IdleTimeout.
+		final boolean locked = connectionPermit.tryAcquire();
 		try {
 			final String shell = shellId;
 			shellId = null;
@@ -625,7 +937,7 @@ final class WsmanClient implements AutoCloseable {
 			}
 		} finally {
 			if (locked) {
-				operationLock.unlock();
+				connectionPermit.release();
 			}
 			transport.close();
 		}
