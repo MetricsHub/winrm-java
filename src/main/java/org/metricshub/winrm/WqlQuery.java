@@ -4,7 +4,7 @@ package org.metricshub.winrm;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2026 MetricsHub
+ * Copyright (C) 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -235,10 +235,15 @@ public class WqlQuery {
 	/**
 	 * Get the map of subproperties to retrieve inside each selected property, in lower case.
 	 *
-	 * @return an unmodifiable view of the property to subproperties map
+	 * @return an unmodifiable view of the property to subproperties map (the subproperty sets are
+	 *         unmodifiable too)
 	 */
 	public Map<String, Set<String>> getSubPropertiesMap() {
-		return Collections.unmodifiableMap(subPropertiesMap);
+		// Deep view: wrap each value set too, so callers cannot alter the parsed query's metadata
+		final Map<String, Set<String>> view = new LinkedHashMap<>();
+		subPropertiesMap
+			.forEach((property, subProperties) -> view.put(property, Collections.unmodifiableSet(subProperties)));
+		return Collections.unmodifiableMap(view);
 	}
 
 	public String getCleanWql() {

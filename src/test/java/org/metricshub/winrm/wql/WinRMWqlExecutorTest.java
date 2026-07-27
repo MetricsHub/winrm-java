@@ -31,6 +31,28 @@ import org.mockito.MockedStatic;
 class WinRMWqlExecutorTest {
 
 	@Test
+	void resultCollectionsAreDefensivelyCopiedAndUnmodifiable() {
+		final List<String> headers = new ArrayList<>(asList("Name", "Path"));
+		final List<List<String>> rows = new ArrayList<>();
+		rows.add(new ArrayList<>(asList("C$", "C:\\")));
+
+		final WinRMWqlExecutor result = new WinRMWqlExecutor(42L, headers, rows);
+
+		// Mutating the source collections (including a retained inner row) after construction
+		// must not affect the result
+		headers.add("Extra");
+		rows.get(0).set(0, "hacked");
+		rows.add(new ArrayList<>());
+		assertEquals(asList("Name", "Path"), result.getHeaders());
+		assertEquals(singletonList(asList("C$", "C:\\")), result.getRows());
+
+		// The returned collections are unmodifiable, down to each row
+		assertThrows(UnsupportedOperationException.class, () -> result.getHeaders().add("x"));
+		assertThrows(UnsupportedOperationException.class, () -> result.getRows().add(asList("x")));
+		assertThrows(UnsupportedOperationException.class, () -> result.getRows().get(0).set(0, "x"));
+	}
+
+	@Test
 	void testExecute() throws Exception {
 		final String wqlQuery = "Select Name,Path from Win32_Share";
 		final String hostname = "host";

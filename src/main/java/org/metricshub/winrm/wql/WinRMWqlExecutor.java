@@ -54,7 +54,13 @@ public class WinRMWqlExecutor {
 	public WinRMWqlExecutor(final long executionTime, final List<String> headers, final List<List<String>> rows) {
 		this.executionTime = executionTime;
 		this.headers = headers != null ? new ArrayList<>(headers) : null;
-		this.rows = rows != null ? new ArrayList<>(rows) : null;
+		// Deep copy: each row is copied too, so a caller retaining a row list cannot mutate this result
+		this.rows = rows != null
+			? rows
+				.stream()
+				.map(row -> row != null ? Collections.unmodifiableList(new ArrayList<>(row)) : null)
+				.collect(Collectors.toList())
+			: null;
 	}
 
 	/**
