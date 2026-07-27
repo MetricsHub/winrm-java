@@ -92,7 +92,7 @@ public class ByteArrayUtils {
 	}
 
 	public static byte[] concat(final byte[]... sequences) {
-		try (final ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+		try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
 			for (byte[] s : sequences) {
 				out.write(s);
 			}

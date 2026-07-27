@@ -203,6 +203,31 @@
 				</executions>
 			</plugin>
 
+			<!--
+				pmd: fail the build on any violation of pmd.xml, so the PMD report stays clean.
+				Version pinned to the one the parent manages for the site report, so the gate and
+				the report always run the same PMD.
+			-->
+			<plugin>
+				<artifactId>maven-pmd-plugin</artifactId>
+				<version>3.26.0</version>
+				<executions>
+					<execution>
+						<phase>verify</phase>
+						<goals>
+							<goal>check</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<targetJdk>${maven.compiler.release}</targetJdk>
+					<rulesets>
+						<ruleset>pmd.xml</ruleset>
+					</rulesets>
+					<printFailingErrors>true</printFailingErrors>
+				</configuration>
+			</plugin>
+
 			<!-- site: pin a recent maven-site-plugin (the version inherited from oss-parent is too old
 			     for the Doxia 2.0 report plugins and raises a project-info-reports LinkageError) and add
 			     the Sentry skin's companion maven-skin-tools -->

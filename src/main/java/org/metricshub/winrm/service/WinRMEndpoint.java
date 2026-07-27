@@ -220,13 +220,13 @@ public class WinRMEndpoint {
 			return false;
 		}
 		final WinRMEndpoint other = (WinRMEndpoint) obj;
-		return (Objects.equals(endpoint, other.endpoint)
+		return Objects.equals(endpoint, other.endpoint)
 			&&
 			Objects.equals(namespace, other.namespace)
 			&&
 			Arrays.equals(password, other.password)
 			&&
-			Objects.equals(rawUsername, other.rawUsername));
+			Objects.equals(rawUsername, other.rawUsername);
 	}
 
 	@Override

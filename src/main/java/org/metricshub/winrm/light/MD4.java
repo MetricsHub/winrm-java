@@ -126,84 +126,84 @@ public class MD4 {
 	}
 
 	private void round1(final int[] d) {
-		a = rotintlft((a + f(b, c, this.d) + d[0]), 3);
-		this.d = rotintlft((this.d + f(a, b, c) + d[1]), 7);
-		c = rotintlft((c + f(this.d, a, b) + d[2]), 11);
-		b = rotintlft((b + f(c, this.d, a) + d[3]), 19);
+		a = rotintlft(a + f(b, c, this.d) + d[0], 3);
+		this.d = rotintlft(this.d + f(a, b, c) + d[1], 7);
+		c = rotintlft(c + f(this.d, a, b) + d[2], 11);
+		b = rotintlft(b + f(c, this.d, a) + d[3], 19);
 
-		a = rotintlft((a + f(b, c, this.d) + d[4]), 3);
-		this.d = rotintlft((this.d + f(a, b, c) + d[5]), 7);
-		c = rotintlft((c + f(this.d, a, b) + d[6]), 11);
-		b = rotintlft((b + f(c, this.d, a) + d[7]), 19);
+		a = rotintlft(a + f(b, c, this.d) + d[4], 3);
+		this.d = rotintlft(this.d + f(a, b, c) + d[5], 7);
+		c = rotintlft(c + f(this.d, a, b) + d[6], 11);
+		b = rotintlft(b + f(c, this.d, a) + d[7], 19);
 
-		a = rotintlft((a + f(b, c, this.d) + d[8]), 3);
-		this.d = rotintlft((this.d + f(a, b, c) + d[9]), 7);
-		c = rotintlft((c + f(this.d, a, b) + d[10]), 11);
-		b = rotintlft((b + f(c, this.d, a) + d[11]), 19);
+		a = rotintlft(a + f(b, c, this.d) + d[8], 3);
+		this.d = rotintlft(this.d + f(a, b, c) + d[9], 7);
+		c = rotintlft(c + f(this.d, a, b) + d[10], 11);
+		b = rotintlft(b + f(c, this.d, a) + d[11], 19);
 
-		a = rotintlft((a + f(b, c, this.d) + d[12]), 3);
-		this.d = rotintlft((this.d + f(a, b, c) + d[13]), 7);
-		c = rotintlft((c + f(this.d, a, b) + d[14]), 11);
-		b = rotintlft((b + f(c, this.d, a) + d[15]), 19);
+		a = rotintlft(a + f(b, c, this.d) + d[12], 3);
+		this.d = rotintlft(this.d + f(a, b, c) + d[13], 7);
+		c = rotintlft(c + f(this.d, a, b) + d[14], 11);
+		b = rotintlft(b + f(c, this.d, a) + d[15], 19);
 	}
 
 	private void round2(final int[] d) {
-		a = rotintlft((a + g(b, c, this.d) + d[0] + 0x5a827999), 3);
-		this.d = rotintlft((this.d + g(a, b, c) + d[4] + 0x5a827999), 5);
-		c = rotintlft((c + g(this.d, a, b) + d[8] + 0x5a827999), 9);
-		b = rotintlft((b + g(c, this.d, a) + d[12] + 0x5a827999), 13);
+		a = rotintlft(a + g(b, c, this.d) + d[0] + 0x5a827999, 3);
+		this.d = rotintlft(this.d + g(a, b, c) + d[4] + 0x5a827999, 5);
+		c = rotintlft(c + g(this.d, a, b) + d[8] + 0x5a827999, 9);
+		b = rotintlft(b + g(c, this.d, a) + d[12] + 0x5a827999, 13);
 
-		a = rotintlft((a + g(b, c, this.d) + d[1] + 0x5a827999), 3);
-		this.d = rotintlft((this.d + g(a, b, c) + d[5] + 0x5a827999), 5);
-		c = rotintlft((c + g(this.d, a, b) + d[9] + 0x5a827999), 9);
-		b = rotintlft((b + g(c, this.d, a) + d[13] + 0x5a827999), 13);
+		a = rotintlft(a + g(b, c, this.d) + d[1] + 0x5a827999, 3);
+		this.d = rotintlft(this.d + g(a, b, c) + d[5] + 0x5a827999, 5);
+		c = rotintlft(c + g(this.d, a, b) + d[9] + 0x5a827999, 9);
+		b = rotintlft(b + g(c, this.d, a) + d[13] + 0x5a827999, 13);
 
-		a = rotintlft((a + g(b, c, this.d) + d[2] + 0x5a827999), 3);
-		this.d = rotintlft((this.d + g(a, b, c) + d[6] + 0x5a827999), 5);
-		c = rotintlft((c + g(this.d, a, b) + d[10] + 0x5a827999), 9);
-		b = rotintlft((b + g(c, this.d, a) + d[14] + 0x5a827999), 13);
+		a = rotintlft(a + g(b, c, this.d) + d[2] + 0x5a827999, 3);
+		this.d = rotintlft(this.d + g(a, b, c) + d[6] + 0x5a827999, 5);
+		c = rotintlft(c + g(this.d, a, b) + d[10] + 0x5a827999, 9);
+		b = rotintlft(b + g(c, this.d, a) + d[14] + 0x5a827999, 13);
 
-		a = rotintlft((a + g(b, c, this.d) + d[3] + 0x5a827999), 3);
-		this.d = rotintlft((this.d + g(a, b, c) + d[7] + 0x5a827999), 5);
-		c = rotintlft((c + g(this.d, a, b) + d[11] + 0x5a827999), 9);
-		b = rotintlft((b + g(c, this.d, a) + d[15] + 0x5a827999), 13);
+		a = rotintlft(a + g(b, c, this.d) + d[3] + 0x5a827999, 3);
+		this.d = rotintlft(this.d + g(a, b, c) + d[7] + 0x5a827999, 5);
+		c = rotintlft(c + g(this.d, a, b) + d[11] + 0x5a827999, 9);
+		b = rotintlft(b + g(c, this.d, a) + d[15] + 0x5a827999, 13);
 	}
 
 	private void round3(final int[] d) {
-		a = rotintlft((a + h(b, c, this.d) + d[0] + 0x6ed9eba1), 3);
-		this.d = rotintlft((this.d + h(a, b, c) + d[8] + 0x6ed9eba1), 9);
-		c = rotintlft((c + h(this.d, a, b) + d[4] + 0x6ed9eba1), 11);
-		b = rotintlft((b + h(c, this.d, a) + d[12] + 0x6ed9eba1), 15);
+		a = rotintlft(a + h(b, c, this.d) + d[0] + 0x6ed9eba1, 3);
+		this.d = rotintlft(this.d + h(a, b, c) + d[8] + 0x6ed9eba1, 9);
+		c = rotintlft(c + h(this.d, a, b) + d[4] + 0x6ed9eba1, 11);
+		b = rotintlft(b + h(c, this.d, a) + d[12] + 0x6ed9eba1, 15);
 
-		a = rotintlft((a + h(b, c, this.d) + d[2] + 0x6ed9eba1), 3);
-		this.d = rotintlft((this.d + h(a, b, c) + d[10] + 0x6ed9eba1), 9);
-		c = rotintlft((c + h(this.d, a, b) + d[6] + 0x6ed9eba1), 11);
-		b = rotintlft((b + h(c, this.d, a) + d[14] + 0x6ed9eba1), 15);
+		a = rotintlft(a + h(b, c, this.d) + d[2] + 0x6ed9eba1, 3);
+		this.d = rotintlft(this.d + h(a, b, c) + d[10] + 0x6ed9eba1, 9);
+		c = rotintlft(c + h(this.d, a, b) + d[6] + 0x6ed9eba1, 11);
+		b = rotintlft(b + h(c, this.d, a) + d[14] + 0x6ed9eba1, 15);
 
-		a = rotintlft((a + h(b, c, this.d) + d[1] + 0x6ed9eba1), 3);
-		this.d = rotintlft((this.d + h(a, b, c) + d[9] + 0x6ed9eba1), 9);
-		c = rotintlft((c + h(this.d, a, b) + d[5] + 0x6ed9eba1), 11);
-		b = rotintlft((b + h(c, this.d, a) + d[13] + 0x6ed9eba1), 15);
+		a = rotintlft(a + h(b, c, this.d) + d[1] + 0x6ed9eba1, 3);
+		this.d = rotintlft(this.d + h(a, b, c) + d[9] + 0x6ed9eba1, 9);
+		c = rotintlft(c + h(this.d, a, b) + d[5] + 0x6ed9eba1, 11);
+		b = rotintlft(b + h(c, this.d, a) + d[13] + 0x6ed9eba1, 15);
 
-		a = rotintlft((a + h(b, c, this.d) + d[3] + 0x6ed9eba1), 3);
-		this.d = rotintlft((this.d + h(a, b, c) + d[11] + 0x6ed9eba1), 9);
-		c = rotintlft((c + h(this.d, a, b) + d[7] + 0x6ed9eba1), 11);
-		b = rotintlft((b + h(c, this.d, a) + d[15] + 0x6ed9eba1), 15);
+		a = rotintlft(a + h(b, c, this.d) + d[3] + 0x6ed9eba1, 3);
+		this.d = rotintlft(this.d + h(a, b, c) + d[11] + 0x6ed9eba1, 9);
+		c = rotintlft(c + h(this.d, a, b) + d[7] + 0x6ed9eba1, 11);
+		b = rotintlft(b + h(c, this.d, a) + d[15] + 0x6ed9eba1, 15);
 	}
 
 	private static int f(final int x, final int y, final int z) {
-		return ((x & y) | (~x & z));
+		return (x & y) | (~x & z);
 	}
 
 	private static int g(final int x, final int y, final int z) {
-		return ((x & y) | (x & z) | (y & z));
+		return (x & y) | (x & z) | (y & z);
 	}
 
 	private static int h(final int x, final int y, final int z) {
-		return (x ^ y ^ z);
+		return x ^ y ^ z;
 	}
 
 	private static int rotintlft(final int val, final int numbits) {
-		return ((val << numbits) | (val >>> (32 - numbits)));
+		return (val << numbits) | (val >>> (32 - numbits));
 	}
 }

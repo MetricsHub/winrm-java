@@ -39,7 +39,10 @@ public class Type3Message extends NTLMMessage {
 		java.security.SecureRandom rnd = null;
 		try {
 			rnd = java.security.SecureRandom.getInstance("SHA1PRNG");
-		} catch (final Exception ignore) {}
+		} catch (final Exception ignored) {
+			// SHA1PRNG is not guaranteed to be present: leave RND_GEN null and let the constructor
+			// reject the authentication attempt with a clear NtlmException.
+		}
 		RND_GEN = rnd;
 	}
 
@@ -93,7 +96,6 @@ public class Type3Message extends NTLMMessage {
 			user,
 			password,
 			nonce,
-			target,
 			responseTargetInformation
 		);
 

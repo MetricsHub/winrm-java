@@ -120,7 +120,7 @@ public class WinRMWqlExecutor {
 		final WinRMEndpoint winRMEndpoint = new WinRMEndpoint(protocol, hostname, port, username, password, namespace);
 
 		try (
-			final WindowsRemoteExecutor winRMService = WinRMExecutorFactory.createInstance(
+			WindowsRemoteExecutor winRMService = WinRMExecutorFactory.createInstance(
 				winRMEndpoint,
 				timeout,
 				ticketCache,

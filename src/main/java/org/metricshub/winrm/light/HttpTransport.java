@@ -178,7 +178,7 @@ final class HttpTransport implements AutoCloseable {
 		} finally {
 			try {
 				socket.setSoTimeout(previousTimeout);
-			} catch (final IOException ignore) {
+			} catch (final IOException ignored) {
 				// socket is being discarded on the stale path anyway
 			}
 		}
@@ -218,7 +218,7 @@ final class HttpTransport implements AutoCloseable {
 			// cannot leak the freshly created SSLSocket.
 			try {
 				newSocket.close();
-			} catch (final IOException ignore) {
+			} catch (final IOException ignored) {
 				// best effort
 			}
 			socket = null;
@@ -355,9 +355,10 @@ final class HttpTransport implements AutoCloseable {
 			if (size == 0) {
 				// After the terminating chunk come zero or more optional trailer fields, then a final
 				// empty line. Consume them all, or leftover bytes desync the kept-alive NTLM socket.
-				String trailer;
-				while ((trailer = readLine()) != null && !trailer.isEmpty()) {
-					// discard trailer field
+				String trailer = readLine();
+				while (trailer != null && !trailer.isEmpty()) {
+					// discard the trailer field and look at the next line
+					trailer = readLine();
 				}
 				break;
 			}
@@ -379,7 +380,7 @@ final class HttpTransport implements AutoCloseable {
 		if (doomed != null) {
 			try {
 				doomed.close();
-			} catch (final IOException ignore) {
+			} catch (final IOException ignored) {
 				// best effort
 			}
 		}
