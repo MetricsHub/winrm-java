@@ -71,6 +71,13 @@ final class WsmanClient implements AutoCloseable {
 	private String pendingAuthorization;
 	private String shellId;
 
+	// The shell's working directory is pinned by the FIRST command on this connection and reused
+	// whenever the shell must be (re)created — e.g. after the server reaped it — so a recreation
+	// stays invisible to the caller instead of silently moving later commands to the default
+	// directory. Guarded by operationLock, like shellId.
+	private String shellWorkingDirectory;
+	private boolean shellWorkingDirectoryPinned;
+
 	// A single NTLM connection is a serial channel: one socket, stateful RC4 ciphers with sequence
 	// numbers, and a single shellId. Concurrent callers (e.g. one executor shared across
 	// threads) MUST NOT interleave, or they read each other's responses and desync the cipher streams.
@@ -228,8 +235,12 @@ final class WsmanClient implements AutoCloseable {
 		lockAbortably();
 		try {
 			transport.operationTimeout(toSocketTimeoutMillis(operationTimeoutMs));
+			if (!shellWorkingDirectoryPinned) {
+				shellWorkingDirectory = workingDirectory;
+				shellWorkingDirectoryPinned = true;
+			}
 			if (shellId == null) {
-				createShell(workingDirectory, operationTimeoutMs);
+				createShell(shellWorkingDirectory, operationTimeoutMs);
 			}
 			final Charset cs = charset != null ? charset : StandardCharsets.UTF_8;
 			// The caller's timeout may have fired while the Create response was being awaited (socket
@@ -244,9 +255,9 @@ final class WsmanClient implements AutoCloseable {
 				}
 				// The server reaped the cached shell between commands (e.g. its IdleTimeout expired on a
 				// long-lived client). The Command was rejected before it could run, so it is safe to
-				// recreate the shell and retry once.
+				// recreate the shell — with its ORIGINAL working directory — and retry once.
 				shellId = null;
-				createShell(workingDirectory, operationTimeoutMs);
+				createShell(shellWorkingDirectory, operationTimeoutMs);
 				checkNotCancelled();
 				commandId = startCommand(commandLine, operationTimeoutMs);
 			}

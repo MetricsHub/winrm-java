@@ -490,7 +490,10 @@ class WinRMClientTest {
 			.enqueue(200, envelope(signalResponse()));
 
 		try (WinRMClient client = builder(PASSWORD).build()) {
-			assertEquals("first", client.command("first.exe").charset(StandardCharsets.UTF_8).execute().stdout());
+			assertEquals(
+				"first",
+				client.command("first.exe").workingDirectory("C:\\Work").charset(StandardCharsets.UTF_8).execute().stdout()
+			);
 			assertEquals("second", client.command("second.exe").charset(StandardCharsets.UTF_8).execute().stdout());
 		}
 
@@ -501,8 +504,15 @@ class WinRMClientTest {
 			() -> String.join("\n---\n", requests)
 		);
 		// Exactly two shells were created, and second.exe was sent twice (rejected, then retried).
-		assertEquals(2, requests.stream().filter(r -> r.contains("<rsp:InputStreams>")).count());
+		final List<String> creates = requests
+			.stream()
+			.filter(r -> r.contains("<rsp:InputStreams>"))
+			.collect(java.util.stream.Collectors.toList());
+		assertEquals(2, creates.size());
 		assertEquals(2, requests.stream().filter(r -> r.contains(">second.exe<")).count());
+		// The recreated shell keeps the working directory pinned by the FIRST command, even though
+		// the retried command did not set one.
+		assertTrue(creates.get(1).contains("<rsp:WorkingDirectory>C:\\Work</rsp:WorkingDirectory>"), creates.get(1));
 	}
 
 	@Test
