@@ -220,11 +220,15 @@ public final class WinRMClient implements AutoCloseable {
 		);
 	}
 
-	/** Validate that a duration is non-null and positive, and return it. */
+	/**
+	 * Validate that a duration is non-null and at least one millisecond (the wire granularity of
+	 * every timeout in this API — a positive sub-millisecond duration would silently become 0),
+	 * and return it.
+	 */
 	static Duration checkPositive(final Duration duration, final String name) {
 		Utils.checkNonNull(duration, name);
-		if (duration.isZero() || duration.isNegative()) {
-			throw new IllegalArgumentException(name + " must be positive.");
+		if (toMillis(duration) < 1) {
+			throw new IllegalArgumentException(name + " must be at least one millisecond.");
 		}
 		return duration;
 	}
@@ -404,7 +408,7 @@ public final class WinRMClient implements AutoCloseable {
 		 * authentication, every WSMan round trip, and result collection. Default: 30 seconds.
 		 * Each operation can override it.
 		 *
-		 * @param timeout the timeout (must be positive)
+		 * @param timeout the timeout (at least one millisecond)
 		 * @return this builder
 		 */
 		public Builder timeout(final Duration timeout) {

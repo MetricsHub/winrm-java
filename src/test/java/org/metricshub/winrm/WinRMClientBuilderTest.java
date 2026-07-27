@@ -64,10 +64,12 @@ class WinRMClientBuilderTest {
 	}
 
 	@Test
-	void timeoutMustBePositive() {
+	void timeoutMustBeAtLeastOneMillisecond() {
 		assertThrows(IllegalArgumentException.class, () -> validBuilder().timeout(Duration.ZERO));
 		assertThrows(IllegalArgumentException.class, () -> validBuilder().timeout(Duration.ofSeconds(-1)));
 		assertThrows(IllegalArgumentException.class, () -> validBuilder().timeout(null));
+		// A positive sub-millisecond duration truncates to 0 ms and must be rejected, not silently dropped.
+		assertThrows(IllegalArgumentException.class, () -> validBuilder().timeout(Duration.ofNanos(1)));
 	}
 
 	@Test
@@ -109,6 +111,7 @@ class WinRMClientBuilderTest {
 			assertThrows(IllegalArgumentException.class, () -> request.namespace(" "));
 			assertThrows(IllegalArgumentException.class, () -> request.timeout(Duration.ZERO));
 			assertThrows(IllegalArgumentException.class, () -> request.pullTimeout(Duration.ofSeconds(-3)));
+			assertThrows(IllegalArgumentException.class, () -> request.pullTimeout(Duration.ofNanos(500)));
 		}
 	}
 

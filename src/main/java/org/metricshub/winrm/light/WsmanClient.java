@@ -78,6 +78,23 @@ final class WsmanClient implements AutoCloseable {
 	// tries it, so it can still hard-close the transport to unblock an abandoned, timed-out worker.
 	private final ReentrantLock operationLock = new ReentrantLock();
 
+	/**
+	 * Acquire {@link #operationLock}, aborting when this task has been cancelled. A caller's
+	 * wall-clock timeout can fire while its operation is still QUEUED behind another one on this
+	 * serial connection; the timeout path then cancels (interrupts) the worker thread, which must
+	 * NOT go on to acquire the lock and execute the operation the caller was already told timed
+	 * out — a command would run its side effects after the failure was reported. Interruption
+	 * while waiting aborts the acquisition; an interrupt that arrived just before or during the
+	 * acquisition is detected right after it, before anything is sent.
+	 */
+	private void lockAbortably() throws InterruptedException {
+		operationLock.lockInterruptibly();
+		if (Thread.interrupted()) {
+			operationLock.unlock();
+			throw new InterruptedException("Operation abandoned: cancelled while waiting for the connection.");
+		}
+	}
+
 	WsmanClient(
 		final String host,
 		final int port,
@@ -136,7 +153,7 @@ final class WsmanClient implements AutoCloseable {
 	) throws Exception {
 		// Serialize the whole enumeration (Enumerate + all Pulls) against any other operation sharing
 		// this connection; see operationLock.
-		operationLock.lock();
+		lockAbortably();
 		try {
 			transport.operationTimeout(toSocketTimeoutMillis(operationTimeoutMs));
 			// WMI namespaces are case-insensitive, but preserve the caller's case to match the CXF backend.
@@ -193,7 +210,7 @@ final class WsmanClient implements AutoCloseable {
 	) throws Exception {
 		// Serialize the whole shell lifecycle (Create + Command + Receive loop + Signal) against any
 		// other operation sharing this connection and the shellId field; see operationLock.
-		operationLock.lock();
+		lockAbortably();
 		try {
 			transport.operationTimeout(toSocketTimeoutMillis(operationTimeoutMs));
 			if (shellId == null) {

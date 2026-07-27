@@ -640,6 +640,24 @@ class ShellFileCopyTest {
 	}
 
 	@Test
+	void uncRemotePathsAreAccepted() throws Exception {
+		final byte[] content = "unc destination".getBytes(UTF_8);
+		final Path localFile = tempDir.resolve("unc.ps1");
+		Files.write(localFile, content);
+
+		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor()
+			.expectCommand("MKDIR", SUCCESS)
+			.expectCommand("certutil -hashfile", hashOutput("SHA256", sha256Hex(content)));
+
+		ShellFileCopy.copyLocalFileToRemoteFile(executor, localFile, "\\\\server\\share\\deploy\\unc.ps1", TIMEOUT);
+
+		assertTrue(
+			executor.getExecutedCommands().get(0).contains("\"\\\\server\\share\\deploy\""),
+			executor.getExecutedCommands().get(0)
+		);
+	}
+
+	@Test
 	void explicitRemotePathIsValidated() throws Exception {
 		final Path localFile = tempDir.resolve("valid.ps1");
 		Files.write(localFile, "x".getBytes(UTF_8));
@@ -649,6 +667,21 @@ class ShellFileCopyTest {
 		assertThrows(
 			IllegalArgumentException.class,
 			() -> ShellFileCopy.copyLocalFileToRemoteFile(executor, localFile, "collect.ps1", TIMEOUT)
+		);
+		// Relative path with a directory: would resolve against the remote shell's current directory
+		assertThrows(
+			IllegalArgumentException.class,
+			() -> ShellFileCopy.copyLocalFileToRemoteFile(executor, localFile, "scripts\\collect.ps1", TIMEOUT)
+		);
+		// Drive-relative path (no backslash after the drive letter): same problem
+		assertThrows(
+			IllegalArgumentException.class,
+			() -> ShellFileCopy.copyLocalFileToRemoteFile(executor, localFile, "C:Temp\\collect.ps1", TIMEOUT)
+		);
+		// Trailing backslash: no file name
+		assertThrows(
+			IllegalArgumentException.class,
+			() -> ShellFileCopy.copyLocalFileToRemoteFile(executor, localFile, "C:\\Temp\\", TIMEOUT)
 		);
 		// cmd.exe would expand % even between quotes
 		assertThrows(

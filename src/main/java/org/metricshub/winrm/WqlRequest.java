@@ -75,7 +75,7 @@ public final class WqlRequest {
 	 * Set the timeout of this query — a wall-clock deadline covering every WSMan round trip and
 	 * result collection. Default: the client's timeout.
 	 *
-	 * @param timeout the timeout (must be positive)
+	 * @param timeout the timeout (at least one millisecond)
 	 * @return this request
 	 */
 	public WqlRequest timeout(final Duration timeout) {
@@ -101,7 +101,7 @@ public final class WqlRequest {
 	 * Set the maximum time the server may hold a single Pull request open before answering with
 	 * the rows it has ({@code MaxTime}). Default: none — the server decides.
 	 *
-	 * @param pullTimeout the per-Pull timeout (must be positive)
+	 * @param pullTimeout the per-Pull timeout (at least one millisecond)
 	 * @return this request
 	 */
 	public WqlRequest pullTimeout(final Duration pullTimeout) {

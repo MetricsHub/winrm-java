@@ -334,6 +334,50 @@ class WinRMClientTest {
 	}
 
 	@Test
+	void queuedOperationThatTimesOutIsNeverSent() throws Exception {
+		// Thread A holds the serial connection with a slow command; thread B's command times out
+		// while QUEUED behind it. B's worker must abort instead of executing the command "later" —
+		// side effects must never run after the caller was already told the operation timed out.
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueueDelayed(
+				200,
+				envelope(receiveResponse(stream("stdout", "CMD-1", "slow".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0))),
+				2_500
+			)
+			.enqueue(200, envelope(signalResponse()));
+
+		final java.util.concurrent.atomic.AtomicReference<Object> slowOutcome = new java.util.concurrent.atomic.AtomicReference<>();
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			final Thread slow = new Thread(() -> {
+				try {
+					slowOutcome.set(client.command("slow.exe").charset(StandardCharsets.UTF_8).execute().stdout());
+				} catch (final RuntimeException e) {
+					slowOutcome.set(e);
+				}
+			});
+			slow.start();
+			Thread.sleep(500); // let the slow command acquire the connection
+
+			assertThrows(
+				WinRMTimeoutException.class,
+				() -> client.command("never.exe").charset(StandardCharsets.UTF_8).timeout(Duration.ofMillis(300)).execute()
+			);
+
+			slow.join(30_000);
+		}
+
+		// The slow command was unaffected by the abandoned one...
+		assertEquals("slow", slowOutcome.get());
+		// ...and the timed-out command never reached the wire.
+		assertTrue(
+			server.decryptedRequests().stream().noneMatch(r -> r.contains("never.exe")),
+			() -> String.join("\n---\n", server.decryptedRequests())
+		);
+	}
+
+	@Test
 	void closedClientRejectsOperationsAndCloseIsIdempotent() {
 		final WinRMClient client = builder(PASSWORD).build();
 		client.close();

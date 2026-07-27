@@ -105,6 +105,10 @@ public class ShellFileCopy {
 	private static final Pattern RESERVED_DEVICE_NAME = Pattern
 		.compile("(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\\..*)?");
 
+	/** Absolute Windows file path: drive-rooted ({@code C:\...}) or UNC ({@code \\server\share\...}). */
+	private static final Pattern ABSOLUTE_REMOTE_PATH = Pattern
+		.compile("(?:[A-Za-z]:|\\\\\\\\[^\\\\]+\\\\[^\\\\]+)\\\\.+");
+
 	/** WSManFault code for "the maximum number of concurrent operations for this user has been exceeded". */
 	private static final String FAULT_OPERATION_QUOTA = "2150859174";
 
@@ -253,10 +257,13 @@ public class ShellFileCopy {
 		Utils.checkNonBlank(remoteFile, "remoteFile");
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
 
+		// Only drive-rooted (C:\...) or UNC (\\server\share\...) destinations: a relative path
+		// (scripts\x.ps1) or a drive-relative one (C:x.ps1) would resolve against the remote
+		// shell's current directory and land the file somewhere the caller did not intend.
 		final int separator = remoteFile.lastIndexOf('\\');
-		if (separator <= 0 || separator == remoteFile.length() - 1) {
+		if (!ABSOLUTE_REMOTE_PATH.matcher(remoteFile).matches() || separator == remoteFile.length() - 1) {
 			throw new IllegalArgumentException(
-				String.format("Remote path %s must be an absolute Windows file path.", remoteFile)
+				String.format("Remote path %s must be an absolute Windows file path (drive-rooted or UNC).", remoteFile)
 			);
 		}
 		final String remoteDirectory = remoteFile.substring(0, separator);

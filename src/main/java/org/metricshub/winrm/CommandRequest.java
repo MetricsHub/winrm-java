@@ -78,7 +78,7 @@ public final class CommandRequest {
 	 * Set the timeout of this command — a wall-clock deadline covering file uploads, encoding
 	 * detection, and the command itself. Default: the client's timeout.
 	 *
-	 * @param timeout the timeout (must be positive)
+	 * @param timeout the timeout (at least one millisecond)
 	 * @return this request
 	 */
 	public CommandRequest timeout(final Duration timeout) {
