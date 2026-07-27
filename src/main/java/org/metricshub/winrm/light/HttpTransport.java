@@ -61,6 +61,9 @@ final class HttpTransport implements AutoCloseable {
 	private OutputStream out;
 	private BufferedInputStream in;
 	private long lastActivityMillis;
+	// Read timeout for the current operation; starts at the connection default and follows the
+	// per-operation timeout (see operationTimeout(int)).
+	private int readTimeoutMillis;
 
 	HttpTransport(final String host, final int port, final int timeoutMillis) {
 		this(host, port, timeoutMillis, null, false);
@@ -78,6 +81,27 @@ final class HttpTransport implements AutoCloseable {
 		this.timeoutMillis = timeoutMillis;
 		this.sslSocketFactory = sslSocketFactory;
 		this.verifyHostname = verifyHostname;
+		// Read timeout slightly above the caller's timeout so the WSMan OperationTimeout fault
+		// (which the Receive loop retries) reliably arrives before a socket read times out.
+		this.readTimeoutMillis = timeoutMillis + 10_000;
+	}
+
+	/**
+	 * Align the socket read timeout with the current operation's timeout (plus headroom, so the
+	 * WSMan OperationTimeout fault arrives before the socket read gives up). Applies to the live
+	 * connection immediately and to any future reconnection.
+	 *
+	 * @param operationTimeoutMillis the current operation's timeout in milliseconds
+	 */
+	void operationTimeout(final int operationTimeoutMillis) {
+		readTimeoutMillis = operationTimeoutMillis + 10_000;
+		if (socket != null && !socket.isClosed()) {
+			try {
+				socket.setSoTimeout(readTimeoutMillis);
+			} catch (final IOException ignored) {
+				// the next read fails and request() re-establishes the connection
+			}
+		}
 	}
 
 	static final class Response {
@@ -200,9 +224,7 @@ final class HttpTransport implements AutoCloseable {
 				sslSocket.setSSLParameters(params);
 			}
 			newSocket.connect(new InetSocketAddress(host, port), timeoutMillis);
-			// Read timeout slightly above the caller's timeout so the WSMan OperationTimeout fault
-			// (which the Receive loop retries) reliably arrives before a socket read times out.
-			newSocket.setSoTimeout(timeoutMillis + 10_000);
+			newSocket.setSoTimeout(readTimeoutMillis);
 			if (newSocket instanceof SSLSocket) {
 				// Force the TLS handshake now so certificate/hostname failures surface here, not on
 				// the first read after we have already sent the request.

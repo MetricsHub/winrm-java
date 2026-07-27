@@ -34,6 +34,8 @@ import javax.net.ssl.SSLSocketFactory;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import org.metricshub.winrm.exceptions.WinRMAuthenticationException;
+import org.metricshub.winrm.exceptions.WinRMFaultException;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -115,17 +117,33 @@ final class WsmanClient implements AutoCloseable {
 		}
 	}
 
-	/** Run a WQL query and return the rows as ordered property maps. */
-	List<Map<String, String>> wql(final String namespace, final String query) throws Exception {
+	/**
+	 * Run a WQL query and return the rows as ordered property maps.
+	 *
+	 * @param namespace the WMI namespace
+	 * @param query the WQL query
+	 * @param operationTimeoutMs this operation's timeout, driving the WSMan OperationTimeout header
+	 *        and the socket read timeout
+	 * @param maxElements the WS-Enumeration MaxElements batch size for Enumerate and every Pull
+	 * @param maxTimeMs the WS-Enumeration MaxTime for each Pull in milliseconds; 0 omits the element
+	 */
+	List<Map<String, String>> wql(
+		final String namespace,
+		final String query,
+		final long operationTimeoutMs,
+		final int maxElements,
+		final long maxTimeMs
+	) throws Exception {
 		// Serialize the whole enumeration (Enumerate + all Pulls) against any other operation sharing
 		// this connection; see operationLock.
 		operationLock.lock();
 		try {
+			transport.operationTimeout(toSocketTimeoutMillis(operationTimeoutMs));
 			// WMI namespaces are case-insensitive, but preserve the caller's case to match the CXF backend.
 			final String ns = namespace.replace('\\', '/');
 			final List<Map<String, String>> rows = new ArrayList<>();
 
-			Document doc = expectOk(Envelopes.enumerateWql(url, ns, query, timeoutMs), "Enumerate");
+			Document doc = expectOk(Envelopes.enumerateWql(url, ns, query, operationTimeoutMs, maxElements), "Enumerate");
 			collectItems(doc, rows);
 
 			// Pull until the server signals EndOfSequence (matching the CXF backend). The aggregate
@@ -133,7 +151,7 @@ final class WsmanClient implements AutoCloseable {
 			boolean endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
 			String context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
 			while (!endOfSequence && context != null && !context.isEmpty()) {
-				doc = expectOk(Envelopes.pull(url, ns, context, timeoutMs), "Pull");
+				doc = expectOk(Envelopes.pull(url, ns, context, operationTimeoutMs, maxElements, maxTimeMs), "Pull");
 				collectItems(doc, rows);
 				endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
 				context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
@@ -158,29 +176,42 @@ final class WsmanClient implements AutoCloseable {
 		}
 	}
 
-	/** Execute a command in the remote command shell, creating the shell on first use. */
-	CommandOutput executeCommand(final String commandLine, final String workingDirectory, final Charset charset)
-		throws Exception {
+	/**
+	 * Execute a command in the remote command shell, creating the shell on first use.
+	 *
+	 * @param commandLine the command line to run
+	 * @param workingDirectory working directory of the shell (only honored when the shell is created)
+	 * @param charset the charset decoding the output streams
+	 * @param operationTimeoutMs this operation's timeout, driving the WSMan OperationTimeout header
+	 *        and the socket read timeout
+	 */
+	CommandOutput executeCommand(
+		final String commandLine,
+		final String workingDirectory,
+		final Charset charset,
+		final long operationTimeoutMs
+	) throws Exception {
 		// Serialize the whole shell lifecycle (Create + Command + Receive loop + Signal) against any
 		// other operation sharing this connection and the shellId field; see operationLock.
 		operationLock.lock();
 		try {
+			transport.operationTimeout(toSocketTimeoutMillis(operationTimeoutMs));
 			if (shellId == null) {
-				createShell(workingDirectory);
+				createShell(workingDirectory, operationTimeoutMs);
 			}
 			final Charset cs = charset != null ? charset : StandardCharsets.UTF_8;
-			final String commandId = startCommand(commandLine);
+			final String commandId = startCommand(commandLine, operationTimeoutMs);
 			try {
-				return receiveLoop(commandId, cs);
+				return receiveLoop(commandId, cs, operationTimeoutMs);
 			} finally {
-				terminate(commandId);
+				terminate(commandId, operationTimeoutMs);
 			}
 		} finally {
 			operationLock.unlock();
 		}
 	}
 
-	private void createShell(final String workingDirectory) throws Exception {
+	private void createShell(final String workingDirectory, final long timeoutMs) throws Exception {
 		final Document doc = expectOk(Envelopes.createShell(url, workingDirectory, timeoutMs), "Create shell");
 		final NodeList selectors = doc.getElementsByTagNameNS("*", "Selector");
 		for (int i = 0; i < selectors.getLength(); i++) {
@@ -193,7 +224,7 @@ final class WsmanClient implements AutoCloseable {
 		throw new IllegalStateException("Shell ID not found in Create response");
 	}
 
-	private String startCommand(final String commandLine) throws Exception {
+	private String startCommand(final String commandLine, final long timeoutMs) throws Exception {
 		final Document doc = expectOk(Envelopes.command(url, shellId, commandLine, timeoutMs), "Command");
 		final String commandId = text(doc, "CommandId");
 		if (commandId == null) {
@@ -202,7 +233,8 @@ final class WsmanClient implements AutoCloseable {
 		return commandId;
 	}
 
-	private CommandOutput receiveLoop(final String commandId, final Charset charset) throws Exception {
+	private CommandOutput receiveLoop(final String commandId, final Charset charset, final long timeoutMs)
+		throws Exception {
 		// Accumulate the raw stream BYTES and decode once at the end: a multibyte character (e.g. UTF-8)
 		// can be split across Stream elements or Receive responses, and decoding each chunk independently
 		// would corrupt the boundary bytes into replacement characters.
@@ -216,7 +248,7 @@ final class WsmanClient implements AutoCloseable {
 				if (FAULT_OPERATION_TIMEOUT.equals(faultCode)) {
 					continue;
 				}
-				throw new IllegalStateException("Receive failed: " + faultSummary(resp));
+				throw faultException("Receive", resp);
 			}
 			collectStreams(resp.document, stdout, stderr);
 			final Integer exitCode = doneExitCode(resp.document);
@@ -230,11 +262,11 @@ final class WsmanClient implements AutoCloseable {
 		}
 	}
 
-	private void terminate(final String commandId) throws Exception {
+	private void terminate(final String commandId, final long timeoutMs) throws Exception {
 		final Decoded resp = request(Envelopes.signal(url, shellId, commandId, timeoutMs));
 		// A missing shell is fine here — the command already finished and the shell may be gone.
 		if (resp.status != 200 && !FAULT_SHELL_NOT_FOUND.equals(wsmanFaultCode(resp.document))) {
-			throw new IllegalStateException("Signal failed: " + faultSummary(resp));
+			throw faultException("Signal", resp);
 		}
 	}
 
@@ -244,9 +276,25 @@ final class WsmanClient implements AutoCloseable {
 	private Document expectOk(final String soap, final String operation) throws Exception {
 		final Decoded resp = request(soap);
 		if (resp.status != 200) {
-			throw new IllegalStateException(operation + " failed: " + faultSummary(resp));
+			throw faultException(operation, resp);
 		}
 		return resp.document;
+	}
+
+	/**
+	 * Build the exception for a faulting response: the message keeps the historical
+	 * {@code <operation> failed: <summary>} format (part of the exception-message contract inherited
+	 * from the CXF backend), and the WSMan fault code, reason and provider detail travel as fields so
+	 * the fluent API can expose them programmatically.
+	 */
+	private static WinRMFaultException faultException(final String operation, final Decoded resp) {
+		return new WinRMFaultException(
+			operation + " failed: " + faultSummary(resp),
+			resp.status,
+			trimToNull(wsmanFaultCode(resp.document)),
+			trimToNull(text(resp.document, "Text")),
+			trimToNull(wsmanFaultMessage(resp.document))
+		);
 	}
 
 	/**
@@ -293,7 +341,7 @@ final class WsmanClient implements AutoCloseable {
 				}
 				// Same message format as the CXF backend's credential-rejection path — callers (and their
 				// operators) match on it.
-				throw new IllegalStateException(
+				throw new WinRMAuthenticationException(
 					String.format("Authentication error on %s with user name \"%s\"", url, rawUsername)
 				);
 			}

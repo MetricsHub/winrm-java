@@ -22,6 +22,7 @@ package org.metricshub.winrm.service;
 
 import java.nio.file.Path;
 import java.util.List;
+import javax.net.ssl.SSLContext;
 import org.metricshub.winrm.WindowsRemoteExecutor;
 import org.metricshub.winrm.exceptions.WinRMException;
 import org.metricshub.winrm.light.LightWinRMService;
@@ -52,5 +53,38 @@ public final class WinRMExecutorFactory {
 		final List<AuthenticationEnum> authentications
 	) throws WinRMException {
 		return LightWinRMService.createInstance(winRMEndpoint, timeout, ticketCache, authentications);
+	}
+
+	/**
+	 * Create a {@link WindowsRemoteExecutor} with an explicit TLS configuration, overriding the
+	 * {@code org.metricshub.winrm.tls.insecure} system property for this instance.
+	 *
+	 * @param winRMEndpoint endpoint with credentials (mandatory)
+	 * @param timeout timeout in milliseconds (must be &gt; 0)
+	 * @param ticketCache Kerberos ticket cache path (may be {@code null})
+	 * @param authentications requested authentication schemes (may be {@code null})
+	 * @param sslContext the {@link SSLContext} providing the HTTPS socket factory (hostname
+	 *        verification stays on); {@code null} uses the default configuration
+	 * @param trustAllCertificates when {@code true} (and no {@code sslContext} is given), trust every
+	 *        server certificate and skip hostname verification — insecure, testing only
+	 * @return an executor backed by {@link LightWinRMService}
+	 * @throws WinRMException for any problem creating the executor
+	 */
+	public static WindowsRemoteExecutor createInstance(
+		final WinRMEndpoint winRMEndpoint,
+		final long timeout,
+		final Path ticketCache,
+		final List<AuthenticationEnum> authentications,
+		final SSLContext sslContext,
+		final boolean trustAllCertificates
+	) throws WinRMException {
+		return LightWinRMService.createInstance(
+			winRMEndpoint,
+			timeout,
+			ticketCache,
+			authentications,
+			sslContext,
+			trustAllCertificates
+		);
 	}
 }

@@ -591,4 +591,82 @@ class ShellFileCopyTest {
 			ShellFileCopy.digestProbe("C:\\f")
 		);
 	}
+
+	@Test
+	void copiesToExplicitRemotePathCreatingTheDirectory() throws Exception {
+		final byte[] content = "explicit destination\r\n".getBytes(UTF_8);
+		final Path localFile = tempDir.resolve("collect.ps1");
+		Files.write(localFile, content);
+
+		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor()
+			.expectCommand("MKDIR", SUCCESS)
+			.expectCommand(" echo ", SUCCESS)
+			.expectCommand("certutil -f -decode", hashOutput("SHA256", sha256Hex(content)))
+			.expectCommand("MOVE /Y", hashOutput("SHA256", sha256Hex(content)))
+			// The initial destination probe: the file does not exist yet
+			.expectCommand("certutil -hashfile", FAILURE);
+
+		ShellFileCopy.copyLocalFileToRemoteFile(executor, localFile, "C:\\Deploy\\scripts\\collect.ps1", TIMEOUT);
+
+		final List<String> commands = executor.getExecutedCommands();
+		assertTrue(
+			commands.get(0).contains("IF NOT EXIST \"C:\\Deploy\\scripts\" MKDIR \"C:\\Deploy\\scripts\""),
+			commands.get(0)
+		);
+		// The transferred bytes round-trip through the echoed base64 payload
+		assertArrayEquals(content, echoedContent(commands));
+		// And the verified staging copy is published at the exact requested destination
+		assertTrue(
+			commands.stream().anyMatch(c -> c.contains("MOVE /Y") && c.contains("\"C:\\Deploy\\scripts\\collect.ps1\"")),
+			commands.toString()
+		);
+	}
+
+	@Test
+	void explicitRemotePathTransferIsSkippedWhenDigestsMatch() throws Exception {
+		final byte[] content = "already there".getBytes(UTF_8);
+		final Path localFile = tempDir.resolve("same.ps1");
+		Files.write(localFile, content);
+
+		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor()
+			.expectCommand("MKDIR", SUCCESS)
+			.expectCommand("certutil -hashfile", hashOutput("SHA256", sha256Hex(content)));
+
+		ShellFileCopy.copyLocalFileToRemoteFile(executor, localFile, "C:\\Deploy\\same.ps1", TIMEOUT);
+
+		// Directory creation + destination probe only: no echo legs, no decode, no publish
+		assertEquals(2, executor.getExecutedCommands().size(), executor.getExecutedCommands().toString());
+		assertFalse(executor.getExecutedCommands().stream().anyMatch(c -> c.contains(" echo ")));
+	}
+
+	@Test
+	void explicitRemotePathIsValidated() throws Exception {
+		final Path localFile = tempDir.resolve("valid.ps1");
+		Files.write(localFile, "x".getBytes(UTF_8));
+		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor();
+
+		// Not an absolute Windows path
+		assertThrows(
+			IllegalArgumentException.class,
+			() -> ShellFileCopy.copyLocalFileToRemoteFile(executor, localFile, "collect.ps1", TIMEOUT)
+		);
+		// cmd.exe would expand % even between quotes
+		assertThrows(
+			IllegalArgumentException.class,
+			() -> ShellFileCopy.copyLocalFileToRemoteFile(executor, localFile, "C:\\Temp\\bad%name.ps1", TIMEOUT)
+		);
+		// Directory part with a character Windows forbids in path components
+		assertThrows(
+			IllegalArgumentException.class,
+			() -> ShellFileCopy.copyLocalFileToRemoteFile(executor, localFile, "C:\\Te|mp\\x.ps1", TIMEOUT)
+		);
+		// Longer than MAX_PATH once the staging suffixes are added
+		final String tooLong = "C:\\Deploy\\" + "a".repeat(250) + "\\x.ps1";
+		assertThrows(
+			IllegalArgumentException.class,
+			() -> ShellFileCopy.copyLocalFileToRemoteFile(executor, localFile, tooLong, TIMEOUT)
+		);
+		// Nothing was executed remotely: validation happens before any command
+		assertTrue(executor.getExecutedCommands().isEmpty());
+	}
 }

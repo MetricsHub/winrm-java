@@ -28,6 +28,54 @@ The Windows Remote Management (WinRM) Java Client is a library that enables to:
 >   (and `WinRMWqlExecutor` copies the lists passed to its constructor): callers that mutated
 >   the returned collections must now copy them first.
 
+## Quick start
+
+The fluent `WinRMClient` is the entry point of the library: one client authenticates once and can
+run any number of WQL queries and commands over the same connection. All failures are reported
+through the unchecked `WinRMClientException` hierarchy (`WinRMAuthenticationException`,
+`WinRMFaultException` with the WSMan fault code and detail as fields, `WinRMTimeoutException`,
+`WqlSyntaxException`).
+
+```java
+import java.nio.file.Path;
+import java.time.Duration;
+import org.metricshub.winrm.*;
+
+try (WinRMClient client = WinRMClient.builder("server01.acme.com")
+        .credentials("ACME\\admin", password)          // char[], wiped by you afterward
+        .timeout(Duration.ofSeconds(30))               // default for all operations
+        .build()) {
+
+    // WQL query
+    WqlResult services = client.wql("SELECT Name, State FROM Win32_Service").execute();
+    for (WqlRow row : services) {
+        System.out.println(row.string("Name") + " is " + row.string("State"));
+    }
+
+    // Remote command
+    CommandResult result = client.command("ipconfig /all").execute();
+    System.out.println(result.stdout());
+
+    // Copy a file to the host (through the WinRM channel itself — no SMB)
+    client.uploadFile(Path.of("collect.ps1"), "C:\\Windows\\Temp\\collect.ps1");
+}
+```
+
+Connection-scoped options on the builder: `https()`, `port(int)`,
+`authentication(AuthScheme.KERBEROS, AuthScheme.NTLM)` (ordered fallback; NTLM is the default),
+`ticketCache(Path)`, `namespace(String)`, `trustAllCertificates()` (per-client alternative to the
+`org.metricshub.winrm.tls.insecure` system property; insecure, testing only), and
+`sslContext(SSLContext)` for a dedicated trust store.
+
+Per-operation options: `namespace(...)`, `timeout(...)`, and for WQL enumeration tuning
+`pageSize(int)` (WS-Enumeration `MaxElements`, 32000 by default) and `pullTimeout(Duration)`
+(`MaxTime` per Pull). Commands accept `workingDirectory(String)`, `charset(Charset)` (detected
+from the remote code set by default), and `upload(Path...)` to copy local script files and rewrite
+the command to reference the remote copies.
+
+The pre-existing static helpers (`WinRMWqlExecutor.executeWql(...)`,
+`WinRMCommandExecutor.execute(...)`) keep working unchanged — see **Legacy API** below.
+
 ## The WinRM client
 
 The client has **zero runtime dependencies** (no Apache CXF / JAX-WS / JAXB, no BouncyCastle, no
@@ -35,15 +83,23 @@ SLF4J — problems are reported through exceptions only) and is immune by constr
 `ServiceLoader` conflicts (it uses the JDK-default XML factories). It supports **NTLM over HTTP
 (with message encryption) and HTTPS** and **Kerberos (SPNEGO) over HTTPS**.
 
-Files listed in `localFileToCopyList` are copied to the remote host **through the WinRM channel
-itself** (chunked base64 through the command shell, decoded with `certutil` and verified with a
-digest): no SMB, no TCP port 445, no administrative share — and it works from any client OS. A
-file already present on the remote host with an identical digest is not transferred again. This
-transport is designed for small script files, not bulk data. Over HTTPS it
-validates the certificate and verifies the hostname by default (see the upgrade warning above);
+Files passed to `upload(...)` (or `localFileToCopyList` in the legacy API) are copied to the
+remote host **through the WinRM channel itself** (chunked base64 through the command shell,
+decoded with `certutil` and verified with a digest): no SMB, no TCP port 445, no administrative
+share — and it works from any client OS. A file already present on the remote host with an
+identical digest is not transferred again. This transport is designed for small script files, not
+bulk data. Over HTTPS it validates the certificate and verifies the hostname by default (see the
+upgrade warning above); `trustAllCertificates()` on the builder or
 `-Dorg.metricshub.winrm.tls.insecure=true` trusts all certificates (insecure, testing only).
 Kerberos uses the ambient Kerberos configuration (`krb5.conf` / `-Djava.security.krb5.*`) unless
 the command-line KDC and realm options described below are used.
+
+### Legacy API
+
+The static one-shot helpers that predate `WinRMClient` remain available and unchanged, with their
+checked exceptions: `WinRMWqlExecutor.executeWql(...)` and `WinRMCommandExecutor.execute(...)`.
+They open a connection, run one operation, and close it — prefer `WinRMClient` for anything that
+runs more than one operation against the same host.
 
 ## Command-line client
 

@@ -58,10 +58,16 @@ public final class FakeWsmanServer implements AutoCloseable {
 
 		final int status;
 		final String soapBody;
+		final long delayMillis;
 
 		Scripted(final int status, final String soapBody) {
+			this(status, soapBody, 0L);
+		}
+
+		Scripted(final int status, final String soapBody, final long delayMillis) {
 			this.status = status;
 			this.soapBody = soapBody;
+			this.delayMillis = delayMillis;
 		}
 	}
 
@@ -138,6 +144,22 @@ public final class FakeWsmanServer implements AutoCloseable {
 	public FakeWsmanServer enqueue(final int status, final String soapBody) {
 		synchronized (script) {
 			script.addLast(new Scripted(status, soapBody));
+		}
+		return this;
+	}
+
+	/**
+	 * Queue the next scripted response with an artificial delay before it is served — to test
+	 * client-side timeouts deterministically.
+	 *
+	 * @param status the HTTP status code to respond with
+	 * @param soapBody the plaintext SOAP body to encrypt and serve
+	 * @param delayMillis how long to wait before serving the response
+	 * @return this server, for chaining
+	 */
+	public FakeWsmanServer enqueueDelayed(final int status, final String soapBody, final long delayMillis) {
+		synchronized (script) {
+			script.addLast(new Scripted(status, soapBody, delayMillis));
 		}
 		return this;
 	}
@@ -259,6 +281,14 @@ public final class FakeWsmanServer implements AutoCloseable {
 					"<s:Reason><s:Text xml:lang=\"en-US\">FakeWsmanServer: no scripted response left</s:Text></s:Reason>" +
 					"</s:Fault></s:Body></s:Envelope>"
 			);
+		}
+		if (next.delayMillis > 0) {
+			try {
+				Thread.sleep(next.delayMillis);
+			} catch (final InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return; // test shutdown
+			}
 		}
 		final byte[] sealed = NtlmCrypto.encryptAndSign(session, next.soapBody.getBytes(StandardCharsets.UTF_8));
 		respond(out, next.status, null, NtlmCrypto.ENCRYPTED_CONTENT_TYPE, sealed);
