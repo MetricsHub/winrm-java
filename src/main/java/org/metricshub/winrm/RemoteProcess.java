@@ -137,22 +137,26 @@ public final class RemoteProcess implements AutoCloseable {
 
 	/**
 	 * Wait at most the given duration for the command to complete — an overall deadline, on top of
-	 * the per-response inactivity timeout. The deadline is checked between protocol round trips,
-	 * so the wait can overshoot by up to one inactivity timeout. Expiry does not affect the
-	 * command: it keeps running, and the caller decides whether to keep waiting or {@link #close()}.
+	 * the per-response inactivity timeout. The remaining wait also bounds the active protocol
+	 * round trip (the server is asked to answer within it), so the wait returns promptly at the
+	 * deadline instead of hanging on a silent command. Expiry does not affect the command: it
+	 * keeps running, the process stays fully usable, and the caller decides whether to keep
+	 * waiting or {@link #close()}.
 	 *
 	 * @param deadline how long to wait (at least one millisecond)
 	 * @return {@code true} when the command completed within the given duration — the exit code is
 	 *         then available from {@link #exitCode()} — {@code false} when the wait expired first
-	 * @throws WinRMTimeoutException when the command stays silent for a whole inactivity timeout
+	 * @throws WinRMTimeoutException when the server does not even answer the bounded requests
 	 * @throws org.metricshub.winrm.exceptions.WinRMClientException for any other failure
 	 */
 	public synchronized boolean waitFor(final Duration deadline) {
 		WinRMClient.checkPositive(deadline, "deadline");
 		final long deadlineMillis = WinRMClient.toMillis(deadline);
 		final long start = Utils.getCurrentTimeMillis();
-		while (!finished && Utils.getCurrentTimeMillis() - start < deadlineMillis) {
-			fetchOnce();
+		long remaining = deadlineMillis;
+		while (!finished && remaining > 0) {
+			absorb(advance(remaining));
+			remaining = deadlineMillis - (Utils.getCurrentTimeMillis() - start);
 		}
 		if (finished && exitCode == null) {
 			throw new IllegalStateException("The process was closed before the command completed.");
@@ -211,9 +215,17 @@ public final class RemoteProcess implements AutoCloseable {
 
 	/** One Receive round trip: decode what arrived into the per-channel buffers. Holds the monitor. */
 	private void fetchOnce() {
-		final CommandCursor.Chunk chunk;
+		absorb(advance(-1));
+	}
+
+	/**
+	 * One protocol round trip: unbounded ({@code maxWaitMillis < 0}, the inactivity timeout
+	 * governs) or bounded to the given wait (a deadline-driven poll whose expiry is an empty
+	 * chunk, not a failure). Holds the monitor.
+	 */
+	private CommandCursor.Chunk advance(final long maxWaitMillis) {
 		try {
-			chunk = cursor.next();
+			return maxWaitMillis < 0 ? cursor.next() : cursor.poll(maxWaitMillis);
 		} catch (final TimeoutException e) {
 			throw new WinRMTimeoutException(
 				String.format("Command produced no output within %s on %s", timeout, hostname),
@@ -222,6 +234,10 @@ public final class RemoteProcess implements AutoCloseable {
 		} catch (final WindowsRemoteException e) {
 			throw WinRMClient.translate(e);
 		}
+	}
+
+	/** Absorb one round trip's outcome into the process state. Holds the monitor. */
+	private void absorb(final CommandCursor.Chunk chunk) {
 		if (chunk == null) {
 			finished = true;
 			exitCode = cursor.exitCode();

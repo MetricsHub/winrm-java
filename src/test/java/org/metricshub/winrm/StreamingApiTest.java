@@ -469,6 +469,37 @@ class StreamingApiTest {
 	}
 
 	@Test
+	void waitForDeadlineBoundsTheActiveReceive() throws Exception {
+		enqueueCommandStartup();
+		server
+			// Answers the bounded Receive after the wait would have expired: with a compliant server
+			// this is the "nothing yet" op-timeout fault at the requested OperationTimeout. It must
+			// read as an expired poll, NOT as an inactivity failure — the handle stays usable.
+			.enqueueDelayed(500, fault(FAULT_OPERATION_TIMEOUT, "The operation timed out."), 300)
+			.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 3))))
+			.enqueue(200, envelope(signalResponse()));
+
+		try (WinRMClient client = builder().build()) {
+			try (RemoteProcess process = client.command("slow.exe").charset(StandardCharsets.UTF_8).start()) {
+				assertFalse(process.waitFor(Duration.ofMillis(200)), "the command must still be running");
+
+				// The active Receive was bounded by the remaining wait, not by the 10 s inactivity
+				// timeout: its WSMan OperationTimeout is sub-second.
+				final String boundedReceive = server.decryptedRequests().get(2);
+				assertTrue(boundedReceive.contains("/Receive"), boundedReceive);
+				assertTrue(
+					boundedReceive.contains("<wsman:OperationTimeout>PT0."),
+					"the bounded Receive must carry the remaining wait as its OperationTimeout"
+				);
+
+				// The expired wait was non-destructive: the process completes normally afterward.
+				assertEquals(3, process.waitFor());
+				assertEquals("done", process.stdout().readLine());
+			}
+		}
+	}
+
+	@Test
 	void commandSilenceBeyondTheTimeoutSurfacesAsInactivityTimeout() throws Exception {
 		enqueueCommandStartup();
 		server

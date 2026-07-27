@@ -549,7 +549,58 @@ final class WsmanClient implements AutoCloseable {
 				finish();
 				return null;
 			}
-			final Decoded resp = receiveOutput();
+			return toChunk(receiveOutput());
+		}
+
+		/**
+		 * Bounded variant of {@link #nextChunk()}: one Receive round trip whose WSMan
+		 * OperationTimeout is the given wait, so a compliant server answers within it — with output,
+		 * or with the "nothing yet" op-timeout fault, which is returned as an EMPTY chunk instead of
+		 * failing the handle. This is how a deadline-bounded wait polls without risking the
+		 * connection: the fault is the protocol's clean expiry, the exchange completes, and the
+		 * command (and this handle) remain fully usable. Returns {@code null} exactly like
+		 * {@link #nextChunk()} once the command has completed.
+		 *
+		 * @param maxWaitMs how long the server may hold the Receive, capped by the handle's own
+		 *        per-round-trip timeout
+		 */
+		Chunk pollChunk(final long maxWaitMs) throws Exception {
+			if (finished) {
+				return null;
+			}
+			if (exitCode != null) {
+				finish();
+				return null;
+			}
+			final long wait = Math.max(1, Math.min(maxWaitMs, operationTimeoutMs));
+			// The socket gets the blocking-style headroom on purpose: the expected answer to an
+			// expired bounded Receive is the op-timeout FAULT, and it must win the race against the
+			// socket timeout or the poll would desync the connection it is supposed to leave intact.
+			transport.operationTimeout(toSocketTimeoutMillis(wait));
+			try {
+				checkNotCancelled();
+				final Decoded resp;
+				try {
+					resp = request(Envelopes.receive(url, shellId, commandId, wait));
+				} catch (final SocketTimeoutException e) {
+					throw quietTimeout("No response from the WinRM service", wait, e);
+				}
+				if (resp.status != 200) {
+					if (FAULT_OPERATION_TIMEOUT.equals(wsmanFaultCode(resp.document))) {
+						// Nothing yet: the bounded wait elapsed server-side.
+						return new Chunk(new byte[0], new byte[0]);
+					}
+					throw faultException("Receive", resp);
+				}
+				return toChunk(resp);
+			} finally {
+				// Back to the strict streaming bound for the ordinary (unbounded) fetches.
+				transport.inactivityTimeout(toSocketTimeoutMillis(operationTimeoutMs));
+			}
+		}
+
+		/** Turn one 200 Receive response into a chunk, recording the exit code when it says Done. */
+		private Chunk toChunk(final Decoded resp) {
 			final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
 			final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
 			collectStreams(resp.document, stdout, stderr);

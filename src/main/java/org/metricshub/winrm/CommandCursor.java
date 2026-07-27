@@ -53,6 +53,25 @@ public interface CommandCursor extends AutoCloseable {
 	Chunk next() throws TimeoutException, WindowsRemoteException;
 
 	/**
+	 * Bounded variant of {@link #next()}: block at most the given wait for output. When the
+	 * command produces nothing in that window, an <b>empty</b> chunk is returned — a bounded poll
+	 * expiring is not a failure, and the cursor remains fully usable — unlike {@link #next()},
+	 * whose whole per-round-trip timeout counts as the stream's inactivity limit. Deadline-bounded
+	 * waits (e.g. {@code RemoteProcess.waitFor(Duration)}) are built on this.
+	 * <p>
+	 * The default implementation does not bound the wait: it delegates to {@link #next()}.
+	 *
+	 * @param maxWaitMillis how long to block at most, capped by the cursor's per-round-trip timeout
+	 * @return the next chunk of raw output — empty when the wait elapsed first — or {@code null}
+	 *         once the command has completed
+	 * @throws TimeoutException when the server does not even answer the bounded request
+	 * @throws WindowsRemoteException for any other failure while receiving
+	 */
+	default Chunk poll(final long maxWaitMillis) throws TimeoutException, WindowsRemoteException {
+		return next();
+	}
+
+	/**
 	 * Get the command's exit code.
 	 *
 	 * @return the exit code
