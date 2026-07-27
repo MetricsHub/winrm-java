@@ -95,6 +95,19 @@ final class WsmanClient implements AutoCloseable {
 		}
 	}
 
+	/**
+	 * Abort between protocol steps when this task has been cancelled. A classic socket read does
+	 * not observe the interrupt the timeout path delivers: a worker blocked in (say) the Create
+	 * shell response can outlive its caller's timeout and would otherwise go on to the next step —
+	 * sending a command after the caller was already told the operation timed out. Checked before
+	 * every step with side effects.
+	 */
+	private static void checkNotCancelled() throws InterruptedException {
+		if (Thread.interrupted()) {
+			throw new InterruptedException("Operation abandoned: cancelled after its timeout was reported.");
+		}
+	}
+
 	WsmanClient(
 		final String host,
 		final int port,
@@ -168,6 +181,8 @@ final class WsmanClient implements AutoCloseable {
 			boolean endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
 			String context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
 			while (!endOfSequence && context != null && !context.isEmpty()) {
+				// Stop pulling once the caller has been told the operation timed out.
+				checkNotCancelled();
 				doc = expectOk(Envelopes.pull(url, ns, context, operationTimeoutMs, maxElements, maxTimeMs), "Pull");
 				collectItems(doc, rows);
 				endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
@@ -217,6 +232,9 @@ final class WsmanClient implements AutoCloseable {
 				createShell(workingDirectory, operationTimeoutMs);
 			}
 			final Charset cs = charset != null ? charset : StandardCharsets.UTF_8;
+			// The caller's timeout may have fired while the Create response was being awaited (socket
+			// reads do not observe interrupts): never START the command after the reported timeout.
+			checkNotCancelled();
 			final String commandId = startCommand(commandLine, operationTimeoutMs);
 			try {
 				return receiveLoop(commandId, cs, operationTimeoutMs);

@@ -305,21 +305,11 @@ public final class WinRMClient implements AutoCloseable {
 		/**
 		 * Set the credentials (mandatory).
 		 *
-		 * @param username the user name, plain ({@code user}) or domain-qualified ({@code DOMAIN\\user})*
-		 * @param
-		 * password the password;
-		 *        the array
-		 *        is deliberately
-		 *        not copied, so
-		 *        the caller
-		 *        can wipe*
-		 *        the single
-		 *        authoritative copy
-		 *        of the
-		 *        secret after
-		 *        closing the client*@return this builder
+		 * @param username the user name, plain ({@code user}) or domain-qualified ({@code DOMAIN\\user})
+		 * @param password the password; the array is deliberately not copied, so the caller can
+		 *        wipe the single authoritative copy of the secret after closing the client
+		 * @return this builder
 		 */
-
 		@SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "The password char[] is deliberately shared, not copied, so the caller "
 			+
 			"can wipe the single authoritative copy of the secret")

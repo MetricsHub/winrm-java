@@ -378,6 +378,40 @@ class WinRMClientTest {
 	}
 
 	@Test
+	void commandIsNeverStartedWhenTheTimeoutFiresDuringShellCreation() throws Exception {
+		// The Create-shell response arrives AFTER the caller's timeout. A socket read does not
+		// observe the cancellation interrupt, so the worker outlives the timeout — but it must
+		// abort before STARTING the command, not run it after the caller was told it timed out.
+		server
+			.enqueueDelayed(200, envelope(resourceCreated("SHELL-1")), 2_000)
+			// Responses for the follow-up command, proving the client stays usable (shell reused).
+			.enqueue(200, envelope(commandResponse("CMD-2")))
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(stream("stdout", "CMD-2", "second".getBytes(StandardCharsets.UTF_8)), done("CMD-2", 0))
+				)
+			)
+			.enqueue(200, envelope(signalResponse()));
+
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			assertThrows(
+				WinRMTimeoutException.class,
+				() -> client.command("first.exe").charset(StandardCharsets.UTF_8).timeout(Duration.ofMillis(500)).execute()
+			);
+
+			// Blocks until the abandoned worker receives the late Create response and aborts.
+			assertEquals("second", client.command("second.exe").charset(StandardCharsets.UTF_8).execute().stdout());
+		}
+
+		// The timed-out command was never started on the remote host.
+		assertTrue(
+			server.decryptedRequests().stream().noneMatch(r -> r.contains(">first.exe<")),
+			() -> String.join("\n---\n", server.decryptedRequests())
+		);
+	}
+
+	@Test
 	void closedClientRejectsOperationsAndCloseIsIdempotent() {
 		final WinRMClient client = builder(PASSWORD).build();
 		client.close();
