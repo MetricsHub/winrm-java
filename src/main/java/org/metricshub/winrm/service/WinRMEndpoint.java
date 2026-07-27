@@ -20,6 +20,7 @@ package org.metricshub.winrm.service;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Arrays;
@@ -53,6 +54,12 @@ public class WinRMEndpoint {
 	 * @param password The password (mandatory)
 	 * @param namespace The namespace default value: {@value WmiHelper#DEFAULT_NAMESPACE}
 	 */
+	@SuppressFBWarnings(value = {
+			"EI_EXPOSE_REP2",
+			"CT_CONSTRUCTOR_THROW" }, justification = "The password char[] is deliberately shared, not copied, so the caller can wipe "
+				+
+				"the single authoritative copy of the secret; and the constructor intentionally validates its " +
+				"arguments — no partially-initialized instance escapes since nothing publishes 'this'")
 	public WinRMEndpoint(
 		final WinRMHttpProtocolEnum protocol,
 		final String hostname,
@@ -114,6 +121,9 @@ public class WinRMEndpoint {
 	}
 
 	/** Get the password */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = "The password char[] is deliberately handed out by reference so there is a "
+		+
+		"single wipeable copy of the secret; cloning it here would scatter copies of the password in memory")
 	public char[] getPassword() {
 		return password;
 	}

@@ -49,12 +49,16 @@ final class WinRMSession {
 	private final String username;
 	private final String password;
 
-	private long negotiateFlags;
-	private byte[] clientSigningKey;
-	private byte[] serverSigningKey;
-	private Cipher encryptor;
-	private Cipher decryptor;
-	private boolean authenticated;
+	// volatile: the session outlives individual operations, and each operation runs on a fresh
+	// worker thread (Utils.execute spawns one per call), so state written during the handshake on
+	// one thread must be visible to the thread running the next operation. Accesses are never
+	// concurrent (operations on a connection are sequential); only visibility is needed.
+	private volatile long negotiateFlags;
+	private volatile byte[] clientSigningKey;
+	private volatile byte[] serverSigningKey;
+	private volatile Cipher encryptor;
+	private volatile Cipher decryptor;
+	private volatile boolean authenticated;
 
 	private final AtomicLong sequenceOutgoing = new AtomicLong(-1);
 	private final AtomicLong sequenceIncoming = new AtomicLong(-1);

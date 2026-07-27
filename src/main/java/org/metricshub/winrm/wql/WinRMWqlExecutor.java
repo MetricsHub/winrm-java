@@ -21,6 +21,8 @@ package org.metricshub.winrm.wql;
  */
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
@@ -46,13 +48,13 @@ public class WinRMWqlExecutor {
 	 * The WinRMWqlExecutor constructor
 	 *
 	 * @param executionTime The execution time in milliseconds
-	 * @param headers The headers list
-	 * @param rows The value rows list
+	 * @param headers The headers list (copied defensively)
+	 * @param rows The value rows list (copied defensively)
 	 */
 	public WinRMWqlExecutor(final long executionTime, final List<String> headers, final List<List<String>> rows) {
 		this.executionTime = executionTime;
-		this.headers = headers;
-		this.rows = rows;
+		this.headers = headers != null ? new ArrayList<>(headers) : null;
+		this.rows = rows != null ? new ArrayList<>(rows) : null;
 	}
 
 	/**
@@ -67,19 +69,19 @@ public class WinRMWqlExecutor {
 	/**
 	 * Get the headers of the query.
 	 *
-	 * @return
+	 * @return an unmodifiable view of the headers list
 	 */
 	public List<String> getHeaders() {
-		return headers;
+		return headers != null ? Collections.unmodifiableList(headers) : null;
 	}
 
 	/**
 	 * Get the result rows of the query.
 	 *
-	 * @return
+	 * @return an unmodifiable view of the result rows
 	 */
 	public List<List<String>> getRows() {
-		return rows;
+		return rows != null ? Collections.unmodifiableList(rows) : null;
 	}
 
 	/**

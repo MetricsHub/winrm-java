@@ -44,10 +44,12 @@ final class NtlmCrypto {
 		try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
 			out.write(BOUNDARY_CR.getBytes(StandardCharsets.US_ASCII));
 			out.write("\tContent-Type: application/HTTP-SPNEGO-session-encrypted\r\n".getBytes(StandardCharsets.US_ASCII));
+			// Plain concatenation (not String.format) so the protocol-mandated CRLF cannot be mistaken
+			// for a platform line separator
 			out.write(
-				String
-					.format("\tOriginalContent: type=application/soap+xml;charset=UTF-8;Length=%d\r\n", messageBody.length)
-					.getBytes(StandardCharsets.US_ASCII)
+				("\tOriginalContent: type=application/soap+xml;charset=UTF-8;Length=" + messageBody.length + "\r\n").getBytes(
+					StandardCharsets.US_ASCII
+				)
 			);
 			out.write(BOUNDARY_CR.getBytes(StandardCharsets.US_ASCII));
 			out.write("\tContent-Type: application/octet-stream\r\n".getBytes(StandardCharsets.US_ASCII));

@@ -20,6 +20,7 @@ package org.metricshub.winrm.light;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.security.Key;
 import java.security.MessageDigest;
 import java.util.Arrays;
@@ -34,6 +35,13 @@ import javax.crypto.spec.SecretKeySpec;
  * io.cloudsoft.winrm4j.client.ntlm.forks.httpclient is a fork of apache-httpclient 4.5.13
  */
 public class CipherGen {
+
+	/** Shared justification for the SpotBugs EI_EXPOSE_REP/EI_EXPOSE_REP2 suppressions below */
+	private static final String EXPOSE_JUSTIFICATION = "Reference NTLM crypto port kept aligned with upstream: the lazily computed hashes/responses are "
+		+
+		"cached and returned by design, and the challenge/random/targetInformation inputs are " +
+		"handshake-scoped byte arrays owned by the single NTLM exchange - defensive copies would churn " +
+		"the port for no security benefit";
 
 	private final Random random;
 	private final long currentTime;
@@ -68,6 +76,7 @@ public class CipherGen {
 	private byte[] ntlm2SessionResponseUserSessionKey = null;
 	private byte[] lanManagerSessionKey = null;
 
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = EXPOSE_JUSTIFICATION)
 	public CipherGen(
 		final Random random,
 		final long currentTime,
@@ -104,6 +113,7 @@ public class CipherGen {
 	}
 
 	/** Calculate and return random secondary key */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = EXPOSE_JUSTIFICATION)
 	public byte[] getSecondaryKey() {
 		if (secondaryKey == null) {
 			secondaryKey = makeSecondaryKey(random);
@@ -120,6 +130,7 @@ public class CipherGen {
 	}
 
 	/** Calculate and return the LMResponse */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = EXPOSE_JUSTIFICATION)
 	public byte[] getLMResponse() throws NtlmException {
 		if (lmResponse == null) {
 			lmResponse = lmResponse(getLMHash(), challenge);
@@ -136,6 +147,7 @@ public class CipherGen {
 	}
 
 	/** Calculate and return the NTLMResponse */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = EXPOSE_JUSTIFICATION)
 	public byte[] getNTLMResponse() throws NtlmException {
 		if (ntlmResponse == null) {
 			ntlmResponse = lmResponse(getNTLMHash(), challenge);
@@ -228,6 +240,7 @@ public class CipherGen {
 	}
 
 	/** Calculate the NTLMv2Response */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = EXPOSE_JUSTIFICATION)
 	public byte[] getNTLMv2Response() throws NtlmException {
 		if (ntlmv2Response == null) {
 			ntlmv2Response = lmv2Response(getNTLMv2Hash(), challenge, getNTLMv2Blob());
@@ -236,6 +249,7 @@ public class CipherGen {
 	}
 
 	/** Calculate the LMv2Response */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = EXPOSE_JUSTIFICATION)
 	public byte[] getLMv2Response() throws NtlmException {
 		if (lmv2Response == null) {
 			lmv2Response = lmv2Response(getLMv2Hash(), challenge, getClientChallenge());
@@ -244,6 +258,7 @@ public class CipherGen {
 	}
 
 	/** Get NTLM2SessionResponse */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = EXPOSE_JUSTIFICATION)
 	public byte[] getNTLM2SessionResponse() throws NtlmException {
 		if (ntlm2SessionResponse == null) {
 			ntlm2SessionResponse = ntlm2SessionResponse(getNTLMHash(), challenge, getClientChallenge());
@@ -395,6 +410,7 @@ public class CipherGen {
 	}
 
 	/** Calculate and return LM2 session response */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = EXPOSE_JUSTIFICATION)
 	public byte[] getLM2SessionResponse() {
 		if (lm2SessionResponse == null) {
 			final byte[] clntChallenge = getClientChallenge();
@@ -406,6 +422,7 @@ public class CipherGen {
 	}
 
 	/** Get LMUserSessionKey */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = EXPOSE_JUSTIFICATION)
 	public byte[] getLMUserSessionKey() throws NtlmException {
 		if (lmUserSessionKey == null) {
 			lmUserSessionKey = new byte[16];
@@ -416,6 +433,7 @@ public class CipherGen {
 	}
 
 	/** Get NTLMUserSessionKey */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = EXPOSE_JUSTIFICATION)
 	public byte[] getNTLMUserSessionKey() throws NtlmException {
 		if (ntlmUserSessionKey == null) {
 			final MD4 md4 = new MD4();
@@ -426,6 +444,7 @@ public class CipherGen {
 	}
 
 	/** GetNTLMv2UserSessionKey */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = EXPOSE_JUSTIFICATION)
 	public byte[] getNTLMv2UserSessionKey() throws NtlmException {
 		if (ntlmv2UserSessionKey == null) {
 			final byte[] ntlmv2hash = getNTLMv2Hash();
@@ -437,6 +456,7 @@ public class CipherGen {
 	}
 
 	/** Get NTLM2SessionResponseUserSessionKey */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = EXPOSE_JUSTIFICATION)
 	public byte[] getNTLM2SessionResponseUserSessionKey() throws NtlmException {
 		if (ntlm2SessionResponseUserSessionKey == null) {
 			final byte[] ntlm2SessionResponseNonce = getLM2SessionResponse();
@@ -449,6 +469,7 @@ public class CipherGen {
 	}
 
 	/** Get LAN Manager session key */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = EXPOSE_JUSTIFICATION)
 	public byte[] getLanManagerSessionKey() throws NtlmException {
 		if (lanManagerSessionKey == null) {
 			try {

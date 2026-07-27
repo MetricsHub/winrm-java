@@ -22,6 +22,7 @@ package org.metricshub.winrm;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -222,12 +223,22 @@ public class WqlQuery {
 		return cleanWql;
 	}
 
+	/**
+	 * Get the properties of the SELECT statement, in lower case.
+	 *
+	 * @return an unmodifiable view of the selected properties (empty for {@code SELECT *})
+	 */
 	public List<String> getSelectedProperties() {
-		return selectedProperties;
+		return Collections.unmodifiableList(selectedProperties);
 	}
 
+	/**
+	 * Get the map of subproperties to retrieve inside each selected property, in lower case.
+	 *
+	 * @return an unmodifiable view of the property to subproperties map
+	 */
 	public Map<String, Set<String>> getSubPropertiesMap() {
-		return subPropertiesMap;
+		return Collections.unmodifiableMap(subPropertiesMap);
 	}
 
 	public String getCleanWql() {
