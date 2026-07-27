@@ -58,6 +58,19 @@ class WinRMClientBuilderTest {
 	}
 
 	@Test
+	void incompleteDomainQualifiedUsernamesAreRejected() {
+		final char[] password = "x".toCharArray();
+		final WinRMClient.Builder builder = WinRMClient.builder("host");
+		// A trailing or leading backslash means an empty user or domain part.
+		assertThrows(IllegalArgumentException.class, () -> builder.credentials("DOMAIN\\", password));
+		assertThrows(IllegalArgumentException.class, () -> builder.credentials("\\user", password));
+		assertThrows(IllegalArgumentException.class, () -> builder.credentials("  ", password));
+		// The valid forms still pass.
+		builder.credentials("user", password);
+		builder.credentials("DOMAIN\\user", password);
+	}
+
+	@Test
 	void portMustBeValid() {
 		assertThrows(IllegalArgumentException.class, () -> validBuilder().port(0));
 		assertThrows(IllegalArgumentException.class, () -> validBuilder().port(65536));

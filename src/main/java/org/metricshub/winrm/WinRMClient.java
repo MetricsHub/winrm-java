@@ -316,6 +316,13 @@ public final class WinRMClient implements AutoCloseable {
 		public Builder credentials(final String username, final char[] password) {
 			Utils.checkNonNull(username, "username");
 			Utils.checkNonNull(password, "password");
+			// Validate the shape now (on the whitespace-stripped form the endpoint actually parses):
+			// a lone or edge backslash would otherwise surface as an obscure parsing error at build().
+			final String cleaned = username.replaceAll("\\s", "");
+			final int backslash = cleaned.indexOf('\\');
+			if (cleaned.isEmpty() || backslash == 0 || backslash == cleaned.length() - 1) {
+				throw new IllegalArgumentException("username must be \"user\" or \"DOMAIN\\user\".");
+			}
 			this.username = username;
 			this.password = password;
 			return this;
