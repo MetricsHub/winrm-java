@@ -39,12 +39,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
-import org.metricshub.winrm.WinRMHttpProtocolEnum;
-import org.metricshub.winrm.WindowsRemoteCommandResult;
 import org.metricshub.winrm.light.FakeWsmanServer;
-import org.metricshub.winrm.light.LightWinRMService;
-import org.metricshub.winrm.service.WinRMEndpoint;
 
 class WinRmCliTest {
 
@@ -99,7 +96,9 @@ class WinRmCliTest {
 	@Test
 	void forwardsCommandStreamsAndExitCode() throws Exception {
 		final FakeRemote remote = new FakeRemote();
-		remote.commandResult = new WindowsRemoteCommandResult("output", "warning", 0.1f, 7);
+		remote.stdoutChunks = List.of("out", "put");
+		remote.stderrChunks = List.of("warning");
+		remote.commandExitCode = 7;
 
 		final Invocation invocation = invoke(concat(REQUIRED, "exec", "echo", "hello world"), args -> remote);
 
@@ -258,35 +257,39 @@ class WinRmCliTest {
 	@Test
 	void decodesCommandOutputUsingTheRemoteWindowsCodePage() throws Exception {
 		final Charset windowsCharset = Charset.forName("windows-1251");
-		final long timeout = 30_000L;
 
-		// End to end against the in-process WSMan server: the remote reports Windows code page
-		// 1251 and the command output arrives in that encoding — the CLI must query the code page
-		// and decode the stream bytes with it, or the Cyrillic output turns into mojibake.
+		// Full stack against the in-process WSMan server, through the CLI's real connect factory
+		// and its streaming forwarders: the remote reports Windows code page 1251 and the command
+		// output arrives in that encoding — the CLI must query the code page and decode the stream
+		// bytes with it, or the Cyrillic output turns into mojibake.
 		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
 			enqueueEnumeration(server, instance("Win32_OperatingSystem", "CodeSet", "1251"));
 			enqueueShellCreation(server);
 			enqueueCommandExchange(server, "Результат".getBytes(windowsCharset), new byte[0], 0);
 			enqueueShellDeletion(server);
 
-			final WinRMEndpoint endpoint = new WinRMEndpoint(
-				WinRMHttpProtocolEnum.HTTP,
-				"127.0.0.1",
-				server.port(),
-				"FAKE\\user",
-				"secret".toCharArray(),
-				null
+			final Invocation invocation = invoke(
+				new String[]
+				{
+						"-h",
+						"127.0.0.1",
+						"-P",
+						String.valueOf(server.port()),
+						"-u",
+						"FAKE\\user",
+						"-p",
+						"secret",
+						"-t",
+						"30000",
+						"exec",
+						"whoami"
+				},
+				WinRmCli::connect
 			);
-			final WindowsRemoteCommandResult result;
-			try (
-				WinRmCli.LightRemoteOperations remote = new WinRmCli.LightRemoteOperations(
-					LightWinRMService.createInstance(endpoint, timeout, null, null)
-				)) {
-				result = remote.executeCommand("whoami", timeout);
-			}
 
-			assertEquals("Результат", result.getStdout());
-			assertEquals(0, result.getStatusCode());
+			assertEquals(0, invocation.exitCode);
+			assertEquals("Результат", invocation.stdout);
+			assertEquals("", invocation.stderr);
 
 			// The decoding charset really came from the remote code-page query
 			assertTrue(
@@ -362,22 +365,32 @@ class WinRmCliTest {
 	private static final class FakeRemote implements WinRmCli.RemoteOperations {
 
 		private List<Map<String, Object>> rows = List.of();
-		private WindowsRemoteCommandResult commandResult = new WindowsRemoteCommandResult("", "", 0.0f, 0);
+		private List<String> stdoutChunks = List.of();
+		private List<String> stderrChunks = List.of();
+		private int commandExitCode;
 		private Exception failure;
 		private String command;
 		private boolean closed;
 
 		@Override
-		public List<Map<String, Object>> executeWql(final String query, final long timeout) throws Exception {
+		public void streamWql(final String query, final long timeout, final Consumer<Map<String, Object>> rowConsumer)
+			throws Exception {
 			failIfConfigured();
-			return rows;
+			rows.forEach(rowConsumer);
 		}
 
 		@Override
-		public WindowsRemoteCommandResult executeCommand(final String command, final long timeout) throws Exception {
+		public int executeCommand(
+			final String command,
+			final long timeout,
+			final Consumer<String> stdoutConsumer,
+			final Consumer<String> stderrConsumer
+		) throws Exception {
 			this.command = command;
 			failIfConfigured();
-			return commandResult;
+			stdoutChunks.forEach(stdoutConsumer);
+			stderrChunks.forEach(stderrConsumer);
+			return commandExitCode;
 		}
 
 		@Override

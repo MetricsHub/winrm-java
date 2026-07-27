@@ -173,4 +173,8 @@ java -jar ${project.artifactId}-${project.version}-standalone.jar \
   wql 'SELECT Name, State FROM Win32_Service'
 ```
 
-Property order follows the WinRM response; diagnostics go only to standard error.
+The rows are **streamed**: each one is written (and flushed) as it arrives from the host, so a
+pipe consuming the output starts working immediately and memory stays bounded regardless of the
+result size. The `-t`/`--timeout` option is the inactivity timeout of the stream; a mid-stream
+failure can leave partial output on standard output before the nonzero exit. Property order
+follows the WinRM response; diagnostics go only to standard error.

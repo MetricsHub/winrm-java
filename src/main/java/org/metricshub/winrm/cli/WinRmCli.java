@@ -27,23 +27,30 @@ import java.net.ConnectException;
 import java.net.NoRouteToHostException;
 import java.net.SocketException;
 import java.net.UnknownHostException;
-import java.nio.charset.Charset;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
+import java.util.stream.Stream;
 import javax.net.ssl.SSLException;
-import org.metricshub.winrm.WindowsRemoteCommandResult;
-import org.metricshub.winrm.WindowsRemoteProcessUtils;
-import org.metricshub.winrm.exceptions.WindowsRemoteException;
-import org.metricshub.winrm.light.LightWinRMService;
-import org.metricshub.winrm.service.WinRMEndpoint;
+import org.metricshub.winrm.AuthScheme;
+import org.metricshub.winrm.WinRMClient;
+import org.metricshub.winrm.WinRMHttpProtocolEnum;
+import org.metricshub.winrm.WqlRow;
+import org.metricshub.winrm.exceptions.WinRMTimeoutException;
+import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 
 /**
- * Command-line interface for WQL queries and remote command execution through WinRM.
+ * Command-line interface for WQL queries and remote command execution through WinRM, built on the
+ * streaming terminals of the fluent {@link WinRMClient} API.
  * <p>
- * WQL results are emitted as UTF-8 JSON Lines on standard output. Remote command output is
- * forwarded to the matching local output stream. Diagnostics are written only to standard error.
+ * WQL results are emitted as UTF-8 JSON Lines on standard output, <b>row by row as the
+ * WS-Enumeration pages arrive</b> — a large query starts producing output immediately and memory
+ * stays bounded, but a mid-stream failure can leave partial output on standard output (with a
+ * nonzero exit code). Remote command output is forwarded <b>live</b> to the matching local output
+ * stream while the command runs. Diagnostics are written only to standard error.
  * <p>
  * NTLM is the default authentication scheme. Kerberos requires HTTPS. HTTPS validates certificates
  * and hostnames unless the explicitly insecure {@code --https-permissive} option is used.
@@ -63,7 +70,6 @@ public final class WinRmCli {
 	static final int EXIT_AUTHENTICATION = 77;
 	static final int EXIT_TIMEOUT = 124;
 
-	private static final String INSECURE_TLS_PROPERTY = "org.metricshub.winrm.tls.insecure";
 	private static final String KERBEROS_KDC_PROPERTY = "java.security.krb5.kdc";
 	private static final String KERBEROS_REALM_PROPERTY = "java.security.krb5.realm";
 
@@ -140,29 +146,40 @@ public final class WinRmCli {
 		final PrintStream standardError,
 		final RemoteFactory remoteFactory
 	) {
-		final String previousInsecureTls = System.getProperty(INSECURE_TLS_PROPERTY);
 		final String previousKerberosKdc = System.getProperty(KERBEROS_KDC_PROPERTY);
 		final String previousKerberosRealm = System.getProperty(KERBEROS_REALM_PROPERTY);
 		try {
-			setPermissiveHttps(arguments.permissiveHttps());
 			setKerberosConfiguration(arguments, standardError);
 			try (RemoteOperations remote = remoteFactory.connect(arguments)) {
 				if (arguments.operation() == CliArguments.Operation.WQL) {
-					final List<Map<String, Object>> rows = remote.executeWql(arguments.input(), arguments.timeout());
-					for (final Map<String, Object> row : rows) {
-						JsonLinesWriter.write(row, standardOutput);
-					}
-					standardOutput.flush();
+					// Flush after every row so a downstream pipe sees each row as soon as the server
+					// hands it out, not when the enumeration ends.
+					remote.streamWql(
+						arguments.input(),
+						arguments.timeout(),
+						row -> {
+							JsonLinesWriter.write(row, standardOutput);
+							standardOutput.flush();
+						}
+					);
 					return 0;
 				}
-				final WindowsRemoteCommandResult result = remote.executeCommand(arguments.input(), arguments.timeout());
-				standardOutput.print(result.getStdout());
-				standardError.print(result.getStderr());
-				standardOutput.flush();
-				standardError.flush();
-				return remoteExitCode(result.getStatusCode(), standardError);
+				// Forward each output chunk as it arrives, so a long-running command can be followed live.
+				final int exitCode = remote.executeCommand(
+					arguments.input(),
+					arguments.timeout(),
+					chunk -> {
+						standardOutput.print(chunk);
+						standardOutput.flush();
+					},
+					chunk -> {
+						standardError.print(chunk);
+						standardError.flush();
+					}
+				);
+				return remoteExitCode(exitCode, standardError);
 			}
-		} catch (final TimeoutException e) {
+		} catch (final TimeoutException | WinRMTimeoutException e) {
 			diagnostic(standardError, "operation timed out");
 			return EXIT_TIMEOUT;
 		} catch (final Exception e) {
@@ -170,24 +187,35 @@ public final class WinRmCli {
 			diagnostic(standardError, safeMessage(e));
 			return exitCode;
 		} finally {
-			restoreProperty(INSECURE_TLS_PROPERTY, previousInsecureTls);
 			restoreProperty(KERBEROS_KDC_PROPERTY, previousKerberosKdc);
 			restoreProperty(KERBEROS_REALM_PROPERTY, previousKerberosRealm);
 		}
 	}
 
-	private static RemoteOperations connect(final CliArguments arguments) throws WindowsRemoteException {
-		final WinRMEndpoint endpoint = new WinRMEndpoint(
-			arguments.protocol(),
-			arguments.hostname(),
-			arguments.port(),
-			arguments.username(),
-			arguments.password(),
-			null
-		);
-		return new LightRemoteOperations(
-			LightWinRMService.createInstance(endpoint, arguments.timeout(), null, arguments.authentications())
-		);
+	static RemoteOperations connect(final CliArguments arguments) {
+		final WinRMClient.Builder builder = WinRMClient
+			.builder(arguments.hostname())
+			.port(arguments.port())
+			.credentials(arguments.username(), arguments.password())
+			.timeout(Duration.ofMillis(arguments.timeout()));
+		if (arguments.protocol() == WinRMHttpProtocolEnum.HTTPS) {
+			builder.https();
+		}
+		if (arguments.permissiveHttps()) {
+			// Per-client setting: unlike the legacy org.metricshub.winrm.tls.insecure system
+			// property, it does not leak to (or race with) anything else in the JVM.
+			builder.trustAllCertificates();
+		}
+		final List<AuthenticationEnum> authentications = arguments.authentications();
+		if (authentications != null && !authentications.isEmpty()) {
+			builder.authentication(
+				authentications
+					.stream()
+					.map(scheme -> scheme == AuthenticationEnum.KERBEROS ? AuthScheme.KERBEROS : AuthScheme.NTLM)
+					.toArray(AuthScheme[]::new)
+			);
+		}
+		return new FluentRemoteOperations(builder.build());
 	}
 
 	private static int remoteExitCode(final int exitCode, final PrintStream standardError) {
@@ -236,12 +264,6 @@ public final class WinRmCli {
 
 	private static void diagnostic(final PrintStream standardError, final String message) {
 		standardError.println("winrm-java: " + message);
-	}
-
-	private static void setPermissiveHttps(final boolean permissive) {
-		if (permissive) {
-			System.setProperty(INSECURE_TLS_PROPERTY, Boolean.TRUE.toString());
-		}
 	}
 
 	private static void setKerberosConfiguration(
@@ -304,8 +326,11 @@ public final class WinRmCli {
 			"LF, CRLF, or CR removed; every other byte is part of the UTF-8 password.\n" +
 			"Kerberos KDC/realm options set the JDK Kerberos configuration for this invocation.\n" +
 			"Without them, the ambient JDK Kerberos configuration is used.\n" +
-			"WQL rows are written to stdout as UTF-8 JSON Lines. Command stdout and stderr are forwarded\n" +
-			"to the corresponding local streams.\n" +
+			"WQL rows are streamed to stdout as UTF-8 JSON Lines as they arrive from the host; the timeout\n" +
+			"is the longest tolerated silence between two server responses, so large results may stream\n" +
+			"for longer, and a mid-stream failure can leave partial output before the nonzero exit.\n" +
+			"Command stdout and stderr are forwarded live to the corresponding local streams while the\n" +
+			"command runs; the timeout is the overall command deadline.\n" +
 			"\n" +
 			"Exit codes: 0 success; remote command code 0..255 when available; 64 usage;\n" +
 			"69 connection/TLS; 70 WinRM protocol; 77 authentication; 124 timeout.\n";
@@ -322,36 +347,55 @@ public final class WinRmCli {
 	}
 
 	interface RemoteOperations extends AutoCloseable {
-		List<Map<String, Object>> executeWql(String query, long timeout) throws Exception;
+		/** Run the WQL query, handing each row to the consumer as it arrives. */
+		void streamWql(String query, long timeout, Consumer<Map<String, Object>> rowConsumer) throws Exception;
 
-		WindowsRemoteCommandResult executeCommand(String command, long timeout) throws Exception;
+		/**
+		 * Run the command, forwarding each decoded output chunk to the matching consumer as it
+		 * arrives, and return the remote exit code.
+		 */
+		int executeCommand(String command, long timeout, Consumer<String> stdoutConsumer, Consumer<String> stderrConsumer)
+			throws Exception;
 
 		@Override
 		void close();
 	}
 
-	static final class LightRemoteOperations implements RemoteOperations {
+	/** The real remote operations: the streaming terminals of the fluent {@link WinRMClient}. */
+	static final class FluentRemoteOperations implements RemoteOperations {
 
-		private final LightWinRMService service;
+		private final WinRMClient client;
 
-		LightRemoteOperations(final LightWinRMService service) {
-			this.service = service;
+		FluentRemoteOperations(final WinRMClient client) {
+			this.client = client;
 		}
 
 		@Override
-		public List<Map<String, Object>> executeWql(final String query, final long timeout) throws Exception {
-			return service.executeWql(query, timeout);
+		public void streamWql(final String query, final long timeout, final Consumer<Map<String, Object>> rowConsumer) {
+			try (Stream<WqlRow> rows = client.wql(query).timeout(Duration.ofMillis(timeout)).stream()) {
+				rows.forEach(row -> rowConsumer.accept(row.asMap()));
+			}
 		}
 
 		@Override
-		public WindowsRemoteCommandResult executeCommand(final String command, final long timeout) throws Exception {
-			final Charset charset = WindowsRemoteProcessUtils.getWindowsEncodingCharset(service, timeout);
-			return service.executeCommand(command, null, charset, timeout);
+		public int executeCommand(
+			final String command,
+			final long timeout,
+			final Consumer<String> stdoutConsumer,
+			final Consumer<String> stderrConsumer
+		) {
+			return client
+				.command(command)
+				.timeout(Duration.ofMillis(timeout))
+				.onStdout(stdoutConsumer)
+				.onStderr(stderrConsumer)
+				.execute()
+				.exitCode();
 		}
 
 		@Override
 		public void close() {
-			service.close();
+			client.close();
 		}
 	}
 }

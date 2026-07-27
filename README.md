@@ -202,9 +202,12 @@ echoing it. Non-interactive runs must use `--password-file` (or, less securely, 
 
 WQL writes one compact UTF-8 JSON object per row to stdout
 ([JSON Lines](https://jsonlines.org/)); property order follows the WinRM response. Diagnostics go
-only to stderr. Remote command stdout and stderr are forwarded to the corresponding local streams.
-The current backend buffers an operation's result; the CLI output boundary is ready to consume the
-streaming API when it becomes available.
+only to stderr. The CLI is built on the streaming API: WQL rows are written **as the enumeration
+pages arrive** (a huge query starts producing output immediately, memory stays bounded, and for
+`wql` the timeout is the longest tolerated silence between two server responses rather than an
+overall deadline — a mid-stream failure can leave partial output before the nonzero exit), and
+remote command stdout and stderr are forwarded **live** to the corresponding local streams while
+the command runs (the timeout remains the overall command deadline).
 
 Exit behavior is stable:
 

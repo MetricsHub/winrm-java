@@ -170,8 +170,9 @@ See [Timeouts and Errors](timeouts-and-errors.html) for details.
 ## From the command line
 
 The standalone jar runs a command with the `command` subcommand (aliases: `cmd`, `exec`, `run`).
-Standard output and standard error are forwarded to the corresponding local streams, and the
-process exits with the remote exit code when it fits in 0–255:
+Standard output and standard error are forwarded **live** to the corresponding local streams while
+the command runs (each chunk is flushed as it arrives, so a long-running command can be followed
+in real time), and the process exits with the remote exit code when it fits in 0–255:
 
 ```bash
 java -jar ${project.artifactId}-${project.version}-standalone.jar \
