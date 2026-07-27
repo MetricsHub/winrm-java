@@ -112,12 +112,6 @@
 			<artifactId>junit-jupiter-engine</artifactId>
 			<scope>test</scope>
 		</dependency>
-		<dependency>
-			<groupId>org.mockito</groupId>
-			<artifactId>mockito-inline</artifactId>
-			<version>5.2.0</version>
-			<scope>test</scope>
-		</dependency>
 	</dependencies>
 
 	<build>
@@ -213,13 +207,16 @@
 
 			<!--
 				pmd: fail the build on any violation of pmd.xml and on any CPD duplication, so the
-				PMD and CPD reports stay clean. Version pinned to the one the parent manages for the
-				site report, so the gate and the report always run the same PMD. minimumTokens matches
-				the reporting configuration so the CPD gate and the CPD report agree.
+				PMD and CPD reports stay clean. Version pinned to the same one as the site report
+				below, so the gate and the report always run the same PMD — 3.28.0 runs PMD 7.17.0,
+				whose type resolution understands the class files of recent JDKs (7.7.0 failed on the
+				JDK 25 core library with "Unsupported class file major version 69" and then reported
+				false positives). minimumTokens matches the reporting configuration so the CPD gate
+				and the CPD report agree.
 			-->
 			<plugin>
 				<artifactId>maven-pmd-plugin</artifactId>
-				<version>3.26.0</version>
+				<version>3.28.0</version>
 				<executions>
 					<execution>
 						<phase>verify</phase>
@@ -262,13 +259,15 @@
 
 			<!--
 				spotbugs: fail the build on any SpotBugs finding, so the SpotBugs report stays clean.
-				Version pinned to the one the parent manages for the site report, so the gate and the
-				report always run the same SpotBugs.
+				Version pinned to the same one as the site report below, so the gate and the report
+				always run the same SpotBugs — 4.10.3.0 runs SpotBugs 4.10.3, which reads the class
+				files of recent JDKs (4.9.3 crashed on the JDK 25 core library with "Unsupported
+				class file major version 69").
 			-->
 			<plugin>
 				<groupId>com.github.spotbugs</groupId>
 				<artifactId>spotbugs-maven-plugin</artifactId>
-				<version>4.9.3.0</version>
+				<version>4.10.3.0</version>
 				<executions>
 					<execution>
 						<phase>verify</phase>
@@ -355,9 +354,18 @@
 				<version>3.5.6</version>
 			</plugin>
 
-			<!-- pmd -->
+			<!-- spotbugs: same version as the build gate above, so the report shows what the gate
+			     checked (and, like the gate, understands the class files of recent JDKs) -->
+			<plugin>
+				<groupId>com.github.spotbugs</groupId>
+				<artifactId>spotbugs-maven-plugin</artifactId>
+				<version>4.10.3.0</version>
+			</plugin>
+
+			<!-- pmd: same version as the build gate above, so the report shows what the gate checked -->
 			<plugin>
 				<artifactId>maven-pmd-plugin</artifactId>
+				<version>3.28.0</version>
 				<configuration>
 					<linkXref>true</linkXref>
 					<sourceEncoding>${project.build.sourceEncoding}</sourceEncoding>
