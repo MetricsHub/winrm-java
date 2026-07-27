@@ -519,6 +519,10 @@ public class CipherGen {
 	 *         Responses.
 	 */
 	private static byte[] ntlmv2Hash(final String domain, final String user, final byte[] ntlmHash) throws NtlmException {
+		// CPD-OFF — near-duplicate of lmv2Hash() by design: both mirror the reference NTLM
+		// implementation (Apache HttpClient's NTLMEngineImpl), kept line-for-line comparable with
+		// upstream rather than factored through a shared helper. The one divergence is deliberate
+		// and easy to miss: LMv2 upper-cases the domain, NTLMv2 keeps its case.
 		if (NTLMEngineUtils.UNICODE_LITTLE_UNMARKED == null) {
 			throw new NtlmException("Unicode not supported");
 		}
@@ -529,6 +533,7 @@ public class CipherGen {
 			hmacMD5.update(domain.getBytes(NTLMEngineUtils.UNICODE_LITTLE_UNMARKED));
 		}
 		return hmacMD5.getOutput();
+		// CPD-ON
 	}
 
 	/**
