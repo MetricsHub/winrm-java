@@ -1,16 +1,34 @@
 package org.metricshub.winrm.cli;
 
+/*-
+ * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
+ * WinRM Java Client
+ * ჻჻჻჻჻჻
+ * Copyright 2023 - 2026 MetricsHub
+ * ჻჻჻჻჻჻
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
+ */
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueCommandExchange;
+import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueEnumeration;
+import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellCreation;
+import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellDeletion;
+import static org.metricshub.winrm.light.FakeWsmanResponses.instance;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -22,10 +40,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
+import org.metricshub.winrm.WinRMHttpProtocolEnum;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
-import org.metricshub.winrm.WindowsRemoteProcessUtils;
+import org.metricshub.winrm.light.FakeWsmanServer;
 import org.metricshub.winrm.light.LightWinRMService;
+import org.metricshub.winrm.service.WinRMEndpoint;
 
 class WinRmCliTest {
 
@@ -238,21 +257,44 @@ class WinRmCliTest {
 
 	@Test
 	void decodesCommandOutputUsingTheRemoteWindowsCodePage() throws Exception {
-		final LightWinRMService service = mock(LightWinRMService.class);
 		final Charset windowsCharset = Charset.forName("windows-1251");
-		final WindowsRemoteCommandResult expected = new WindowsRemoteCommandResult("Результат", "", 0.0f, 0);
-		final long timeout = 1_234L;
-		when(service.executeCommand("whoami", null, windowsCharset, timeout)).thenReturn(expected);
+		final long timeout = 30_000L;
 
-		try (MockedStatic<WindowsRemoteProcessUtils> processUtils = mockStatic(WindowsRemoteProcessUtils.class)) {
-			processUtils
-				.when(() -> WindowsRemoteProcessUtils.getWindowsEncodingCharset(service, timeout))
-				.thenReturn(windowsCharset);
-			final WinRmCli.LightRemoteOperations remote = new WinRmCli.LightRemoteOperations(service);
+		// End to end against the in-process WSMan server: the remote reports Windows code page
+		// 1251 and the command output arrives in that encoding — the CLI must query the code page
+		// and decode the stream bytes with it, or the Cyrillic output turns into mojibake.
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			enqueueEnumeration(server, instance("Win32_OperatingSystem", "CodeSet", "1251"));
+			enqueueShellCreation(server);
+			enqueueCommandExchange(server, "Результат".getBytes(windowsCharset), new byte[0], 0);
+			enqueueShellDeletion(server);
 
-			assertSame(expected, remote.executeCommand("whoami", timeout));
-			processUtils.verify(() -> WindowsRemoteProcessUtils.getWindowsEncodingCharset(service, timeout));
-			verify(service).executeCommand(eq("whoami"), isNull(), eq(windowsCharset), eq(timeout));
+			final WinRMEndpoint endpoint = new WinRMEndpoint(
+				WinRMHttpProtocolEnum.HTTP,
+				"127.0.0.1",
+				server.port(),
+				"FAKE\\user",
+				"secret".toCharArray(),
+				null
+			);
+			final WindowsRemoteCommandResult result;
+			try (
+				WinRmCli.LightRemoteOperations remote = new WinRmCli.LightRemoteOperations(
+					LightWinRMService.createInstance(endpoint, timeout, null, null)
+				)) {
+				result = remote.executeCommand("whoami", timeout);
+			}
+
+			assertEquals("Результат", result.getStdout());
+			assertEquals(0, result.getStatusCode());
+
+			// The decoding charset really came from the remote code-page query
+			assertTrue(
+				server
+					.decryptedRequests()
+					.stream()
+					.anyMatch(request -> request.contains("SELECT CodeSet FROM Win32_OperatingSystem"))
+			);
 		}
 	}
 

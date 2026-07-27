@@ -1,5 +1,25 @@
 package org.metricshub.winrm.light;
 
+/*-
+ * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
+ * WinRM Java Client
+ * ჻჻჻჻჻჻
+ * Copyright 2023 - 2026 MetricsHub
+ * ჻჻჻჻჻჻
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
+ */
+
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -31,7 +51,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * The NTLMv2 verification is real: a client that derives a wrong hash (e.g. a domain-case
  * regression) fails authentication here just like against a real host.
  */
-final class FakeWsmanServer implements AutoCloseable {
+public final class FakeWsmanServer implements AutoCloseable {
 
 	/** One scripted HTTP response: status code and the plaintext SOAP body to encrypt and serve. */
 	static final class Scripted {
@@ -83,7 +103,15 @@ final class FakeWsmanServer implements AutoCloseable {
 	private volatile boolean closed;
 	private volatile boolean chunkedResponses;
 
-	FakeWsmanServer(final String domain, final String user, final String password) throws IOException {
+	/**
+	 * Start the fake server on an ephemeral local port.
+	 *
+	 * @param domain the NetBIOS domain the client is expected to authenticate with
+	 * @param user the user name the client is expected to authenticate with
+	 * @param password the password the client's NTLMv2 proof is verified against
+	 * @throws IOException when the listening socket cannot be opened
+	 */
+	public FakeWsmanServer(final String domain, final String user, final String password) throws IOException {
 		this.expectedDomain = domain.toUpperCase(Locale.ROOT);
 		this.expectedUser = user;
 		this.expectedPassword = password;
@@ -93,12 +121,21 @@ final class FakeWsmanServer implements AutoCloseable {
 		this.acceptThread.start();
 	}
 
-	int port() {
+	/**
+	 * @return the local port the server listens on
+	 */
+	public int port() {
 		return serverSocket.getLocalPort();
 	}
 
-	/** Queue the next scripted response (served in order, one per decrypted request). */
-	FakeWsmanServer enqueue(final int status, final String soapBody) {
+	/**
+	 * Queue the next scripted response (served in order, one per decrypted request).
+	 *
+	 * @param status the HTTP status code to respond with
+	 * @param soapBody the plaintext SOAP body to encrypt and serve
+	 * @return this server, for chaining
+	 */
+	public FakeWsmanServer enqueue(final int status, final String soapBody) {
 		synchronized (script) {
 			script.addLast(new Scripted(status, soapBody));
 		}
@@ -110,14 +147,20 @@ final class FakeWsmanServer implements AutoCloseable {
 	 * extension, and trailer fields after the terminating chunk — instead of {@code Content-Length},
 	 * like a real WinRM host does. A client that mis-reads the framing (e.g. leaves the trailers in
 	 * the socket) desyncs the kept-alive connection and fails on the NEXT request.
+	 *
+	 * @return this server, for chaining
 	 */
-	FakeWsmanServer withChunkedResponses() {
+	public FakeWsmanServer withChunkedResponses() {
 		chunkedResponses = true;
 		return this;
 	}
 
-	/** The plaintext SOAP request bodies received so far, in order (after decryption). */
-	List<String> decryptedRequests() {
+	/**
+	 * The plaintext SOAP request bodies received so far, in order (after decryption).
+	 *
+	 * @return a copy of the decrypted request bodies
+	 */
+	public List<String> decryptedRequests() {
 		return new ArrayList<>(decryptedRequests);
 	}
 

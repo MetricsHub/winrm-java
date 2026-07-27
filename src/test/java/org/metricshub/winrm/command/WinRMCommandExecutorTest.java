@@ -1,5 +1,25 @@
 package org.metricshub.winrm.command;
 
+/*-
+ * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
+ * WinRM Java Client
+ * ჻჻჻჻჻჻
+ * Copyright 2023 - 2026 MetricsHub
+ * ჻჻჻჻჻჻
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
+ */
+
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
@@ -8,36 +28,47 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.metricshub.winrm.WinRMHttpProtocolEnum.HTTPS;
 import static org.metricshub.winrm.command.WinRMCommandExecutor.execute;
+import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueCommandExchange;
+import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueEnumeration;
+import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellCreation;
+import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellDeletion;
+import static org.metricshub.winrm.light.FakeWsmanResponses.instance;
 import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.NTLM;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.mockStatic;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.metricshub.winrm.ScriptedWindowsRemoteExecutor;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
-import org.metricshub.winrm.service.WinRMEndpoint;
-import org.metricshub.winrm.service.WinRMExecutorFactory;
+import org.metricshub.winrm.light.FakeWsmanServer;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
-import org.mockito.MockedStatic;
 
+/**
+ * End-to-end tests of {@link WinRMCommandExecutor} against {@link FakeWsmanServer}: the whole
+ * stack — factory, {@code LightWinRMService}, real NTLM handshake and message encryption, shell
+ * lifecycle, and (for the file-copy path) the in-shell file transfer — runs for real; only the
+ * scripted SOAP response bodies are canned.
+ */
 class WinRMCommandExecutorTest {
 
 	private static final String COMMAND = "launch";
 	private static final String HOSTNAME = "host";
-	private static final String USERNAME = "domain\\user";
-	private static final char[] PASSWORD = "pass".toCharArray();
+	private static final String USERNAME = "FAKE\\user";
+	private static final String USER = "user";
+	private static final String DOMAIN = "FAKE";
+	private static final String PASSWORD_STRING = "pass";
+	private static final char[] PASSWORD = PASSWORD_STRING.toCharArray();
 	private static final long TIMEOUT = 30 * 1000L;
 	private static final Path TICKET_CACHE = Paths.get("path");
 	private static final List<AuthenticationEnum> AUTHENTICATIONS = singletonList(NTLM);
+	private static final String LOCALHOST = "127.0.0.1";
+
+	private static final byte[] NO_OUTPUT = new byte[0];
 
 	@TempDir
 	Path tempDir;
@@ -152,35 +183,45 @@ class WinRMCommandExecutorTest {
 
 	@Test
 	void testExecuteWithoutFilesToCopy() throws Exception {
-		final WindowsRemoteCommandResult expected = new WindowsRemoteCommandResult("stdout", "stderr", 1.0f, 0);
+		try (FakeWsmanServer server = new FakeWsmanServer(DOMAIN, USER, PASSWORD_STRING)) {
+			// Three executions: a null file list, an empty one, and a list of blank names must all
+			// take the same no-copy path. Each execution creates (and closes) its own executor.
+			final List<List<String>> fileListVariants = new ArrayList<>();
+			fileListVariants.add(null);
+			fileListVariants.add(emptyList());
+			fileListVariants.add(singletonList(" \r\t\n "));
 
-		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor()
-			.expectWql("CodeSet", List.of(Map.of("CodeSet", "65001")))
-			.expectCommand(COMMAND, expected);
+			for (final List<String> localFileToCopyList : fileListVariants) {
+				enqueueCodeSetQuery(server, "65001");
+				enqueueShellCreation(server);
+				enqueueCommandExchange(server, "stdout".getBytes(UTF_8), "stderr".getBytes(UTF_8), 0);
+				enqueueShellDeletion(server);
 
-		try (final MockedStatic<WinRMExecutorFactory> mockedFactory = mockStatic(WinRMExecutorFactory.class)) {
-			mockedFactory
-				.when(() -> WinRMExecutorFactory.createInstance(any(WinRMEndpoint.class), anyLong(), isNull(), isNull()))
-				.thenReturn(executor);
+				final WindowsRemoteCommandResult result = execute(
+					COMMAND,
+					null,
+					LOCALHOST,
+					server.port(),
+					USERNAME,
+					PASSWORD,
+					null,
+					TIMEOUT,
+					localFileToCopyList,
+					null,
+					null
+				);
 
-			assertEquals(
-				expected,
-				execute(COMMAND, null, HOSTNAME, null, USERNAME, PASSWORD, null, TIMEOUT, null, null, null)
-			);
+				assertEquals("stdout", result.getStdout());
+				assertEquals("stderr", result.getStderr());
+				assertEquals(0, result.getStatusCode());
+			}
 
-			assertEquals(
-				expected,
-				execute(COMMAND, null, HOSTNAME, null, USERNAME, PASSWORD, null, TIMEOUT, emptyList(), null, null)
-			);
-
-			// A list of blank names behaves like no list at all
-			assertEquals(
-				expected,
-				execute(COMMAND, null, HOSTNAME, null, USERNAME, PASSWORD, null, TIMEOUT, singletonList(" \r\t\n "), null, null)
-			);
-
-			assertEquals(List.of(COMMAND, COMMAND, COMMAND), executor.getExecutedCommands());
-			assertTrue(executor.isClosed());
+			final List<String> requests = server.decryptedRequests();
+			// Each execution queried the remote code page, ran the command verbatim (no CMD.EXE /C
+			// wrapper on the no-copy path), and deleted its shell on close
+			assertEquals(3, count(requests, "SELECT CodeSet FROM Win32_OperatingSystem"));
+			assertEquals(3, count(requests, "<rsp:Command>" + COMMAND + "</rsp:Command>"));
+			assertEquals(3, count(requests, "http://schemas.xmlsoap.org/ws/2004/09/transfer/Delete"));
 		}
 	}
 
@@ -190,41 +231,34 @@ class WinRMCommandExecutorTest {
 		final Path localFile = tempDir.resolve("MyScript.vbs");
 		Files.write(localFile, content);
 
-		final WindowsRemoteCommandResult expected = new WindowsRemoteCommandResult("stdout", "stderr", 1.0f, 0);
+		final String hashOutput = "SHA256 hash of file:\r\n" +
+			sha256Hex(content) +
+			"\r\nCertUtil: -hashfile command completed successfully.\r\n";
 
-		final StringBuilder hex = new StringBuilder();
-		for (final byte b : MessageDigest.getInstance("SHA-256").digest(content)) {
-			hex.append(String.format("%02x", b));
-		}
-		final WindowsRemoteCommandResult remoteHash = new WindowsRemoteCommandResult(
-			"SHA256 hash of file:\r\n" + hex + "\r\nCertUtil: -hashfile command completed successfully.\r\n",
-			"",
-			0.1f,
-			0
-		);
-		final WindowsRemoteCommandResult failure = new WindowsRemoteCommandResult("", "not found", 0.1f, 1);
-		final WindowsRemoteCommandResult success = new WindowsRemoteCommandResult("", "", 0.1f, 0);
+		try (FakeWsmanServer server = new FakeWsmanServer(DOMAIN, USER, PASSWORD_STRING)) {
+			// The in-shell transfer sequence of ShellFileCopy, scripted response by response
+			enqueueEnumeration(server, instance("Win32_OperatingSystem", "WindowsDirectory", "C:\\Windows"));
+			enqueueShellCreation(server);
+			// 1: purge + MKDIR of the remote temporary directory
+			enqueueCommandExchange(server, NO_OUTPUT, NO_OUTPUT, 0);
+			// 2: pre-transfer digest probe — the destination does not exist yet
+			enqueueCommandExchange(server, NO_OUTPUT, "CertUtil: -hashfile command FAILED: 0x80070002".getBytes(UTF_8), 1);
+			// 3: the single chunked-echo upload leg (the payload is small)
+			enqueueCommandExchange(server, NO_OUTPUT, NO_OUTPUT, 0);
+			// 4: certutil -decode + digest probe of the staging file
+			enqueueCommandExchange(server, hashOutput.getBytes(UTF_8), NO_OUTPUT, 0);
+			// 5: publish (MOVE) + digest probe of the destination
+			enqueueCommandExchange(server, hashOutput.getBytes(UTF_8), NO_OUTPUT, 0);
+			// then the code-page query and the actual command
+			enqueueCodeSetQuery(server, "65001");
+			enqueueCommandExchange(server, "stdout".getBytes(UTF_8), "stderr".getBytes(UTF_8), 0);
+			enqueueShellDeletion(server);
 
-		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor()
-			.expectWql("WindowsDirectory", List.of(Map.of("WindowsDirectory", "C:\\Windows")))
-			.expectWql("CodeSet", List.of(Map.of("CodeSet", "65001")))
-			.expectCommand("MKDIR", success)
-			.expectCommand(" echo ", success)
-			.expectCommand("certutil -f -decode", remoteHash)
-			.expectCommand("MOVE /Y", remoteHash)
-			.expectCommand("certutil -hashfile", failure)
-			.expectCommand("CSCRIPT", expected);
-
-		try (final MockedStatic<WinRMExecutorFactory> mockedFactory = mockStatic(WinRMExecutorFactory.class)) {
-			mockedFactory
-				.when(() -> WinRMExecutorFactory.createInstance(any(WinRMEndpoint.class), anyLong(), isNull(), isNull()))
-				.thenReturn(executor);
-
-			final WindowsRemoteCommandResult actual = execute(
+			final WindowsRemoteCommandResult result = execute(
 				"CSCRIPT " + localFile,
 				null,
-				HOSTNAME,
-				null,
+				LOCALHOST,
+				server.port(),
 				USERNAME,
 				PASSWORD,
 				null,
@@ -234,15 +268,44 @@ class WinRMCommandExecutorTest {
 				null
 			);
 
-			assertEquals(expected, actual);
+			assertEquals("stdout", result.getStdout());
+			assertEquals("stderr", result.getStderr());
+			assertEquals(0, result.getStatusCode());
+
+			final List<String> requests = server.decryptedRequests();
+
+			// The file content went over the wire base64-encoded in an echo leg
+			final String base64Content = Base64.getEncoder().encodeToString(content);
+			assertTrue(requests.stream().anyMatch(request -> request.contains(base64Content)));
 
 			// The executed command references the remote copy, wrapped in CMD.EXE /C (...)
-			final String finalCommand = executor.getExecutedCommands().get(executor.getExecutedCommands().size() - 1);
-			assertTrue(finalCommand.startsWith("CMD.EXE /C (CSCRIPT "));
-			assertTrue(finalCommand.contains("\\Temp\\"));
+			final String finalCommand = requests
+				.stream()
+				.filter(request -> request.contains("<rsp:Command>CMD.EXE /C (CSCRIPT "))
+				.findFirst()
+				.orElseThrow(() -> new AssertionError("No CMD.EXE /C command found:\n" + String.join("\n---\n", requests)));
+			assertTrue(finalCommand.contains("\\Temp\\"), finalCommand);
 			// The remote name is content-addressed: MyScript.<digest-fragment>.vbs
-			assertTrue(finalCommand.matches("(?s).*MyScript\\.[0-9a-f]{12}\\.vbs.*"));
-			assertTrue(executor.isClosed());
+			assertTrue(finalCommand.matches("(?s).*MyScript\\.[0-9a-f]{12}\\.vbs.*"), finalCommand);
+
+			// close() deleted the shell
+			assertEquals(1, count(requests, "http://schemas.xmlsoap.org/ws/2004/09/transfer/Delete"));
 		}
+	}
+
+	private static void enqueueCodeSetQuery(final FakeWsmanServer server, final String codeSet) {
+		enqueueEnumeration(server, instance("Win32_OperatingSystem", "CodeSet", codeSet));
+	}
+
+	private static long count(final List<String> requests, final String needle) {
+		return requests.stream().filter(request -> request.contains(needle)).count();
+	}
+
+	private static String sha256Hex(final byte[] content) throws Exception {
+		final StringBuilder hex = new StringBuilder();
+		for (final byte b : MessageDigest.getInstance("SHA-256").digest(content)) {
+			hex.append(String.format("%02x", b));
+		}
+		return hex.toString();
 	}
 }

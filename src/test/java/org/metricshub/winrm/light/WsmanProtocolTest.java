@@ -1,11 +1,39 @@
 package org.metricshub.winrm.light;
 
+/*-
+ * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
+ * WinRM Java Client
+ * ჻჻჻჻჻჻
+ * Copyright 2023 - 2026 MetricsHub
+ * ჻჻჻჻჻჻
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
+ */
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.metricshub.winrm.light.FakeWsmanResponses.commandResponse;
+import static org.metricshub.winrm.light.FakeWsmanResponses.done;
+import static org.metricshub.winrm.light.FakeWsmanResponses.envelope;
+import static org.metricshub.winrm.light.FakeWsmanResponses.fault;
+import static org.metricshub.winrm.light.FakeWsmanResponses.instance;
+import static org.metricshub.winrm.light.FakeWsmanResponses.receiveResponse;
+import static org.metricshub.winrm.light.FakeWsmanResponses.resourceCreated;
+import static org.metricshub.winrm.light.FakeWsmanResponses.signalResponse;
+import static org.metricshub.winrm.light.FakeWsmanResponses.stream;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -29,11 +57,9 @@ class WsmanProtocolTest {
 	private static final String PASSWORD = "s3cret-Passw0rd";
 	private static final long TIMEOUT = 30_000L;
 
-	private static final String SOAP_NS = "http://www.w3.org/2003/05/soap-envelope";
 	private static final String WSEN = "http://schemas.xmlsoap.org/ws/2004/09/enumeration";
 	private static final String WSMAN = "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd";
 	private static final String RSP = "http://schemas.microsoft.com/wbem/wsman/1/windows/shell";
-	private static final String FAULT_NS = "http://schemas.microsoft.com/wbem/wsman/1/wsmanfault";
 
 	private FakeWsmanServer server;
 
@@ -197,18 +223,17 @@ class WsmanProtocolTest {
 		server
 			.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
-			.enqueue(200, envelope(receiveResponse("CMD-1", stream("stdout", chunk1), null)))
+			.enqueue(200, envelope(receiveResponse(stream("stdout", "CMD-1", chunk1), null)))
 			.enqueue(
 				200,
 				envelope(
 					receiveResponse(
-						"CMD-1",
-						stream("stdout", chunk2) + stream("stderr", "warn!".getBytes(StandardCharsets.UTF_8)),
+						stream("stdout", "CMD-1", chunk2) + stream("stderr", "CMD-1", "warn!".getBytes(StandardCharsets.UTF_8)),
 						done("CMD-1", 7)
 					)
 				)
 			)
-			.enqueue(200, envelope("<rsp:SignalResponse xmlns:rsp=\"" + RSP + "\"/>"));
+			.enqueue(200, envelope(signalResponse()));
 
 		try (LightWinRMService service = client(PASSWORD)) {
 			final WindowsRemoteCommandResult result = service.executeCommand(
@@ -255,9 +280,11 @@ class WsmanProtocolTest {
 			)
 			.enqueue(
 				200,
-				envelope(receiveResponse("CMD-1", stream("stdout", "late".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
+				envelope(
+					receiveResponse(stream("stdout", "CMD-1", "late".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0))
+				)
 			)
-			.enqueue(200, envelope("<rsp:SignalResponse xmlns:rsp=\"" + RSP + "\"/>"));
+			.enqueue(200, envelope(signalResponse()));
 
 		try (LightWinRMService service = client(PASSWORD)) {
 			final WindowsRemoteCommandResult result = service.executeCommand("slow", null, StandardCharsets.UTF_8, TIMEOUT);
@@ -282,15 +309,18 @@ class WsmanProtocolTest {
 				200,
 				envelope(
 					receiveResponse(
-						"CMD-1",
-						stream("stdout", "CertUtil: -hashfile command FAILED: 0x80070002".getBytes(StandardCharsets.UTF_8)),
+						stream(
+							"stdout",
+							"CMD-1",
+							"CertUtil: -hashfile command FAILED: 0x80070002".getBytes(StandardCharsets.UTF_8)
+						),
 						"<rsp:CommandState CommandId=\"CMD-1\" State=\"" +
 							RSP +
 							"/CommandState/Done\"><rsp:ExitCode>2147942402</rsp:ExitCode></rsp:CommandState>"
 					)
 				)
 			)
-			.enqueue(200, envelope("<rsp:SignalResponse xmlns:rsp=\"" + RSP + "\"/>"));
+			.enqueue(200, envelope(signalResponse()));
 
 		try (LightWinRMService service = client(PASSWORD)) {
 			final WindowsRemoteCommandResult result = service.executeCommand(
@@ -314,7 +344,7 @@ class WsmanProtocolTest {
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				200,
-				envelope(receiveResponse("CMD-1", stream("stdout", "ok".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
+				envelope(receiveResponse(stream("stdout", "CMD-1", "ok".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
 			)
 			.enqueue(
 				500,
@@ -372,90 +402,7 @@ class WsmanProtocolTest {
 
 	// --- response body builders -----------------------------------------------------
 
-	private static String envelope(final String body) {
-		return "<s:Envelope xmlns:s=\"" + SOAP_NS + "\"><s:Header/><s:Body>" + body + "</s:Body></s:Envelope>";
-	}
-
 	private static String service(final String name, final String state) {
-		return ("<p:Win32_Service xmlns:p=\"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/Win32_Service\">" +
-			"<p:Name>" +
-			name +
-			"</p:Name><p:State>" +
-			state +
-			"</p:State></p:Win32_Service>");
-	}
-
-	private static String resourceCreated(final String shellId) {
-		return ("<x:ResourceCreated xmlns:x=\"http://schemas.xmlsoap.org/ws/2004/09/transfer\"" +
-			" xmlns:wsa=\"http://schemas.xmlsoap.org/ws/2004/08/addressing\" xmlns:wsman=\"" +
-			WSMAN +
-			"\">" +
-			"<wsa:Address>http://127.0.0.1/wsman</wsa:Address>" +
-			"<wsa:ReferenceParameters>" +
-			"<wsman:ResourceURI>" +
-			RSP +
-			"/cmd</wsman:ResourceURI>" +
-			"<wsman:SelectorSet><wsman:Selector Name=\"ShellId\">" +
-			shellId +
-			"</wsman:Selector></wsman:SelectorSet>" +
-			"</wsa:ReferenceParameters></x:ResourceCreated>");
-	}
-
-	private static String commandResponse(final String commandId) {
-		return ("<rsp:CommandResponse xmlns:rsp=\"" +
-			RSP +
-			"\"><rsp:CommandId>" +
-			commandId +
-			"</rsp:CommandId></rsp:CommandResponse>");
-	}
-
-	private static String receiveResponse(final String commandId, final String streams, final String commandState) {
-		return ("<rsp:ReceiveResponse xmlns:rsp=\"" +
-			RSP +
-			"\">" +
-			streams +
-			(commandState == null ? "" : commandState) +
-			"</rsp:ReceiveResponse>");
-	}
-
-	private static String stream(final String name, final byte[] content) {
-		return ("<rsp:Stream Name=\"" +
-			name +
-			"\" CommandId=\"CMD-1\">" +
-			Base64.getEncoder().encodeToString(content) +
-			"</rsp:Stream>");
-	}
-
-	private static String done(final String commandId, final int exitCode) {
-		return ("<rsp:CommandState CommandId=\"" +
-			commandId +
-			"\" State=\"" +
-			RSP +
-			"/CommandState/Done\"><rsp:ExitCode>" +
-			exitCode +
-			"</rsp:ExitCode></rsp:CommandState>");
-	}
-
-	private static String fault(final String code, final String reason) {
-		return fault(code, reason, null);
-	}
-
-	private static String fault(final String code, final String reason, final String detailMessage) {
-		return ("<s:Envelope xmlns:s=\"" +
-			SOAP_NS +
-			"\"><s:Body><s:Fault>" +
-			"<s:Code><s:Value>s:Receiver</s:Value></s:Code>" +
-			"<s:Reason><s:Text xml:lang=\"en-US\">" +
-			reason +
-			"</s:Text></s:Reason>" +
-			"<s:Detail><f:WSManFault xmlns:f=\"" +
-			FAULT_NS +
-			"\" Code=\"" +
-			code +
-			"\" Machine=\"fake\">" +
-			"<f:Message>" +
-			(detailMessage == null ? reason : detailMessage) +
-			"</f:Message></f:WSManFault></s:Detail>" +
-			"</s:Fault></s:Body></s:Envelope>");
+		return instance("Win32_Service", "Name", name, "State", state);
 	}
 }
