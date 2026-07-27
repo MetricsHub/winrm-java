@@ -91,6 +91,12 @@ final class WsmanClient implements AutoCloseable {
 	// released at all — unlock is owner-only).
 	private final Semaphore connectionPermit = new Semaphore(1);
 
+	// Set (before anything else) by close(): a straggler — an abandoned worker or a streaming
+	// handle outliving the client — must never send another request, because request() would
+	// happily reconnect and re-authenticate the hard-closed transport, reviving a connection
+	// nothing will ever close again. Volatile: close() may run on another thread.
+	private volatile boolean closed;
+
 	/**
 	 * Acquire {@link #connectionPermit}, aborting when this task has been cancelled. A caller's
 	 * wall-clock timeout can fire while its operation is still QUEUED behind another one on this
@@ -245,7 +251,12 @@ final class WsmanClient implements AutoCloseable {
 				failOnQuietTimeout
 			);
 			enumeration.ingest(
-				expectOk(Envelopes.enumerateWql(url, ns, query, operationTimeoutMs, maxElements), "Enumerate")
+				exchange(
+					Envelopes.enumerateWql(url, ns, query, operationTimeoutMs, maxElements),
+					"Enumerate",
+					operationTimeoutMs,
+					failOnQuietTimeout
+				)
 			);
 			opened = true;
 			return enumeration;
@@ -335,36 +346,16 @@ final class WsmanClient implements AutoCloseable {
 				}
 				// Stop pulling once the caller has been told the operation timed out.
 				checkNotCancelled();
-				final Decoded resp;
-				try {
-					resp = request(Envelopes.pull(url, namespace, context, operationTimeoutMs, maxElements, maxTimeMs));
-				} catch (final SocketTimeoutException e) {
-					if (failOnQuietTimeout) {
-						throw inactivityTimeout("No response from the WinRM service", e);
-					}
-					throw e;
-				}
-				if (resp.status != 200) {
-					if (failOnQuietTimeout && FAULT_OPERATION_TIMEOUT.equals(wsmanFaultCode(resp.document))) {
-						// The server had no rows to hand out for a whole OperationTimeout: that IS the
-						// streaming inactivity timeout.
-						throw inactivityTimeout("The WQL enumeration produced no rows", null);
-					}
-					throw faultException("Pull", resp);
-				}
-				ingest(resp.document);
+				ingest(
+					exchange(
+						Envelopes.pull(url, namespace, context, operationTimeoutMs, maxElements, maxTimeMs),
+						"Pull",
+						operationTimeoutMs,
+						failOnQuietTimeout
+					)
+				);
 			}
 			return page.get(cursor++);
-		}
-
-		private TimeoutException inactivityTimeout(final String what, final Throwable cause) {
-			final TimeoutException timeout = new TimeoutException(
-				what + " within the " + operationTimeoutMs + " ms timeout."
-			);
-			if (cause != null) {
-				timeout.initCause(cause);
-			}
-			return timeout;
 		}
 
 		/**
@@ -379,7 +370,9 @@ final class WsmanClient implements AutoCloseable {
 			}
 			finished = true;
 			try {
-				if (!broken && !endOfSequence && context != null && !context.isEmpty()) {
+				// No Release when the whole client was closed while this handle was open: its transport
+				// is gone, and the request would reconnect and re-authenticate just to be thrown away.
+				if (!broken && !closed && !endOfSequence && context != null && !context.isEmpty()) {
 					try {
 						request(Envelopes.release(url, namespace, context, operationTimeoutMs));
 					} catch (final Exception ignored) {
@@ -476,14 +469,14 @@ final class WsmanClient implements AutoCloseable {
 				shellWorkingDirectoryPinned = true;
 			}
 			if (shellId == null) {
-				createShell(shellWorkingDirectory, operationTimeoutMs);
+				createShell(shellWorkingDirectory, operationTimeoutMs, failOnQuietTimeout);
 			}
 			// The caller's timeout may have fired while the Create response was being awaited (socket
 			// reads do not observe interrupts): never START the command after the reported timeout.
 			checkNotCancelled();
 			String commandId;
 			try {
-				commandId = sendCommand(commandLine, operationTimeoutMs);
+				commandId = sendCommand(commandLine, operationTimeoutMs, failOnQuietTimeout);
 			} catch (final WinRMFaultException e) {
 				if (!FAULT_SHELL_NOT_FOUND.equals(e.getFaultCode())) {
 					throw e;
@@ -492,9 +485,9 @@ final class WsmanClient implements AutoCloseable {
 				// long-lived client). The Command was rejected before it could run, so it is safe to
 				// recreate the shell — with its ORIGINAL working directory — and retry once.
 				shellId = null;
-				createShell(shellWorkingDirectory, operationTimeoutMs);
+				createShell(shellWorkingDirectory, operationTimeoutMs, failOnQuietTimeout);
 				checkNotCancelled();
-				commandId = sendCommand(commandLine, operationTimeoutMs);
+				commandId = sendCommand(commandLine, operationTimeoutMs, failOnQuietTimeout);
 			}
 			opened = true;
 			return new RemoteCommand(commandId, operationTimeoutMs, failOnQuietTimeout);
@@ -576,11 +569,7 @@ final class WsmanClient implements AutoCloseable {
 					resp = request(Envelopes.receive(url, shellId, commandId, operationTimeoutMs));
 				} catch (final SocketTimeoutException e) {
 					if (failOnQuietTimeout) {
-						final TimeoutException timeout = new TimeoutException(
-							"No response from the WinRM service within the " + operationTimeoutMs + " ms timeout."
-						);
-						timeout.initCause(e);
-						throw timeout;
+						throw quietTimeout("No response from the WinRM service", operationTimeoutMs, e);
 					}
 					throw e;
 				}
@@ -594,9 +583,7 @@ final class WsmanClient implements AutoCloseable {
 				// immediately (its caller's wall-clock deadline governs); for a streaming consumer
 				// that silence IS the inactivity timeout.
 				if (failOnQuietTimeout) {
-					throw new TimeoutException(
-						"The command produced no output within the " + operationTimeoutMs + " ms timeout."
-					);
+					throw quietTimeout("The command produced no output", operationTimeoutMs, null);
 				}
 			}
 		}
@@ -618,7 +605,12 @@ final class WsmanClient implements AutoCloseable {
 			}
 			finished = true;
 			try {
-				terminate(commandId, operationTimeoutMs);
+				// No Signal when the whole client was closed while this handle was open: its transport
+				// is gone, and the request would reconnect and re-authenticate just to be thrown away —
+				// the server reaps the shell (and its commands) on its own IdleTimeout instead.
+				if (!closed) {
+					terminate(commandId, operationTimeoutMs);
+				}
 			} finally {
 				connectionPermit.release();
 			}
@@ -635,8 +627,14 @@ final class WsmanClient implements AutoCloseable {
 		}
 	}
 
-	private void createShell(final String workingDirectory, final long timeoutMs) throws Exception {
-		final Document doc = expectOk(Envelopes.createShell(url, workingDirectory, timeoutMs), "Create shell");
+	private void createShell(final String workingDirectory, final long timeoutMs, final boolean failOnQuietTimeout)
+		throws Exception {
+		final Document doc = exchange(
+			Envelopes.createShell(url, workingDirectory, timeoutMs),
+			"Create shell",
+			timeoutMs,
+			failOnQuietTimeout
+		);
 		final NodeList selectors = doc.getElementsByTagNameNS("*", "Selector");
 		for (int i = 0; i < selectors.getLength(); i++) {
 			final Element selector = (Element) selectors.item(i);
@@ -648,8 +646,14 @@ final class WsmanClient implements AutoCloseable {
 		throw new IllegalStateException("Shell ID not found in Create response");
 	}
 
-	private String sendCommand(final String commandLine, final long timeoutMs) throws Exception {
-		final Document doc = expectOk(Envelopes.command(url, shellId, commandLine, timeoutMs), "Command");
+	private String sendCommand(final String commandLine, final long timeoutMs, final boolean failOnQuietTimeout)
+		throws Exception {
+		final Document doc = exchange(
+			Envelopes.command(url, shellId, commandLine, timeoutMs),
+			"Command",
+			timeoutMs,
+			failOnQuietTimeout
+		);
 		final String commandId = text(doc, "CommandId");
 		if (commandId == null) {
 			throw new IllegalStateException("No CommandId in Command response");
@@ -682,6 +686,48 @@ final class WsmanClient implements AutoCloseable {
 	}
 
 	/**
+	 * Send one request of a streaming-capable operation, expecting HTTP 200. In streaming mode
+	 * ({@code failOnQuietTimeout}) the two "server stayed quiet for a whole timeout" signals — a
+	 * socket read timeout and the WSMan operation-timeout fault — are translated into the
+	 * {@link TimeoutException} the streaming contract documents, on EVERY round trip (startup
+	 * included), so the caller sees one consistent inactivity failure regardless of which request
+	 * exceeded the limit first. In blocking mode this is exactly {@link #expectOk}: the raw
+	 * failures surface and the caller's wall-clock deadline governs.
+	 */
+	private Document exchange(
+		final String soap,
+		final String operation,
+		final long operationTimeoutMs,
+		final boolean failOnQuietTimeout
+	) throws Exception {
+		if (!failOnQuietTimeout) {
+			return expectOk(soap, operation);
+		}
+		final Decoded resp;
+		try {
+			resp = request(soap);
+		} catch (final SocketTimeoutException e) {
+			throw quietTimeout("No response from the WinRM service", operationTimeoutMs, e);
+		}
+		if (resp.status != 200) {
+			if (FAULT_OPERATION_TIMEOUT.equals(wsmanFaultCode(resp.document))) {
+				throw quietTimeout(operation + " produced no result", operationTimeoutMs, null);
+			}
+			throw faultException(operation, resp);
+		}
+		return resp.document;
+	}
+
+	/** The streaming inactivity timeout: the server produced nothing for a whole timeout. */
+	private static TimeoutException quietTimeout(final String what, final long timeoutMs, final Throwable cause) {
+		final TimeoutException timeout = new TimeoutException(what + " within the " + timeoutMs + " ms timeout.");
+		if (cause != null) {
+			timeout.initCause(cause);
+		}
+		return timeout;
+	}
+
+	/**
 	 * Build the exception for a faulting response: the message keeps the historical
 	 * {@code <operation> failed: <summary>} format (part of the exception-message contract inherited
 	 * from the CXF backend), and the WSMan fault code, reason and provider detail travel as fields so
@@ -704,6 +750,17 @@ final class WsmanClient implements AutoCloseable {
 	 * close, so requests never interleave on the stateful connection.
 	 */
 	private Decoded request(final String soap) throws Exception {
+		// A straggler outliving close() must fail here rather than transparently reconnect and
+		// re-authenticate the hard-closed transport — that revived connection would leak, since
+		// nothing will ever close this client again. Same message as the executor's own guard.
+		if (closed) {
+			throw new IllegalStateException("This instance has been closed and a new one must be created.");
+		}
+		return send(soap);
+	}
+
+	/** The body of {@link #request(String)}, also reachable from close() itself. */
+	private Decoded send(final String soap) throws Exception {
 		// If the connection was dropped (e.g. the server sent "Connection: close"), the session bound
 		// to it is dead — re-handshake on the fresh connection rather than sending unauthenticated.
 		if (auth.isAuthenticated() && !transport.isConnected()) {
@@ -933,6 +990,9 @@ final class WsmanClient implements AutoCloseable {
 
 	@Override
 	public void close() {
+		// Fence stragglers first: any in-flight or later request() from a worker or streaming handle
+		// that outlives this close must fail instead of reviving the connection (see request()).
+		closed = true;
 		// Only attempt a graceful shell Delete if no operation is currently using the connection: a
 		// non-blocking tryAcquire (never an acquire()) keeps close() from waiting on an abandoned,
 		// timed-out worker — or an open streaming handle — still holding the permit while blocked on
@@ -946,7 +1006,7 @@ final class WsmanClient implements AutoCloseable {
 			if (locked) {
 				if (shell != null) {
 					try {
-						request(Envelopes.deleteShell(url, shell, timeoutMs));
+						send(Envelopes.deleteShell(url, shell, timeoutMs));
 					} catch (final Exception ignored) {
 						// best-effort shell cleanup
 					}

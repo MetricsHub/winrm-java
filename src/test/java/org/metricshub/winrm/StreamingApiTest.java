@@ -248,6 +248,35 @@ class StreamingApiTest {
 	}
 
 	@Test
+	void quietTimeoutOnTheInitialEnumerateSurfacesAsInactivityTimeout() throws Exception {
+		// The op-timeout fault can answer the very first request too: stream() must report the
+		// documented timeout, not a generic WSMan fault.
+		server.enqueue(500, fault(FAULT_OPERATION_TIMEOUT, "The operation timed out."));
+
+		try (WinRMClient client = builder().timeout(Duration.ofMillis(500)).build()) {
+			assertThrows(WinRMTimeoutException.class, () -> client.wql("SELECT Name FROM Win32_Service").stream());
+		}
+	}
+
+	@Test
+	void closingTheClientWhileAWqlStreamIsOpenLeavesTheStreamInert() throws Exception {
+		server.enqueue(200, envelope(enumeratePage("uuid:CTX-1", service("Spooler", "Running"))));
+
+		try (WinRMClient client = builder().build()) {
+			final Stream<WqlRow> rows = client.wql("SELECT Name FROM Win32_Service").stream();
+			final Iterator<WqlRow> iterator = rows.iterator();
+			assertEquals("Spooler", iterator.next().string("Name"));
+
+			// The client goes away while the stream still owns the connection: closing the stream
+			// afterward must not resurrect the transport (reconnect + re-authenticate) for a Release.
+			client.close();
+			rows.close();
+
+			assertEquals(1, server.decryptedRequests().size());
+		}
+	}
+
+	@Test
 	void wqlStreamRejectsInvalidQueryBeforeSendingAnything() throws Exception {
 		try (WinRMClient client = builder().build()) {
 			assertThrows(WqlSyntaxException.class, () -> client.wql("Not a WQL query").stream());
@@ -404,6 +433,38 @@ class StreamingApiTest {
 				assertEquals("slow", process.stdout().readLine());
 			}
 			assertTrue(server.decryptedRequests().get(3).contains("signal/terminate"));
+		}
+	}
+
+	@Test
+	void quietTimeoutDuringCommandStartupSurfacesAsInactivityTimeout() throws Exception {
+		// The op-timeout fault can answer the shell Create too: start() must report the documented
+		// timeout, not a generic WSMan fault.
+		server.enqueue(500, fault(FAULT_OPERATION_TIMEOUT, "The operation timed out."));
+
+		try (WinRMClient client = builder().timeout(Duration.ofMillis(500)).build()) {
+			assertThrows(
+				WinRMTimeoutException.class,
+				() -> client.command("slow-start.exe").charset(StandardCharsets.UTF_8).start()
+			);
+		}
+	}
+
+	@Test
+	void closingTheClientWhileAProcessIsOpenLeavesTheProcessInert() throws Exception {
+		enqueueCommandStartup();
+		server.enqueue(200, envelope(receiveResponse(stdoutChunk("tick\n"), null)));
+
+		try (WinRMClient client = builder().build()) {
+			final RemoteProcess process = client.command("ping -t localhost").charset(StandardCharsets.UTF_8).start();
+			assertEquals("tick", process.stdout().readLine());
+
+			// The client goes away while the process still owns the connection: closing the process
+			// afterward must not resurrect the transport (reconnect + re-authenticate) for a Signal.
+			client.close();
+			process.close();
+
+			assertEquals(3, server.decryptedRequests().size());
 		}
 	}
 
