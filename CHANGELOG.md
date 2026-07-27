@@ -94,6 +94,13 @@ Consequences:
 - The WSMan `OperationTimeout` header and the socket read timeout now follow each operation's own
   timeout instead of the executor's creation timeout (they were always the same value through the
   legacy API; the fluent API can override the timeout per operation).
+- A cached remote command shell reaped by the server between commands (e.g. its `IdleTimeout`
+  expired on a long-lived client) is transparently recreated and the rejected command retried
+  once — previously every later command on the same executor kept failing with the
+  shell-not-found fault.
+- The library's internal housekeeping queries (output-encoding detection, Windows-directory
+  discovery for file transfers) now explicitly target `ROOT\CIMV2`, so a client configured with a
+  custom default WMI namespace can still run commands and transfer files.
 - Dependency-free WinRM client with no Apache CXF / JAX-WS / JAXB stack, immune by construction to
   JAXP `ServiceLoader` conflicts (it uses the JDK-default XML factories). Supports NTLM over HTTP
   (with message encryption) and HTTPS, and Kerberos (SPNEGO, via the JDK GSS-API) over HTTPS.

@@ -235,7 +235,21 @@ final class WsmanClient implements AutoCloseable {
 			// The caller's timeout may have fired while the Create response was being awaited (socket
 			// reads do not observe interrupts): never START the command after the reported timeout.
 			checkNotCancelled();
-			final String commandId = startCommand(commandLine, operationTimeoutMs);
+			String commandId;
+			try {
+				commandId = startCommand(commandLine, operationTimeoutMs);
+			} catch (final WinRMFaultException e) {
+				if (!FAULT_SHELL_NOT_FOUND.equals(e.getFaultCode())) {
+					throw e;
+				}
+				// The server reaped the cached shell between commands (e.g. its IdleTimeout expired on a
+				// long-lived client). The Command was rejected before it could run, so it is safe to
+				// recreate the shell and retry once.
+				shellId = null;
+				createShell(workingDirectory, operationTimeoutMs);
+				checkNotCancelled();
+				commandId = startCommand(commandLine, operationTimeoutMs);
+			}
 			try {
 				return receiveLoop(commandId, cs, operationTimeoutMs);
 			} finally {
@@ -304,8 +318,13 @@ final class WsmanClient implements AutoCloseable {
 	private void terminate(final String commandId, final long timeoutMs) throws Exception {
 		final Decoded resp = request(Envelopes.signal(url, shellId, commandId, timeoutMs));
 		// A missing shell is fine here — the command already finished and the shell may be gone.
-		if (resp.status != 200 && !FAULT_SHELL_NOT_FOUND.equals(wsmanFaultCode(resp.document))) {
-			throw faultException("Signal", resp);
+		// But drop the cached ID so the next command creates a fresh shell up front instead of
+		// discovering the stale one the hard way.
+		if (resp.status != 200) {
+			if (!FAULT_SHELL_NOT_FOUND.equals(wsmanFaultCode(resp.document))) {
+				throw faultException("Signal", resp);
+			}
+			shellId = null;
 		}
 	}
 

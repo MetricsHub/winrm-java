@@ -463,6 +463,76 @@ class WinRMClientTest {
 	}
 
 	@Test
+	void expiredCachedShellIsRecreatedAndTheCommandRetried() throws Exception {
+		server
+			// First command: normal lifecycle in a fresh shell.
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueue(
+				200,
+				envelope(receiveResponse(stream("stdout", "CMD-1", "first".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
+			)
+			.enqueue(200, envelope(signalResponse()))
+			// Second command: the server reaped SHELL-1 in the meantime (IdleTimeout) and rejects the
+			// Command with shell-not-found; the client must recreate the shell and retry once.
+			.enqueue(
+				500,
+				fault("2150858843", "The WS-Management service cannot process the request because the resource is offline.")
+			)
+			.enqueue(200, envelope(resourceCreated("SHELL-2")))
+			.enqueue(200, envelope(commandResponse("CMD-2")))
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(stream("stdout", "CMD-2", "second".getBytes(StandardCharsets.UTF_8)), done("CMD-2", 0))
+				)
+			)
+			.enqueue(200, envelope(signalResponse()));
+
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			assertEquals("first", client.command("first.exe").charset(StandardCharsets.UTF_8).execute().stdout());
+			assertEquals("second", client.command("second.exe").charset(StandardCharsets.UTF_8).execute().stdout());
+		}
+
+		final List<String> requests = server.decryptedRequests();
+		// The retried Command rides the NEW shell.
+		assertTrue(
+			requests.stream().anyMatch(r -> r.contains(">second.exe<") && r.contains("Selector Name=\"ShellId\">SHELL-2<")),
+			() -> String.join("\n---\n", requests)
+		);
+		// Exactly two shells were created, and second.exe was sent twice (rejected, then retried).
+		assertEquals(2, requests.stream().filter(r -> r.contains("<rsp:InputStreams>")).count());
+		assertEquals(2, requests.stream().filter(r -> r.contains(">second.exe<")).count());
+	}
+
+	@Test
+	void charsetDetectionQueriesCimv2EvenWithACustomDefaultNamespace() throws Exception {
+		server
+			.enqueue(200, envelope(enumerationDone(instance("Win32_OperatingSystem", "CodeSet", "1252"))))
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueue(
+				200,
+				envelope(receiveResponse(stream("stdout", "CMD-1", "ok".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
+			)
+			.enqueue(200, envelope(signalResponse()));
+
+		// The client's default namespace points at a custom one, where Win32_OperatingSystem does
+		// not exist: the internal encoding-detection query must still target ROOT\CIMV2.
+		try (WinRMClient client = builder(PASSWORD).namespace("root\\custom").build()) {
+			assertEquals("ok", client.command("whoami").execute().stdout());
+		}
+
+		final String codeSetQuery = server
+			.decryptedRequests()
+			.stream()
+			.filter(r -> r.contains("SELECT CodeSet FROM Win32_OperatingSystem"))
+			.findFirst()
+			.orElseThrow();
+		assertTrue(codeSetQuery.contains("http://schemas.microsoft.com/wbem/wsman/1/wmi/ROOT/CIMV2/*"), codeSetQuery);
+	}
+
+	@Test
 	void closedClientRejectsOperationsAndCloseIsIdempotent() {
 		final WinRMClient client = builder(PASSWORD).build();
 		client.close();

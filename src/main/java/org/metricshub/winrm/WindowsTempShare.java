@@ -140,9 +140,11 @@ public class WindowsTempShare {
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
 
 		try {
-			// Extract the WindowsDirectory property from the first instance and return it (or throw an exception)
-			return windowsRemoteExecutor
-				.executeWql("SELECT WindowsDirectory FROM Win32_OperatingSystem", timeout)
+			// Extract the WindowsDirectory property from the first instance and return it (or throw an
+			// exception). Explicitly in ROOT\CIMV2: the executor's default namespace may be a custom
+			// one, where Win32_OperatingSystem does not exist.
+			return WmiHelper
+				.executeWqlInCimv2(windowsRemoteExecutor, "SELECT WindowsDirectory FROM Win32_OperatingSystem", timeout)
 				.stream()
 				.limit(1)
 				.map(row -> (String) row.get("WindowsDirectory"))
