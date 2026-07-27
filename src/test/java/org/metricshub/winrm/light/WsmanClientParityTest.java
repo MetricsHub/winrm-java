@@ -224,7 +224,8 @@ class WsmanClientParityTest {
 			"http://host:5985/wsman",
 			"root/cimv2",
 			"SELECT * FROM Win32_OperatingSystem",
-			timeoutMs
+			timeoutMs,
+			32000
 		);
 	}
 }

@@ -58,26 +58,47 @@ final class Envelopes {
 
 	// --- WQL ---------------------------------------------------------------
 
-	static String enumerateWql(final String url, final String namespace, final String wql, final long timeoutMs) {
+	static String enumerateWql(
+		final String url,
+		final String namespace,
+		final String wql,
+		final long timeoutMs,
+		final int maxElements
+	) {
 		return envelopeOpen(false) +
 			header(url, wmiResourceUri(namespace), ACTION_ENUMERATE, timeoutMs, null, null) +
 			"<s:Body><wsen:Enumerate>" +
 			"<wsman:OptimizeEnumeration/>" +
-			"<wsman:MaxElements>32000</wsman:MaxElements>" +
+			"<wsman:MaxElements>" +
+			maxElements +
+			"</wsman:MaxElements>" +
 			"<wsman:Filter Dialect=\"http://schemas.microsoft.com/wbem/wsman/1/WQL\">" +
 			escape(wql) +
 			"</wsman:Filter>" +
 			"</wsen:Enumerate></s:Body></s:Envelope>";
 	}
 
-	static String pull(final String url, final String namespace, final String context, final long timeoutMs) {
+	static String pull(
+		final String url,
+		final String namespace,
+		final String context,
+		final long timeoutMs,
+		final int maxElements,
+		final long maxTimeMs
+	) {
+		// Per WS-Enumeration, MaxTime precedes MaxElements inside Pull. MaxTime bounds how long the
+		// server may hold this single Pull open before answering with the rows it has; 0 omits it and
+		// the OperationTimeout header applies alone.
 		return envelopeOpen(false) +
 			header(url, wmiResourceUri(namespace), ACTION_PULL, timeoutMs, null, null) +
 			"<s:Body><wsen:Pull>" +
 			"<wsen:EnumerationContext>" +
 			escape(context) +
 			"</wsen:EnumerationContext>" +
-			"<wsen:MaxElements>32000</wsen:MaxElements>" +
+			(maxTimeMs > 0 ? "<wsen:MaxTime>" + operationTimeout(maxTimeMs) + "</wsen:MaxTime>" : "") +
+			"<wsen:MaxElements>" +
+			maxElements +
+			"</wsen:MaxElements>" +
 			"</wsen:Pull></s:Body></s:Envelope>";
 	}
 

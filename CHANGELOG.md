@@ -72,6 +72,35 @@ Consequences:
 
 ### Added
 
+- **Fluent client API** (issue #131): `WinRMClient.builder(host)` creates a reusable,
+  `AutoCloseable` client — one authentication, any number of WQL queries and commands over the
+  same connection. Per-operation builders (`client.wql(...)`, `client.command(...)`) end in
+  `execute()` and return typed results (`WqlResult`/`WqlRow` with case-insensitive property
+  lookup, `CommandResult`), with `java.time.Duration` timeouts throughout. Failures are reported
+  through a new unchecked exception hierarchy (`WinRMClientException`, with
+  `WinRMAuthenticationException`, `WinRMFaultException` — carrying the WSMan fault code, reason,
+  and provider detail as fields — `WinRMTimeoutException`, and `WqlSyntaxException`). The legacy
+  static helpers and their checked exceptions are unchanged.
+- **WQL enumeration tuning** (issue #86): `pageSize(int)` sets the WS-Enumeration `MaxElements`
+  batch size (default 32000) and `pullTimeout(Duration)` sets the per-Pull `MaxTime`; both on the
+  fluent WQL builder, plumbed down to the WSMan envelopes.
+- **Per-client TLS configuration**: `trustAllCertificates()` and `sslContext(SSLContext)` on the
+  client builder override the global `org.metricshub.winrm.tls.insecure` system property for that
+  client only.
+- **First-class file upload**: `client.uploadFile(localPath, remotePath)` copies a file to an
+  explicit remote path through the WinRM channel (digest-verified, skip-if-identical, destination
+  directory created when needed) — also available to the legacy API as
+  `ShellFileCopy.copyLocalFileToRemoteFile(...)`.
+- The WSMan `OperationTimeout` header and the socket read timeout now follow each operation's own
+  timeout instead of the executor's creation timeout (they were always the same value through the
+  legacy API; the fluent API can override the timeout per operation).
+- A cached remote command shell reaped by the server between commands (e.g. its `IdleTimeout`
+  expired on a long-lived client) is transparently recreated and the rejected command retried
+  once — previously every later command on the same executor kept failing with the
+  shell-not-found fault.
+- The library's internal housekeeping queries (output-encoding detection, Windows-directory
+  discovery for file transfers) now explicitly target `ROOT\CIMV2`, so a client configured with a
+  custom default WMI namespace can still run commands and transfer files.
 - Dependency-free WinRM client with no Apache CXF / JAX-WS / JAXB stack, immune by construction to
   JAXP `ServiceLoader` conflicts (it uses the JDK-default XML factories). Supports NTLM over HTTP
   (with message encryption) and HTTPS, and Kerberos (SPNEGO, via the JDK GSS-API) over HTTPS.

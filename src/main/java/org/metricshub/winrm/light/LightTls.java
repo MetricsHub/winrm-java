@@ -61,9 +61,17 @@ final class LightTls {
 	 * @return an {@link SSLSocketFactory}
 	 */
 	static SSLSocketFactory socketFactory() {
-		if (!isInsecure()) {
-			return (SSLSocketFactory) SSLSocketFactory.getDefault();
-		}
+		return isInsecure() ? insecureSocketFactory() : (SSLSocketFactory) SSLSocketFactory.getDefault();
+	}
+
+	/**
+	 * A trust-all socket factory that skips certificate validation — the per-client counterpart of
+	 * {@value #INSECURE_PROPERTY}, used by the fluent API's {@code trustAllCertificates()} option.
+	 * Insecure; testing only.
+	 *
+	 * @return a trust-all {@link SSLSocketFactory}
+	 */
+	static SSLSocketFactory insecureSocketFactory() {
 		try {
 			final SSLContext context = SSLContext.getInstance("TLS");
 			context.init(null, new TrustManager[] { trustAllManager() }, null);

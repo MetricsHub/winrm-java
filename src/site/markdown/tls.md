@@ -1,17 +1,18 @@
-keywords: tls, https, certificate, trust store, hostname verification, insecure, self-signed
-description: How the client validates TLS certificates over HTTPS, how to trust a certificate, and the insecure test-only opt-out.
+keywords: tls, https, certificate, trust store, hostname verification, insecure, self-signed, sslcontext
+description: How the client validates TLS certificates over HTTPS, how to trust a certificate, per-client TLS options, and the insecure test-only opt-out.
 
 # TLS / HTTPS
 
 <!-- MACRO{toc|fromDepth=2|toDepth=3|id=toc} -->
 
-Use HTTPS by passing `HTTPS` as the protocol. HTTPS uses port **5986** by default (HTTP uses
-**5985**); pass an explicit `port` to override either.
+Use HTTPS with `https()` on the [`WinRMClient`](apidocs/org/metricshub/winrm/WinRMClient.html)
+builder. HTTPS uses port **5986** by default (HTTP uses **5985**); `port(int)` overrides either.
 
 ```java
-import static org.metricshub.winrm.WinRMHttpProtocolEnum.HTTPS;
-
-executeWql(HTTPS, "server.example.com", null, /* ... */);
+WinRMClient.builder("server.example.com")
+    .https()
+    .credentials("DOMAIN\\Administrator", password)
+    .build();
 ```
 
 ## Validation is on by default
@@ -40,19 +41,55 @@ java -Djavax.net.ssl.trustStore=/path/to/truststore.jks \
 Because the client uses the JDK default socket factory, any trust store configured this way (or the
 platform's default trust store) applies automatically.
 
+### A dedicated trust store for one client
+
+To use a specific trust store for one client — without touching the JVM-wide configuration — pass
+your own `SSLContext` to the builder. Hostname verification stays on:
+
+```java
+KeyStore trustStore = KeyStore.getInstance(KeyStore.getDefaultType());
+try (InputStream in = Files.newInputStream(Path.of("winrm-truststore.jks"))) {
+    trustStore.load(in, "changeit".toCharArray());
+}
+TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+tmf.init(trustStore);
+SSLContext sslContext = SSLContext.getInstance("TLS");
+sslContext.init(null, tmf.getTrustManagers(), null);
+
+WinRMClient client = WinRMClient.builder("server.example.com")
+    .https()
+    .credentials("DOMAIN\\Administrator", password)
+    .sslContext(sslContext)
+    .build();
+```
+
 ## Disabling validation (insecure — testing only)
 
-For a self-signed test host where installing a trust store is not practical, set the system property
-`org.metricshub.winrm.tls.insecure` to `true`. This trusts **all** certificates and skips hostname
-verification:
+For a self-signed test host where installing a trust store is not practical,
+`trustAllCertificates()` on the builder trusts **all** certificates and skips hostname
+verification — for that client only:
+
+```java
+WinRMClient.builder("test-host.local")
+    .https()
+    .credentials("Administrator", password)
+    .trustAllCertificates()   // insecure — testing only
+    .build();
+```
+
+The JVM-wide system property `org.metricshub.winrm.tls.insecure=true` has the same effect for
+every client that does not configure TLS explicitly (it is what the legacy API uses):
 
 ```bash
 java -Dorg.metricshub.winrm.tls.insecure=true -cp ... MyApp
 ```
 
 > [!WARNING]
-> This defeats the protection TLS provides against man-in-the-middle attacks. Use it only for
-> testing or for isolated hosts, never in production.
+> Both opt-outs defeat the protection TLS provides against man-in-the-middle attacks. Use them only
+> for testing or for isolated hosts, never in production.
+
+`trustAllCertificates()` and `sslContext(...)` are mutually exclusive, and either one takes
+precedence over the system property for that client.
 
 ## On the command line
 

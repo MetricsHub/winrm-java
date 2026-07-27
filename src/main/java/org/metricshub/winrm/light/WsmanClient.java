@@ -34,6 +34,8 @@ import javax.net.ssl.SSLSocketFactory;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import org.metricshub.winrm.exceptions.WinRMAuthenticationException;
+import org.metricshub.winrm.exceptions.WinRMFaultException;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -69,12 +71,49 @@ final class WsmanClient implements AutoCloseable {
 	private String pendingAuthorization;
 	private String shellId;
 
+	// The shell's working directory is pinned by the FIRST command on this connection and reused
+	// whenever the shell must be (re)created — e.g. after the server reaped it — so a recreation
+	// stays invisible to the caller instead of silently moving later commands to the default
+	// directory. Guarded by operationLock, like shellId.
+	private String shellWorkingDirectory;
+	private boolean shellWorkingDirectoryPinned;
+
 	// A single NTLM connection is a serial channel: one socket, stateful RC4 ciphers with sequence
 	// numbers, and a single shellId. Concurrent callers (e.g. one executor shared across
 	// threads) MUST NOT interleave, or they read each other's responses and desync the cipher streams.
 	// Every high-level operation (wql/executeCommand) runs while holding this lock; close() only
 	// tries it, so it can still hard-close the transport to unblock an abandoned, timed-out worker.
 	private final ReentrantLock operationLock = new ReentrantLock();
+
+	/**
+	 * Acquire {@link #operationLock}, aborting when this task has been cancelled. A caller's
+	 * wall-clock timeout can fire while its operation is still QUEUED behind another one on this
+	 * serial connection; the timeout path then cancels (interrupts) the worker thread, which must
+	 * NOT go on to acquire the lock and execute the operation the caller was already told timed
+	 * out — a command would run its side effects after the failure was reported. Interruption
+	 * while waiting aborts the acquisition; an interrupt that arrived just before or during the
+	 * acquisition is detected right after it, before anything is sent.
+	 */
+	private void lockAbortably() throws InterruptedException {
+		operationLock.lockInterruptibly();
+		if (Thread.interrupted()) {
+			operationLock.unlock();
+			throw new InterruptedException("Operation abandoned: cancelled while waiting for the connection.");
+		}
+	}
+
+	/**
+	 * Abort between protocol steps when this task has been cancelled. A classic socket read does
+	 * not observe the interrupt the timeout path delivers: a worker blocked in (say) the Create
+	 * shell response can outlive its caller's timeout and would otherwise go on to the next step —
+	 * sending a command after the caller was already told the operation timed out. Checked before
+	 * every step with side effects.
+	 */
+	private static void checkNotCancelled() throws InterruptedException {
+		if (Thread.interrupted()) {
+			throw new InterruptedException("Operation abandoned: cancelled after its timeout was reported.");
+		}
+	}
 
 	WsmanClient(
 		final String host,
@@ -115,17 +154,33 @@ final class WsmanClient implements AutoCloseable {
 		}
 	}
 
-	/** Run a WQL query and return the rows as ordered property maps. */
-	List<Map<String, String>> wql(final String namespace, final String query) throws Exception {
+	/**
+	 * Run a WQL query and return the rows as ordered property maps.
+	 *
+	 * @param namespace the WMI namespace
+	 * @param query the WQL query
+	 * @param operationTimeoutMs this operation's timeout, driving the WSMan OperationTimeout header
+	 *        and the socket read timeout
+	 * @param maxElements the WS-Enumeration MaxElements batch size for Enumerate and every Pull
+	 * @param maxTimeMs the WS-Enumeration MaxTime for each Pull in milliseconds; 0 omits the element
+	 */
+	List<Map<String, String>> wql(
+		final String namespace,
+		final String query,
+		final long operationTimeoutMs,
+		final int maxElements,
+		final long maxTimeMs
+	) throws Exception {
 		// Serialize the whole enumeration (Enumerate + all Pulls) against any other operation sharing
 		// this connection; see operationLock.
-		operationLock.lock();
+		lockAbortably();
 		try {
+			transport.operationTimeout(toSocketTimeoutMillis(operationTimeoutMs));
 			// WMI namespaces are case-insensitive, but preserve the caller's case to match the CXF backend.
 			final String ns = namespace.replace('\\', '/');
 			final List<Map<String, String>> rows = new ArrayList<>();
 
-			Document doc = expectOk(Envelopes.enumerateWql(url, ns, query, timeoutMs), "Enumerate");
+			Document doc = expectOk(Envelopes.enumerateWql(url, ns, query, operationTimeoutMs, maxElements), "Enumerate");
 			collectItems(doc, rows);
 
 			// Pull until the server signals EndOfSequence (matching the CXF backend). The aggregate
@@ -133,7 +188,9 @@ final class WsmanClient implements AutoCloseable {
 			boolean endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
 			String context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
 			while (!endOfSequence && context != null && !context.isEmpty()) {
-				doc = expectOk(Envelopes.pull(url, ns, context, timeoutMs), "Pull");
+				// Stop pulling once the caller has been told the operation timed out.
+				checkNotCancelled();
+				doc = expectOk(Envelopes.pull(url, ns, context, operationTimeoutMs, maxElements, maxTimeMs), "Pull");
 				collectItems(doc, rows);
 				endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
 				context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
@@ -158,29 +215,63 @@ final class WsmanClient implements AutoCloseable {
 		}
 	}
 
-	/** Execute a command in the remote command shell, creating the shell on first use. */
-	CommandOutput executeCommand(final String commandLine, final String workingDirectory, final Charset charset)
-		throws Exception {
+	/**
+	 * Execute a command in the remote command shell, creating the shell on first use.
+	 *
+	 * @param commandLine the command line to run
+	 * @param workingDirectory working directory of the shell (only honored when the shell is created)
+	 * @param charset the charset decoding the output streams
+	 * @param operationTimeoutMs this operation's timeout, driving the WSMan OperationTimeout header
+	 *        and the socket read timeout
+	 */
+	CommandOutput executeCommand(
+		final String commandLine,
+		final String workingDirectory,
+		final Charset charset,
+		final long operationTimeoutMs
+	) throws Exception {
 		// Serialize the whole shell lifecycle (Create + Command + Receive loop + Signal) against any
 		// other operation sharing this connection and the shellId field; see operationLock.
-		operationLock.lock();
+		lockAbortably();
 		try {
+			transport.operationTimeout(toSocketTimeoutMillis(operationTimeoutMs));
+			if (!shellWorkingDirectoryPinned) {
+				shellWorkingDirectory = workingDirectory;
+				shellWorkingDirectoryPinned = true;
+			}
 			if (shellId == null) {
-				createShell(workingDirectory);
+				createShell(shellWorkingDirectory, operationTimeoutMs);
 			}
 			final Charset cs = charset != null ? charset : StandardCharsets.UTF_8;
-			final String commandId = startCommand(commandLine);
+			// The caller's timeout may have fired while the Create response was being awaited (socket
+			// reads do not observe interrupts): never START the command after the reported timeout.
+			checkNotCancelled();
+			String commandId;
 			try {
-				return receiveLoop(commandId, cs);
+				commandId = startCommand(commandLine, operationTimeoutMs);
+			} catch (final WinRMFaultException e) {
+				if (!FAULT_SHELL_NOT_FOUND.equals(e.getFaultCode())) {
+					throw e;
+				}
+				// The server reaped the cached shell between commands (e.g. its IdleTimeout expired on a
+				// long-lived client). The Command was rejected before it could run, so it is safe to
+				// recreate the shell — with its ORIGINAL working directory — and retry once.
+				shellId = null;
+				createShell(shellWorkingDirectory, operationTimeoutMs);
+				checkNotCancelled();
+				commandId = startCommand(commandLine, operationTimeoutMs);
+			}
+			try {
+				return receiveLoop(commandId, cs, operationTimeoutMs);
 			} finally {
-				terminate(commandId);
+				terminate(commandId, operationTimeoutMs);
 			}
 		} finally {
 			operationLock.unlock();
 		}
 	}
 
-	private void createShell(final String workingDirectory) throws Exception {
+	private void createShell(final String workingDirectory, final long timeoutMs) throws Exception {
 		final Document doc = expectOk(Envelopes.createShell(url, workingDirectory, timeoutMs), "Create shell");
 		final NodeList selectors = doc.getElementsByTagNameNS("*", "Selector");
 		for (int i = 0; i < selectors.getLength(); i++) {
@@ -193,7 +284,7 @@ final class WsmanClient implements AutoCloseable {
 		throw new IllegalStateException("Shell ID not found in Create response");
 	}
 
-	private String startCommand(final String commandLine) throws Exception {
+	private String startCommand(final String commandLine, final long timeoutMs) throws Exception {
 		final Document doc = expectOk(Envelopes.command(url, shellId, commandLine, timeoutMs), "Command");
 		final String commandId = text(doc, "CommandId");
 		if (commandId == null) {
@@ -202,13 +293,18 @@ final class WsmanClient implements AutoCloseable {
 		return commandId;
 	}
 
-	private CommandOutput receiveLoop(final String commandId, final Charset charset) throws Exception {
+	private CommandOutput receiveLoop(final String commandId, final Charset charset, final long timeoutMs)
+		throws Exception {
 		// Accumulate the raw stream BYTES and decode once at the end: a multibyte character (e.g. UTF-8)
 		// can be split across Stream elements or Receive responses, and decoding each chunk independently
 		// would corrupt the boundary bytes into replacement characters.
 		final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
 		final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
 		while (true) {
+			// A late non-final response (or an op-timeout fault) must not keep an abandoned worker
+			// re-issuing Receive — and holding the serial connection — until the remote command ends.
+			// Aborting here still runs the finally-block Signal, which terminates the remote command.
+			checkNotCancelled();
 			final Decoded resp = request(Envelopes.receive(url, shellId, commandId, timeoutMs));
 			if (resp.status != 200) {
 				final String faultCode = wsmanFaultCode(resp.document);
@@ -216,7 +312,7 @@ final class WsmanClient implements AutoCloseable {
 				if (FAULT_OPERATION_TIMEOUT.equals(faultCode)) {
 					continue;
 				}
-				throw new IllegalStateException("Receive failed: " + faultSummary(resp));
+				throw faultException("Receive", resp);
 			}
 			collectStreams(resp.document, stdout, stderr);
 			final Integer exitCode = doneExitCode(resp.document);
@@ -230,11 +326,16 @@ final class WsmanClient implements AutoCloseable {
 		}
 	}
 
-	private void terminate(final String commandId) throws Exception {
+	private void terminate(final String commandId, final long timeoutMs) throws Exception {
 		final Decoded resp = request(Envelopes.signal(url, shellId, commandId, timeoutMs));
 		// A missing shell is fine here — the command already finished and the shell may be gone.
-		if (resp.status != 200 && !FAULT_SHELL_NOT_FOUND.equals(wsmanFaultCode(resp.document))) {
-			throw new IllegalStateException("Signal failed: " + faultSummary(resp));
+		// But drop the cached ID so the next command creates a fresh shell up front instead of
+		// discovering the stale one the hard way.
+		if (resp.status != 200) {
+			if (!FAULT_SHELL_NOT_FOUND.equals(wsmanFaultCode(resp.document))) {
+				throw faultException("Signal", resp);
+			}
+			shellId = null;
 		}
 	}
 
@@ -244,9 +345,25 @@ final class WsmanClient implements AutoCloseable {
 	private Document expectOk(final String soap, final String operation) throws Exception {
 		final Decoded resp = request(soap);
 		if (resp.status != 200) {
-			throw new IllegalStateException(operation + " failed: " + faultSummary(resp));
+			throw faultException(operation, resp);
 		}
 		return resp.document;
+	}
+
+	/**
+	 * Build the exception for a faulting response: the message keeps the historical
+	 * {@code <operation> failed: <summary>} format (part of the exception-message contract inherited
+	 * from the CXF backend), and the WSMan fault code, reason and provider detail travel as fields so
+	 * the fluent API can expose them programmatically.
+	 */
+	private static WinRMFaultException faultException(final String operation, final Decoded resp) {
+		return new WinRMFaultException(
+			operation + " failed: " + faultSummary(resp),
+			resp.status,
+			trimToNull(wsmanFaultCode(resp.document)),
+			trimToNull(text(resp.document, "Text")),
+			trimToNull(wsmanFaultMessage(resp.document))
+		);
 	}
 
 	/**
@@ -293,7 +410,7 @@ final class WsmanClient implements AutoCloseable {
 				}
 				// Same message format as the CXF backend's credential-rejection path — callers (and their
 				// operators) match on it.
-				throw new IllegalStateException(
+				throw new WinRMAuthenticationException(
 					String.format("Authentication error on %s with user name \"%s\"", url, rawUsername)
 				);
 			}

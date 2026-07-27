@@ -105,6 +105,10 @@ public class ShellFileCopy {
 	private static final Pattern RESERVED_DEVICE_NAME = Pattern
 		.compile("(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\\..*)?");
 
+	/** Absolute Windows file path: drive-rooted ({@code C:\...}) or UNC ({@code \\server\share\...}). */
+	private static final Pattern ABSOLUTE_REMOTE_PATH = Pattern
+		.compile("(?:[A-Za-z]:|\\\\\\\\[^\\\\]+\\\\[^\\\\]+)\\\\.+");
+
 	/** WSManFault code for "the maximum number of concurrent operations for this user has been exceeded". */
 	private static final String FAULT_OPERATION_QUOTA = "2150859174";
 
@@ -223,12 +227,120 @@ public class ShellFileCopy {
 		final String remoteFile = remoteDirectory + "\\"
 			+ contentAddressedName(fileName, content, maxRemoteNameLength(remoteDirectory));
 
+		transferContent(windowsRemoteExecutor, localPath, content, remoteFile, timeout, start);
+
+		return remoteFile;
+	}
+
+	/**
+	 * Copy one local file to an explicit path on the remote host through the WinRM command
+	 * shell, creating the destination directory when needed. The transfer is digest-verified,
+	 * and skipped entirely when the destination already carries the digest of the local file.
+	 *
+	 * @param windowsRemoteExecutor Executor connected to the remote host (mandatory)
+	 * @param localPath The local file to copy (mandatory)
+	 * @param remoteFile The absolute destination path on the remote host, e.g.
+	 *        {@code C:\Windows\Temp\collect.ps1} (mandatory)
+	 * @param timeout Timeout in milliseconds (throws an IllegalArgumentException if negative or zero)
+	 * @throws IOException If the local file cannot be read
+	 * @throws TimeoutException To notify userName of timeout
+	 * @throws WindowsRemoteException For any problem encountered on the remote host
+	 */
+	public static void copyLocalFileToRemoteFile(
+		final WindowsRemoteExecutor windowsRemoteExecutor,
+		final Path localPath,
+		final String remoteFile,
+		final long timeout
+	) throws IOException, TimeoutException, WindowsRemoteException {
+		Utils.checkNonNull(windowsRemoteExecutor, "windowsRemoteExecutor");
+		Utils.checkNonNull(localPath, "localPath");
+		Utils.checkNonBlank(remoteFile, "remoteFile");
+		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
+
+		// Only drive-rooted (C:\...) or UNC (\\server\share\...) destinations: a relative path
+		// (scripts\x.ps1) or a drive-relative one (C:x.ps1) would resolve against the remote
+		// shell's current directory and land the file somewhere the caller did not intend.
+		final int separator = remoteFile.lastIndexOf('\\');
+		if (!ABSOLUTE_REMOTE_PATH.matcher(remoteFile).matches() || separator == remoteFile.length() - 1) {
+			throw new IllegalArgumentException(
+				String.format("Remote path %s must be an absolute Windows file path (drive-rooted or UNC).", remoteFile)
+			);
+		}
+		final String remoteDirectory = remoteFile.substring(0, separator);
+		checkEmbeddableRemotePath(remoteDirectory);
+		checkTransferableFileName(remoteFile.substring(separator + 1));
+
+		// The staging suffixes ride the destination path: the COMPLETE staging path must honor the
+		// traditional MAX_PATH limit that old hosts still enforce.
+		if (remoteFile.length() + STAGING_SUFFIX_BUDGET > MAX_WINDOWS_PATH_LENGTH) {
+			throw new IllegalArgumentException(
+				String.format("Remote path %s is too long to be transferred to a Windows host.", remoteFile)
+			);
+		}
+
+		final long start = Utils.getCurrentTimeMillis();
+
+		final byte[] content = Files.readAllBytes(localPath);
+
+		runChecked(
+			windowsRemoteExecutor,
+			WindowsTempShare.buildCreateRemoteDirectoryCommand(remoteDirectory),
+			"create the remote directory",
+			timeout,
+			start
+		);
+
+		transferContent(windowsRemoteExecutor, localPath, content, remoteFile, timeout, start);
+	}
+
+	/**
+	 * Reject a remote directory path that cannot be embedded safely in a quoted cmd.exe argument
+	 * ({@code %} and {@code !} expand even between quotes, {@code "} and control characters break
+	 * the quoting) or that Windows cannot create ({@code < > / | ? *} are forbidden in path
+	 * components; {@code :} and {@code \} are structural and allowed).
+	 *
+	 * @param path The remote directory path
+	 */
+	static void checkEmbeddableRemotePath(final String path) {
+		if (path.contains("%")
+			||
+			path.contains("!")
+			||
+			path.chars().anyMatch(c -> c < 0x20 || "<>\"/|?*".indexOf(c) >= 0)) {
+			throw new IllegalArgumentException(
+				String.format("Remote path %s cannot be used on a Windows host safely.", path)
+			);
+		}
+	}
+
+	/**
+	 * Transfer the given content to the remote destination, skipping the transfer when the
+	 * destination already carries the identical digest, and repairing a destination seen with a
+	 * mismatched digest by replacement.
+	 *
+	 * @param windowsRemoteExecutor Executor connected to the remote host
+	 * @param localPath The local file, for the failure messages
+	 * @param content The file content
+	 * @param remoteFile The destination path on the remote host
+	 * @param timeout Timeout in milliseconds
+	 * @param start Operation start time in milliseconds
+	 * @throws TimeoutException To notify userName of timeout
+	 * @throws WindowsRemoteException For any problem encountered on the remote host
+	 */
+	private static void transferContent(
+		final WindowsRemoteExecutor windowsRemoteExecutor,
+		final Path localPath,
+		final byte[] content,
+		final String remoteFile,
+		final long timeout,
+		final long start
+	) throws TimeoutException, WindowsRemoteException {
 		// Skip the transfer if the remote host already has an identical copy. A destination that
 		// exists with a DIFFERENT digest (e.g. a cached copy corrupted or modified in place) is
 		// remembered: it must be repaired by replacement, not trusted.
 		final Optional<RemoteDigest> existing = remoteDigest(windowsRemoteExecutor, remoteFile, timeout, start);
 		if (existing.isPresent() && existing.get().matches(content)) {
-			return remoteFile;
+			return;
 		}
 		final boolean mismatchedDestination = existing.isPresent();
 
@@ -255,7 +367,7 @@ public class ShellFileCopy {
 				throw integrityCheckFailure(localPath, remoteFile, windowsRemoteExecutor);
 			}
 
-			return remoteFile;
+			return;
 		}
 
 		// Upload and verify in an operation-unique staging file, then publish: the shared,
@@ -280,8 +392,6 @@ public class ShellFileCopy {
 
 			throw e;
 		}
-
-		return remoteFile;
 	}
 
 	private static WindowsRemoteException integrityCheckFailure(

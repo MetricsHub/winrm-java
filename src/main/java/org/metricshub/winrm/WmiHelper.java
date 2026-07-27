@@ -23,8 +23,10 @@ package org.metricshub.winrm;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import org.metricshub.winrm.exceptions.WindowsRemoteException;
 import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
 
 public abstract class WmiHelper {
@@ -54,6 +56,40 @@ public abstract class WmiHelper {
 	 */
 	public static boolean isValidWql(final String wqlQuery) {
 		return WQL_SIMPLE_SELECT_PATTERN.matcher(wqlQuery).find();
+	}
+
+	/**
+	 * Execute one of the library's internal housekeeping WQL queries (encoding detection, Windows
+	 * directory discovery) explicitly in the {@value #DEFAULT_NAMESPACE} namespace — where the
+	 * standard {@code Win32_*} classes live — regardless of the executor's configured default
+	 * namespace, which the caller may have pointed at a custom namespace. Executors that do not
+	 * support an explicit per-query namespace fall back to their default namespace, preserving the
+	 * historical behavior.
+	 *
+	 * @param windowsRemoteExecutor Executor connected to the remote host
+	 * @param wqlQuery The WQL query to run
+	 * @param timeout Timeout in milliseconds
+	 * @return the query result rows
+	 * @throws TimeoutException To notify userName of timeout
+	 * @throws WqlQuerySyntaxException On WQL syntax errors
+	 * @throws WindowsRemoteException For any problem encountered on the remote host
+	 */
+	public static List<Map<String, Object>> executeWqlInCimv2(
+		final WindowsRemoteExecutor windowsRemoteExecutor,
+		final String wqlQuery,
+		final long timeout
+	) throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
+		try {
+			return windowsRemoteExecutor.executeWql(
+				DEFAULT_NAMESPACE,
+				wqlQuery,
+				timeout,
+				WindowsRemoteExecutor.DEFAULT_WQL_MAX_ELEMENTS,
+				0
+			);
+		} catch (final UnsupportedOperationException e) {
+			return windowsRemoteExecutor.executeWql(wqlQuery, timeout);
+		}
 	}
 
 	/**

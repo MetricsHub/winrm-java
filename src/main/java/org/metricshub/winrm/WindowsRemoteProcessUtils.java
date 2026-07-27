@@ -95,7 +95,10 @@ public class WindowsRemoteProcessUtils {
 			return DEFAULT_CHARSET;
 		}
 
-		final List<Map<String, Object>> result = windowsRemoteExecutor.executeWql(
+		// Explicitly in ROOT\CIMV2: the executor's default namespace may be a custom one, where
+		// Win32_OperatingSystem does not exist.
+		final List<Map<String, Object>> result = WmiHelper.executeWqlInCimv2(
+			windowsRemoteExecutor,
 			"SELECT CodeSet FROM Win32_OperatingSystem",
 			timeout
 		);

@@ -29,6 +29,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
 import org.metricshub.winrm.Utils;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
@@ -81,13 +82,56 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final java.nio.file.Path ticketCache,
 		final List<AuthenticationEnum> authentications
 	) throws WinRMException {
+		return createInstance(winRMEndpoint, timeout, ticketCache, authentications, null, false);
+	}
+
+	/**
+	 * Create a light WinRM executor with an explicit TLS configuration, overriding the
+	 * {@code org.metricshub.winrm.tls.insecure} system property for this instance.
+	 *
+	 * @param winRMEndpoint endpoint with credentials (mandatory)
+	 * @param timeout timeout in milliseconds (must be &gt; 0)
+	 * @param ticketCache Kerberos ticket cache path (used by the Kerberos scheme; {@code null} logs
+	 *        in with the password)
+	 * @param authentications requested authentication schemes, tried in order (NTLM and/or Kerberos);
+	 *        {@code null}/empty means NTLM only
+	 * @param sslContext the {@link SSLContext} providing the HTTPS socket factory (hostname
+	 *        verification stays on); {@code null} uses the default configuration
+	 * @param trustAllCertificates when {@code true} (and no {@code sslContext} is given), trust every
+	 *        server certificate and skip hostname verification — insecure, testing only
+	 * @return a new {@code LightWinRMService}
+	 * @throws WinRMException on invalid arguments or an unsupported authentication request
+	 */
+	public static LightWinRMService createInstance(
+		final WinRMEndpoint winRMEndpoint,
+		final long timeout,
+		final java.nio.file.Path ticketCache,
+		final List<AuthenticationEnum> authentications,
+		final SSLContext sslContext,
+		final boolean trustAllCertificates
+	) throws WinRMException {
 		Utils.checkNonNull(winRMEndpoint, "winRMEndpoint");
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
 
 		// HTTPS wraps the transport in TLS and exchanges plaintext SOAP; HTTP uses NTLM message sealing.
-		// TLS validates by default (platform trust store + hostname verification); see LightTls.
+		// TLS validates by default (platform trust store + hostname verification); see LightTls. A
+		// caller-provided SSLContext keeps hostname verification on; trust-all disables both checks.
 		final boolean https = winRMEndpoint.getProtocol() == WinRMHttpProtocolEnum.HTTPS;
-		final SSLSocketFactory sslSocketFactory = https ? LightTls.socketFactory() : null;
+		final SSLSocketFactory sslSocketFactory;
+		final boolean verifyHostname;
+		if (!https) {
+			sslSocketFactory = null;
+			verifyHostname = false;
+		} else if (sslContext != null) {
+			sslSocketFactory = sslContext.getSocketFactory();
+			verifyHostname = true;
+		} else if (trustAllCertificates) {
+			sslSocketFactory = LightTls.insecureSocketFactory();
+			verifyHostname = false;
+		} else {
+			sslSocketFactory = LightTls.socketFactory();
+			verifyHostname = LightTls.verifyHostname();
+		}
 
 		final AuthScheme authScheme = resolveAuthScheme(winRMEndpoint, authentications, https, ticketCache);
 
@@ -99,7 +143,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			winRMEndpoint.getPort(),
 			timeout,
 			sslSocketFactory,
-			https && LightTls.verifyHostname(),
+			verifyHostname,
 			authScheme,
 			winRMEndpoint.getRawUsername()
 		);
@@ -159,18 +203,34 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	@Override
 	public List<Map<String, Object>> executeWql(final String wqlQuery, final long timeout)
 		throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
+		return executeWql(winRMEndpoint.getNamespace(), wqlQuery, timeout, DEFAULT_WQL_MAX_ELEMENTS, 0);
+	}
+
+	@Override
+	public List<Map<String, Object>> executeWql(
+		final String namespace,
+		final String wqlQuery,
+		final long timeout,
+		final int maxElements,
+		final long pullTimeout
+	) throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
 		checkNotClosed();
+		Utils.checkNonNull(namespace, "namespace");
 		Utils.checkNonNull(wqlQuery, "wqlQuery");
 		if (!WmiHelper.isValidWql(wqlQuery)) {
 			throw new WqlQuerySyntaxException(wqlQuery);
 		}
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
+		Utils.checkArgumentNotZeroOrNegative(maxElements, "maxElements");
+		if (pullTimeout < 0) {
+			throw new IllegalArgumentException("pullTimeout must not be negative.");
+		}
 
 		// Enforce the caller's timeout as a wall-clock deadline (throwing TimeoutException), matching
 		// the CXF WinRMService and bounding the WSMan Pull loop.
 		return executeWithTimeout(
 			() -> {
-				final List<Map<String, String>> rows = client.wql(winRMEndpoint.getNamespace(), wqlQuery);
+				final List<Map<String, String>> rows = client.wql(namespace, wqlQuery, timeout, maxElements, pullTimeout);
 				final List<Map<String, Object>> result = new ArrayList<>(rows.size());
 				for (final Map<String, String> row : rows) {
 					result.add(new LinkedHashMap<>(row));
@@ -197,7 +257,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		return executeWithTimeout(
 			() -> {
 				final long start = Utils.getCurrentTimeMillis();
-				final WsmanClient.CommandOutput output = client.executeCommand(command, workingDirectory, charset);
+				final WsmanClient.CommandOutput output = client.executeCommand(command, workingDirectory, charset, timeout);
 				final float executionTime = (Utils.getCurrentTimeMillis() - start) / 1000.0f;
 				return new WindowsRemoteCommandResult(output.stdout, output.stderr, executionTime, output.exitCode);
 			},

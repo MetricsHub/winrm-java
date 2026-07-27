@@ -55,46 +55,57 @@ command-line jar.
 
 ## A first WQL query
 
-Everything starts with the static
-[`WinRMWqlExecutor.executeWql(...)`](apidocs/org/metricshub/winrm/wql/WinRMWqlExecutor.html) method:
+Everything starts with the fluent
+[`WinRMClient`](apidocs/org/metricshub/winrm/WinRMClient.html) builder — one client authenticates
+once and can run any number of queries and commands over the same connection:
 
 ```java
-import static java.util.Collections.singletonList;
-import static org.metricshub.winrm.WinRMHttpProtocolEnum.HTTP;
-import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.NTLM;
-import static org.metricshub.winrm.wql.WinRMWqlExecutor.executeWql;
-
-import org.metricshub.winrm.wql.WinRMWqlExecutor;
+import java.time.Duration;
+import org.metricshub.winrm.WinRMClient;
+import org.metricshub.winrm.WqlResult;
+import org.metricshub.winrm.WqlRow;
 
 public class Example {
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
+        try (WinRMClient client = WinRMClient.builder("server.example.com")
+                .credentials("DOMAIN\\Administrator", "the-password".toCharArray())
+                .timeout(Duration.ofSeconds(30))
+                .build()) {
 
-        WinRMWqlExecutor result = executeWql(
-            HTTP,                                   // protocol (HTTP or HTTPS)
-            "server.example.com",                   // hostname (mandatory)
-            5985,                                   // port (null for the protocol default)
-            "DOMAIN\\Administrator",                // username (DOMAIN\user or user)
-            "the-password".toCharArray(),           // password
-            null,                                   // namespace (null → ROOT\CIMV2)
-            "SELECT Name, State FROM Win32_Service", // WQL query
-            30_000L,                                // timeout in milliseconds
-            null,                                   // Kerberos ticket cache (null for NTLM)
-            singletonList(NTLM)                     // authentication schemes
-        );
+            WqlResult result = client.wql("SELECT Name, State FROM Win32_Service").execute();
 
-        System.out.println(result.getHeaders());        // [Name, State]
-        result.getRows().forEach(System.out::println);  // one List<String> per row
+            System.out.println(result.columns());       // [Name, State]
+            for (WqlRow row : result) {
+                System.out.println(row.string("Name") + " is " + row.string("State"));
+            }
+        }
     }
 }
 ```
+
+Remote commands work the same way:
+
+```java
+CommandResult result = client.command("ipconfig /all").execute();
+System.out.println(result.stdout());
+```
+
+Failures are reported through the unchecked
+[`WinRMClientException`](apidocs/org/metricshub/winrm/exceptions/WinRMClientException.html)
+hierarchy. The static one-shot helpers that predate `WinRMClient`
+([`WinRMWqlExecutor.executeWql(...)`](apidocs/org/metricshub/winrm/wql/WinRMWqlExecutor.html),
+[`WinRMCommandExecutor.execute(...)`](apidocs/org/metricshub/winrm/command/WinRMCommandExecutor.html))
+remain available and unchanged, with their checked exceptions.
 
 ## Where to go next
 
 * [Installation](installation.html) — coordinates, supported JDKs, and the standalone CLI jar
 * [WQL Queries](wql.html) — query WMI and read the result
 * [Remote Commands](commands.html) — run commands and copy files to the host
+* [File Transfers](file-transfers.html) — how files are copied through the WinRM channel
 * [Authentication](authentication.html) — NTLM and Kerberos
 * [TLS / HTTPS](tls.html) — certificate validation and trust stores
 * [Timeouts and Errors](timeouts-and-errors.html) — timeout semantics and the exception surface
-* [Migrating from 1.x](migrating-from-1x.html) — the 2.0.0 breaking changes
+* [Migrating from 1.x](migrating-from-1x.html) — the 2.0.0 breaking changes, and moving to the fluent API
+* [Legacy API](legacy.html) — the static one-shot helpers that predate `WinRMClient`
