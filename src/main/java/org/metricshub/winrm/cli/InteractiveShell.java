@@ -65,6 +65,21 @@ final class InteractiveShell {
 	 */
 	static final long DEFAULT_POLL_MILLIS = 1_000L;
 
+	/**
+	 * How much input one round forwards at most (one Send's worth of characters). Redirected
+	 * input can queue lines much faster than the wire consumes them: the bound keeps the local
+	 * buffering flat and, above all, keeps the rounds alternating — a fire hose of input must not
+	 * starve the output side of the pump.
+	 */
+	static final int MAX_INPUT_CHARS_PER_ROUND = 32 * 1024;
+
+	/**
+	 * How many lines the local reader thread may queue ahead of the pump before it blocks —
+	 * backpressure toward the local stdin, so a redirected file streams through bounded memory
+	 * instead of being swallowed whole.
+	 */
+	private static final int INPUT_QUEUE_CAPACITY = 1_024;
+
 	private InteractiveShell() {}
 
 	/**
@@ -141,7 +156,14 @@ final class InteractiveShell {
 				process.interrupt();
 			}
 			if (!eofForwarded) {
-				eofForwarded = forwardLocalInput(lines, process.stdin());
+				try {
+					eofForwarded = forwardLocalInput(lines, process.stdin());
+				} catch (final IllegalStateException e) {
+					// The command completed while this input was being queued (the final Receive
+					// beat it): nothing can consume it anymore. Stop forwarding — the next poll
+					// observes the completion and the exit code is reported normally.
+					eofForwarded = true;
+				}
 			}
 			// One bounded round trip: it returns as soon as the server answers, so available
 			// output is forwarded immediately — the cadence only paces the idle rounds.
@@ -156,17 +178,20 @@ final class InteractiveShell {
 	}
 
 	/**
-	 * Forward every queued local line as one flushed write (one WSMan Send). Lines are terminated
-	 * with CRLF — what the remote {@code cmd.exe} console expects. Once the local input ends, the
-	 * remote stdin is closed (the final Send carries {@code End="true"}) and {@code true} is
-	 * returned: no further input will be forwarded.
+	 * Forward the queued local lines — at most {@link #MAX_INPUT_CHARS_PER_ROUND} characters per
+	 * round, the rest stays queued for the next one — as one flushed write (one WSMan Send).
+	 * Lines are terminated with CRLF — what the remote {@code cmd.exe} console expects. Once the
+	 * local input ends, the remote stdin is closed (the final Send carries {@code End="true"})
+	 * and {@code true} is returned: no further input will be forwarded.
 	 */
 	private static boolean forwardLocalInput(final LineSource lines, final BufferedWriter stdin) throws IOException {
 		boolean wrote = false;
+		int batchedChars = 0;
 		String line;
-		while ((line = lines.nextLine()) != null) {
+		while (batchedChars < MAX_INPUT_CHARS_PER_ROUND && (line = lines.nextLine()) != null) {
 			stdin.write(line);
 			stdin.write("\r\n");
+			batchedChars += line.length() + 2;
 			wrote = true;
 		}
 		if (lines.endOfInput()) {
@@ -213,7 +238,7 @@ final class InteractiveShell {
 			}
 		}
 
-		private final BlockingQueue<Item> queue = new LinkedBlockingQueue<>();
+		private final BlockingQueue<Item> queue = new LinkedBlockingQueue<>(INPUT_QUEUE_CAPACITY);
 		private boolean ended;
 
 		/** Feed the queue from the local input, line by line, ending with the EOF marker. */

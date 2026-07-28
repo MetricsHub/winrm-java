@@ -280,6 +280,96 @@ class InteractiveShellTest {
 	}
 
 	@Test
+	void inputQueuedWhileTheFinalReceiveWasInFlightDoesNotHideTheExitCode() throws Exception {
+		enqueueStartup();
+		server
+			// round 1: the final Receive carries the Done state...
+			.enqueue(200, envelope(receiveResponse("", done(COMMAND_ID, 3))))
+			// ...and the completion cleanup Signal follows on the next round
+			.enqueue(200, envelope(signalResponse()));
+		enqueueShellDeletion(server);
+
+		// A line shows up right AFTER the final Receive: it can no longer be consumed, and it must
+		// not turn the session into a failure — the exit code wins.
+		final InteractiveShell.LineSource lateLine = new InteractiveShell.LineSource() {
+			private int round;
+
+			@Override
+			public String nextLine() {
+				round++;
+				return round == 2 ? "too late" : null;
+			}
+
+			@Override
+			public boolean endOfInput() {
+				return false;
+			}
+		};
+		final int exitCode;
+		try (WinRMClient client = client()) {
+			try (RemoteProcess process = client.command("cmd.exe").start()) {
+				exitCode = InteractiveShell.bridge(
+					process,
+					lateLine,
+					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
+					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
+					new AtomicBoolean(),
+					POLL_MILLIS
+				);
+			}
+		}
+
+		assertEquals(3, exitCode);
+		// The late line never reached the wire: no Send left the client.
+		assertTrue(server.stdinChunks().isEmpty());
+		assertTrue(server.decryptedRequests().stream().noneMatch(request -> request.contains(":Send>")));
+	}
+
+	@Test
+	void aFireHoseOfInputIsForwardedInBoundedBatches() throws Exception {
+		final char[] big = new char[InteractiveShell.MAX_INPUT_CHARS_PER_ROUND + 1_000];
+		java.util.Arrays.fill(big, 'x');
+		final String hugeLine = new String(big);
+
+		enqueueStartup();
+		server
+			// round 1: the first batch (capped) travels alone...
+			.enqueue(200, envelope(sendResponse()))
+			.enqueue(
+				200,
+				envelope(receiveResponse(stream("stdout", COMMAND_ID, "ok\r\n".getBytes(StandardCharsets.UTF_8)), null))
+			)
+			// ...the leftover line follows on the next round, with the End mark
+			.enqueue(200, envelope(sendResponse()))
+			.enqueue(200, envelope(receiveResponse("", done(COMMAND_ID, 0))))
+			.enqueue(200, envelope(signalResponse()));
+		enqueueShellDeletion(server);
+
+		final int exitCode;
+		try (WinRMClient client = client()) {
+			try (RemoteProcess process = client.command("cmd.exe").start()) {
+				exitCode = InteractiveShell.bridge(
+					process,
+					ScriptedLines.endingAfter(hugeLine, "exit"),
+					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
+					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
+					new AtomicBoolean(),
+					POLL_MILLIS
+				);
+			}
+		}
+
+		assertEquals(0, exitCode);
+		// Two bounded batches instead of one unbounded drain: the output side polled in between.
+		final List<FakeWsmanServer.StdinChunk> chunks = server.stdinChunks();
+		assertEquals(2, chunks.size());
+		assertArrayEquals((hugeLine + "\r\n").getBytes(StandardCharsets.UTF_8), chunks.get(0).data());
+		assertFalse(chunks.get(0).end());
+		assertArrayEquals("exit\r\n".getBytes(StandardCharsets.UTF_8), chunks.get(1).data());
+		assertTrue(chunks.get(1).end());
+	}
+
+	@Test
 	void queuedLineSourceDeliversLinesInOrderThenTheEndOfInput() {
 		// The production LineSource behind InteractiveShell.run: fed by the helper thread reading
 		// the local standard input. Here the whole stream is read synchronously (readAll returns
