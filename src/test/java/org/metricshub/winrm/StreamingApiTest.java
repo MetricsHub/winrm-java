@@ -535,6 +535,51 @@ class StreamingApiTest {
 	}
 
 	@Test
+	void completionSignalIsBoundedByThePollBudget() throws Exception {
+		enqueueCommandStartup();
+		server
+			.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 5))))
+			// The Signal acknowledging the ALREADY-COMPLETED command stalls far past the poll
+			// budget: completion (and the known exit code) must win over the cleanup hiccup.
+			.enqueueDelayed(200, envelope(signalResponse()), 3_000);
+
+		try (WinRMClient client = builder().build()) {
+			try (CommandCursor cursor = client.executor().startCommand("run.exe", null, 10_000)) {
+				final CommandCursor.Chunk chunk = cursor.poll(5_000);
+				assertEquals("done\n", new String(chunk.stdout(), StandardCharsets.UTF_8));
+
+				final long start = System.nanoTime();
+				assertNull(cursor.poll(1_000), "completion must be reported");
+				final long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+				assertTrue(
+					elapsedMillis < 2_500,
+					"the completion Signal must not outlive the poll budget; took " + elapsedMillis + " ms"
+				);
+				assertEquals(5, cursor.exitCode());
+			}
+		}
+	}
+
+	@Test
+	void completionInsideATinyPollSkipsTheSignal() throws Exception {
+		enqueueCommandStartup();
+		server.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 5))));
+
+		try (WinRMClient client = builder().build()) {
+			try (CommandCursor cursor = client.executor().startCommand("run.exe", null, 10_000)) {
+				final CommandCursor.Chunk chunk = cursor.poll(5_000);
+				assertEquals("done\n", new String(chunk.stdout(), StandardCharsets.UTF_8));
+
+				// No round trip fits in the remaining budget: completion is reported without a wire
+				// Signal, and the healthy connection is left untouched.
+				assertNull(cursor.poll(20));
+				assertEquals(5, cursor.exitCode());
+				assertEquals(3, server.decryptedRequests().size(), "a tiny-budget completion must not touch the wire");
+			}
+		}
+	}
+
+	@Test
 	void commandSilenceBeyondTheTimeoutSurfacesAsInactivityTimeout() throws Exception {
 		enqueueCommandStartup();
 		server

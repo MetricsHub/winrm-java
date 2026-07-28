@@ -508,7 +508,9 @@ final class WsmanClient implements AutoCloseable {
 	 * Holds {@link #connectionPermit} from creation until completion or {@link #close()}; both
 	 * paths send the terminate Signal, exactly like the pre-streaming receive loop did — Signal
 	 * after completion is part of the shell protocol, and Signal on early close is what actually
-	 * stops the remote command.
+	 * stops the remote command. The one exception is completion discovered inside a bounded poll
+	 * (see {@link #finishBounded}), whose Signal is bounded by — or skipped for — the caller's
+	 * remaining wait.
 	 */
 	final class RemoteCommand implements AutoCloseable {
 
@@ -573,7 +575,9 @@ final class WsmanClient implements AutoCloseable {
 				return null;
 			}
 			if (exitCode != null) {
-				finish();
+				// The command completed with the previous chunk: Signal it — but under the poll's
+				// budget, never the full inactivity timeout of the plain fetches.
+				finishBounded(maxWaitMs);
 				return null;
 			}
 			final long budget = Math.max(1, Math.min(maxWaitMs, operationTimeoutMs));
@@ -677,6 +681,37 @@ final class WsmanClient implements AutoCloseable {
 				// the server reaps the shell (and its commands) on its own IdleTimeout instead.
 				if (!closed) {
 					terminate(commandId, operationTimeoutMs);
+				}
+			} finally {
+				connectionPermit.release();
+			}
+		}
+
+		/**
+		 * Completion cleanup under a poll budget: the Signal acknowledging the ALREADY-COMPLETED
+		 * command must not outlive the caller's remaining wait. A Signal answer that does not
+		 * arrive in time is abandoned (the connection is dropped so its late response cannot
+		 * desync a later request) — never reported: the command completed and its exit code is
+		 * known, and that must not be hidden behind a cleanup hiccup. A budget too small for any
+		 * round trip skips the Signal outright, leaving the healthy connection untouched; the
+		 * server reaps the completed command's state with the shell. Runs at most once.
+		 */
+		private void finishBounded(final long budgetMs) throws Exception {
+			if (finished) {
+				return;
+			}
+			finished = true;
+			try {
+				final long budget = Math.max(1, Math.min(budgetMs, operationTimeoutMs));
+				if (!closed && budget >= MIN_WIRE_POLL_MS) {
+					transport.pollTimeout(toSocketTimeoutMillis(budget));
+					try {
+						terminate(commandId, budget);
+					} catch (final SocketTimeoutException e) {
+						transport.close();
+					} finally {
+						transport.inactivityTimeout(toSocketTimeoutMillis(operationTimeoutMs));
+					}
 				}
 			} finally {
 				connectionPermit.release();
