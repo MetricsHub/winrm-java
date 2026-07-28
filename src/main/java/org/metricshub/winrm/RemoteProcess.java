@@ -85,10 +85,14 @@ public final class RemoteProcess implements AutoCloseable {
 	private final CommandCursor cursor;
 	private final String hostname;
 	private final Duration timeout;
+	private final Charset charset;
 
 	private final ChunkDecoder stdoutDecoder;
 	private final ChunkDecoder stderrDecoder;
-	private final ChunkEncoder stdinEncoder;
+
+	// Created on first use (see sendStdin): a legal decode-only charset (e.g. x-JISAutoDetect)
+	// has no encoder, and must not fail a process that only ever READS output.
+	private ChunkEncoder stdinEncoder;
 
 	// Decoded output that has arrived but has not been read yet, per channel.
 	private final StringBuilder stdoutPending = new StringBuilder();
@@ -120,9 +124,9 @@ public final class RemoteProcess implements AutoCloseable {
 		this.cursor = cursor;
 		this.hostname = hostname;
 		this.timeout = timeout;
+		this.charset = charset;
 		this.stdoutDecoder = new ChunkDecoder(charset);
 		this.stderrDecoder = new ChunkDecoder(charset);
-		this.stdinEncoder = new ChunkEncoder(charset);
 		this.stdout = new BufferedReader(new ChannelReader(stdoutPending));
 		this.stderr = new BufferedReader(new ChannelReader(stderrPending));
 		this.stdin = new BufferedWriter(new StdinWriter());
@@ -420,8 +424,19 @@ public final class RemoteProcess implements AutoCloseable {
 		}
 		// Stateful encoding: a charset mark is emitted once (not per flush) and a surrogate pair
 		// split across two flushes is withheld until complete, exactly as one whole-string encode.
-		final byte[] bytes = stdinEncoder.encode(stdinPending.toString(), end);
-		stdinPending.setLength(0);
+		// The encoder is created on first actual input: a decode-only charset throws on
+		// newEncoder(), which must only ever hit a caller actually writing input — never a process
+		// that only reads output, and never a bare close of the untouched writer.
+		final byte[] bytes;
+		if (stdinEncoder == null && stdinPending.length() == 0) {
+			bytes = new byte[0];
+		} else {
+			if (stdinEncoder == null) {
+				stdinEncoder = new ChunkEncoder(charset);
+			}
+			bytes = stdinEncoder.encode(stdinPending.toString(), end);
+			stdinPending.setLength(0);
+		}
 		if (finished) {
 			if (end) {
 				stdinClosed = true;

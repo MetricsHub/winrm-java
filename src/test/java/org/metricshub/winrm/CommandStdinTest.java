@@ -480,6 +480,42 @@ class CommandStdinTest {
 	}
 
 	@Test
+	void aDecodeOnlyCharsetDoesNotBreakAProcessThatNeverWrites() throws Exception {
+		// x-JISAutoDetect decodes but cannot encode (Charset.newEncoder() throws): it must only
+		// ever fail a caller actually WRITING input, never a process that just reads output.
+		org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.charset.Charset.isSupported("x-JISAutoDetect"));
+
+		enqueueStartup();
+		server
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(
+						stream("stdout", COMMAND_ID, "plain ascii\r\n".getBytes(StandardCharsets.US_ASCII)),
+						done(COMMAND_ID, 0)
+					)
+				)
+			)
+			.enqueue(200, envelope(signalResponse()));
+		enqueueShellDeletion(server);
+
+		try (WinRMClient client = builder().build()) {
+			try (
+				RemoteProcess process = client.command("run.exe")
+					.charset(java.nio.charset.Charset.forName("x-JISAutoDetect"))
+					.start()) {
+				assertEquals("plain ascii", process.stdout().readLine());
+				assertEquals(0, process.waitFor());
+
+				// Writing, on the other hand, has no encoder to work with: the failure is the
+				// writer's, reported on the flush that actually needs it.
+				process.stdin().write("input");
+				assertThrows(UnsupportedOperationException.class, () -> process.stdin().flush());
+			}
+		}
+	}
+
+	@Test
 	void cursorRejectsInputAfterTheEndMark() throws Exception {
 		enqueueStartup();
 		server.enqueue(200, envelope(sendResponse())).enqueue(200, envelope(signalResponse()));

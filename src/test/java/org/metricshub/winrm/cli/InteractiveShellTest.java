@@ -53,7 +53,7 @@ import org.metricshub.winrm.light.FakeWsmanServer;
 
 /**
  * Headless tests of the interactive {@code shell} pump (issue #136, phase 2) against
- * {@link FakeWsmanServer}, with a scripted {@link InteractiveShell.LineSource} making every round
+ * {@link FakeWsmanServer}, with a scripted {@link InteractiveShell.InputSource} making every round
  * deterministic: input line → Send on the wire, scripted output → local stdout, local EOF →
  * {@code End="true"}, Ctrl+C → {@code ctrl_c} Signal, and exit-code propagation.
  */
@@ -93,29 +93,29 @@ class InteractiveShellTest {
 		server.enqueue(200, envelope(resourceCreated(SHELL_ID))).enqueue(200, envelope(commandResponse(COMMAND_ID)));
 	}
 
-	/** A line source whose {@code nextLine()} answers are fully scripted, including "not yet". */
-	private static final class ScriptedLines implements InteractiveShell.LineSource {
+	/** An input source whose {@code nextPiece()} answers are fully scripted, including "not yet". */
+	private static final class ScriptedPieces implements InteractiveShell.InputSource {
 
 		private final Deque<String> answers = new ArrayDeque<>();
 		private boolean ended;
 
-		/** The given lines, one per {@code nextLine()} call, then the end of the local input. */
-		private static ScriptedLines endingAfter(final String... lines) {
-			final ScriptedLines scripted = new ScriptedLines();
-			for (final String line : lines) {
-				scripted.answers.addLast(line);
+		/** The given pieces, one per {@code nextPiece()} call, then the end of the local input. */
+		private static ScriptedPieces endingAfter(final String... pieces) {
+			final ScriptedPieces scripted = new ScriptedPieces();
+			for (final String piece : pieces) {
+				scripted.answers.addLast(piece);
 			}
 			scripted.ended = true;
 			return scripted;
 		}
 
 		/** A local input that never produces anything and never ends (a silent terminal). */
-		private static ScriptedLines silent() {
-			return new ScriptedLines();
+		private static ScriptedPieces silent() {
+			return new ScriptedPieces();
 		}
 
 		@Override
-		public String nextLine() {
+		public String nextPiece() {
 			return answers.pollFirst();
 		}
 
@@ -152,7 +152,7 @@ class InteractiveShellTest {
 			try (RemoteProcess process = client.command("cmd.exe").start()) {
 				exitCode = InteractiveShell.bridge(
 					process,
-					ScriptedLines.endingAfter("MODE PREPARE"),
+					ScriptedPieces.endingAfter("MODE PREPARE\r\n"),
 					new PrintStream(stdout, true, "UTF-8"),
 					new PrintStream(stderr, true, "UTF-8"),
 					new AtomicBoolean(),
@@ -194,7 +194,7 @@ class InteractiveShellTest {
 			try (RemoteProcess process = client.command("cmd.exe").start()) {
 				exitCode = InteractiveShell.bridge(
 					process,
-					ScriptedLines.silent(),
+					ScriptedPieces.silent(),
 					new PrintStream(stdout, true, "UTF-8"),
 					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
 					interruptRequested,
@@ -242,14 +242,14 @@ class InteractiveShellTest {
 				final PrintStream out = new PrintStream(stdout, true, "UTF-8");
 				exitCode = InteractiveShell.bridge(
 					process,
-					new InteractiveShell.LineSource() {
+					new InteractiveShell.InputSource() {
 						private int round;
 
 						@Override
-						public String nextLine() {
+						public String nextPiece() {
 							round++;
 							// Round 1 (and the drain call right after "exit"): nothing queued.
-							return round == 2 ? "exit" : null;
+							return round == 2 ? "exit\r\n" : null;
 						}
 
 						@Override
@@ -291,13 +291,13 @@ class InteractiveShellTest {
 
 		// A line shows up right AFTER the final Receive: it can no longer be consumed, and it must
 		// not turn the session into a failure — the exit code wins.
-		final InteractiveShell.LineSource lateLine = new InteractiveShell.LineSource() {
+		final InteractiveShell.InputSource latePiece = new InteractiveShell.InputSource() {
 			private int round;
 
 			@Override
-			public String nextLine() {
+			public String nextPiece() {
 				round++;
-				return round == 2 ? "too late" : null;
+				return round == 2 ? "too late\r\n" : null;
 			}
 
 			@Override
@@ -310,7 +310,7 @@ class InteractiveShellTest {
 			try (RemoteProcess process = client.command("cmd.exe").start()) {
 				exitCode = InteractiveShell.bridge(
 					process,
-					lateLine,
+					latePiece,
 					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
 					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
 					new AtomicBoolean(),
@@ -350,7 +350,7 @@ class InteractiveShellTest {
 			try (RemoteProcess process = client.command("cmd.exe").start()) {
 				exitCode = InteractiveShell.bridge(
 					process,
-					ScriptedLines.endingAfter(hugeLine, "exit"),
+					ScriptedPieces.endingAfter(hugeLine + "\r\n", "exit\r\n"),
 					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
 					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
 					new AtomicBoolean(),
@@ -376,20 +376,42 @@ class InteractiveShellTest {
 	}
 
 	@Test
-	void queuedLineSourceDeliversLinesInOrderThenTheEndOfInput() {
-		// The production LineSource behind InteractiveShell.run: fed by the helper thread reading
+	void queuedInputSourceNormalizesLineEndingsAndReportsTheEnd() {
+		// The production InputSource behind InteractiveShell.run: fed by the helper thread reading
 		// the local standard input. Here the whole stream is read synchronously (readAll returns
-		// once the input ends), making the outcome deterministic.
-		final InteractiveShell.QueuedLineSource lines = new InteractiveShell.QueuedLineSource();
-		lines.readAll(new ByteArrayInputStream("first\nsecond\r\nexit\n".getBytes(StandardCharsets.UTF_8)));
+		// once the input ends), making the outcome deterministic. Every line-ending flavor (LF,
+		// CRLF, lone CR) becomes the CRLF the remote cmd.exe expects, and a final unterminated
+		// record is delivered as-is.
+		final InteractiveShell.QueuedInputSource pieces = new InteractiveShell.QueuedInputSource();
+		pieces.readAll(new ByteArrayInputStream("first\nsecond\r\nthird\rtail".getBytes(StandardCharsets.UTF_8)));
 
-		assertFalse(lines.endOfInput(), "queued lines must be consumed before the end of input is reported");
-		assertEquals("first", lines.nextLine());
-		assertEquals("second", lines.nextLine());
-		assertFalse(lines.endOfInput());
-		assertEquals("exit", lines.nextLine());
-		assertNull(lines.nextLine());
-		assertTrue(lines.endOfInput());
-		assertNull(lines.nextLine());
+		assertFalse(pieces.endOfInput(), "queued pieces must be consumed before the end of input is reported");
+		assertEquals("first\r\n", pieces.nextPiece());
+		assertEquals("second\r\n", pieces.nextPiece());
+		assertEquals("third\r\n", pieces.nextPiece());
+		assertFalse(pieces.endOfInput());
+		assertEquals("tail", pieces.nextPiece());
+		assertNull(pieces.nextPiece());
+		assertTrue(pieces.endOfInput());
+		assertNull(pieces.nextPiece());
+	}
+
+	@Test
+	void queuedInputSourceSlicesANewlineFreeRecordInsteadOfMaterializingIt() {
+		// A giant record without any newline (minified JSON, base64) must be queued in bounded
+		// slices: the memory bound holds by characters, never by lines.
+		final char[] record = new char[InteractiveShell.MAX_QUEUED_PIECE_CHARS + 500];
+		java.util.Arrays.fill(record, 'x');
+		final InteractiveShell.QueuedInputSource pieces = new InteractiveShell.QueuedInputSource();
+		pieces.readAll(new ByteArrayInputStream((new String(record) + "\n").getBytes(StandardCharsets.UTF_8)));
+
+		final String first = pieces.nextPiece();
+		final String second = pieces.nextPiece();
+		assertEquals(InteractiveShell.MAX_QUEUED_PIECE_CHARS, first.length());
+		assertEquals(500 + 2, second.length());
+		assertTrue(second.endsWith("\r\n"));
+		assertEquals(new String(record) + "\r\n", first + second);
+		assertNull(pieces.nextPiece());
+		assertTrue(pieces.endOfInput());
 	}
 }

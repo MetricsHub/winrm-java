@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
+import java.io.Reader;
 import java.nio.charset.Charset;
 import java.time.Duration;
 import java.util.concurrent.BlockingQueue;
@@ -39,15 +40,17 @@ import org.metricshub.winrm.RemoteProcess;
  * its exit code.
  * <p>
  * The pump is <b>single-threaded on the wire</b> — the WinRM connection stays strictly serial.
- * Each round of the loop forwards the queued local input (one WSMan Send), polls the remote
- * output for a short bounded wait, and writes whatever arrived to the local streams; the poll
- * cadence is the interaction latency. An idle session never trips the inactivity timeout: every
- * poll round trip completes with output or the protocol's "nothing yet" answer.
+ * Each round of the loop forwards the queued local input (one WSMan Send, bounded per round),
+ * polls the remote output for a short bounded wait, and writes whatever arrived to the local
+ * streams; the poll cadence is the interaction latency. An idle session never trips the
+ * inactivity timeout: every poll round trip completes with output or the protocol's "nothing
+ * yet" answer.
  * <p>
- * The only helper thread reads the local input into a queue, because a blocking read of
+ * The only helper thread reads the local input into a bounded queue, because a blocking read of
  * {@code System.in} must not stall the pump; it never touches the connection. Input is
- * <b>line-oriented</b> (like {@code winrs}): lines are forwarded once the local terminal hands
- * them out, i.e. after Enter.
+ * <b>line-oriented</b> (like {@code winrs}): a terminal hands lines out after Enter, and they
+ * are forwarded CRLF-terminated. Redirected input flows through the same path in bounded pieces,
+ * so even a giant newline-free record streams through flat memory.
  * <p>
  * Local end of input (Ctrl+Z then Enter on Windows, Ctrl+D elsewhere) closes the remote stdin —
  * the final Send is flagged {@code End} — after which {@code cmd.exe} exits on its own. Setting
@@ -67,34 +70,41 @@ final class InteractiveShell {
 
 	/**
 	 * How much input one round forwards at most (one Send's worth of characters). Redirected
-	 * input can queue lines much faster than the wire consumes them: the bound keeps the local
+	 * input can queue pieces much faster than the wire consumes them: the bound keeps the local
 	 * buffering flat and, above all, keeps the rounds alternating — a fire hose of input must not
 	 * starve the output side of the pump.
 	 */
 	static final int MAX_INPUT_CHARS_PER_ROUND = 32 * 1024;
 
 	/**
-	 * How many lines the local reader thread may queue ahead of the pump before it blocks —
+	 * Largest single piece the local reader thread queues. A record longer than this (a giant
+	 * newline-free payload in a redirected input) is queued in pieces of this size instead of
+	 * being materialized whole, so the memory bound holds by CHARACTERS, not by lines.
+	 */
+	static final int MAX_QUEUED_PIECE_CHARS = 4 * 1024;
+
+	/**
+	 * How many pieces the local reader thread may queue ahead of the pump before it blocks —
 	 * backpressure toward the local stdin, so a redirected file streams through bounded memory
 	 * instead of being swallowed whole.
 	 */
-	private static final int INPUT_QUEUE_CAPACITY = 1_024;
+	private static final int INPUT_QUEUE_CAPACITY = 256;
 
 	private InteractiveShell() {}
 
 	/**
-	 * The local input lines available to the pump, without ever blocking it. Seam between the
-	 * pump's deterministic protocol loop and the helper thread that feeds it in production.
+	 * The local input available to the pump, without ever blocking it. Seam between the pump's
+	 * deterministic protocol loop and the helper thread that feeds it in production.
 	 */
-	interface LineSource {
+	interface InputSource {
 		/**
-		 * @return the next queued local input line (without its line terminator), or {@code null}
-		 *         when none is available right now
+		 * @return the next queued piece of local input — line terminators already normalized to
+		 *         CRLF and included — or {@code null} when nothing is available right now
 		 */
-		String nextLine();
+		String nextPiece();
 
 		/**
-		 * @return whether the local input reached its end and every queued line was consumed
+		 * @return whether the local input reached its end and every queued piece was consumed
 		 */
 		boolean endOfInput();
 	}
@@ -103,7 +113,7 @@ final class InteractiveShell {
 	 * Bridge the process to the given local streams until the remote command exits.
 	 *
 	 * @param process the running remote shell
-	 * @param localInput the local input to forward, read line by line on a helper thread
+	 * @param localInput the local input to forward, read on a helper thread
 	 * @param out where the remote standard output goes
 	 * @param err where the remote standard error goes
 	 * @param interruptRequested set externally (e.g. by a Ctrl+C handler) to forward a
@@ -120,11 +130,11 @@ final class InteractiveShell {
 		final AtomicBoolean interruptRequested,
 		final long pollMillis
 	) throws IOException {
-		final QueuedLineSource lines = new QueuedLineSource();
-		final Thread reader = new Thread(() -> lines.readAll(localInput), "winrm-shell-stdin");
+		final QueuedInputSource pieces = new QueuedInputSource();
+		final Thread reader = new Thread(() -> pieces.readAll(localInput), "winrm-shell-stdin");
 		reader.setDaemon(true);
 		reader.start();
-		return bridge(process, lines, out, err, interruptRequested, pollMillis);
+		return bridge(process, pieces, out, err, interruptRequested, pollMillis);
 	}
 
 	/**
@@ -133,7 +143,7 @@ final class InteractiveShell {
 	 * the local streams — until the remote command completes.
 	 *
 	 * @param process the running remote shell
-	 * @param lines the local input lines
+	 * @param pieces the local input pieces
 	 * @param out where the remote standard output goes
 	 * @param err where the remote standard error goes
 	 * @param interruptRequested checked (and cleared) every round; forwards a {@code ctrl_c} Signal
@@ -143,14 +153,14 @@ final class InteractiveShell {
 	 */
 	static int bridge(
 		final RemoteProcess process,
-		final LineSource lines,
+		final InputSource pieces,
 		final PrintStream out,
 		final PrintStream err,
 		final AtomicBoolean interruptRequested,
 		final long pollMillis
 	) throws IOException {
-		// The tail of a record the current round could not fit entirely (an oversized line):
-		// forwarded first on the next rounds, before any new line is pulled.
+		// The tail of a piece the current round could not fit entirely: forwarded first on the
+		// next rounds, before any new piece is pulled.
 		final StringBuilder pendingInput = new StringBuilder();
 		boolean eofForwarded = false;
 		boolean completed = false;
@@ -160,7 +170,7 @@ final class InteractiveShell {
 			}
 			if (!eofForwarded) {
 				try {
-					eofForwarded = forwardLocalInput(lines, process.stdin(), pendingInput);
+					eofForwarded = forwardLocalInput(pieces, process.stdin(), pendingInput);
 				} catch (final IllegalStateException e) {
 					// The command completed while this input was being queued (the final Receive
 					// beat it): nothing can consume it anymore. Stop forwarding — the next poll
@@ -182,16 +192,14 @@ final class InteractiveShell {
 
 	/**
 	 * Forward the queued local input — at most {@link #MAX_INPUT_CHARS_PER_ROUND} characters per
-	 * round — as one flushed write (one WSMan Send). Lines are terminated with CRLF — what the
-	 * remote {@code cmd.exe} console expects — and a record longer than one round's budget is
+	 * round — as one flushed write (one WSMan Send). A piece exceeding one round's budget is
 	 * split: the surplus stays in {@code pendingInput} and leads the next round, so even a giant
-	 * newline-free record keeps the rounds (and the output side) alternating. Once the local
-	 * input ends and every pending character is out, the remote stdin is closed (the final Send
-	 * carries {@code End="true"}) and {@code true} is returned: no further input will be
-	 * forwarded.
+	 * record keeps the rounds (and the output side) alternating. Once the local input ends and
+	 * every pending character is out, the remote stdin is closed (the final Send carries
+	 * {@code End="true"}) and {@code true} is returned: no further input will be forwarded.
 	 */
 	private static boolean forwardLocalInput(
-		final LineSource lines,
+		final InputSource pieces,
 		final BufferedWriter stdin,
 		final StringBuilder pendingInput
 	) throws IOException {
@@ -206,13 +214,13 @@ final class InteractiveShell {
 				wrote = true;
 				continue;
 			}
-			final String line = lines.nextLine();
-			if (line == null) {
+			final String piece = pieces.nextPiece();
+			if (piece == null) {
 				break;
 			}
-			pendingInput.append(line).append("\r\n");
+			pendingInput.append(piece);
 		}
-		if (pendingInput.length() == 0 && lines.endOfInput()) {
+		if (pendingInput.length() == 0 && pieces.endOfInput()) {
 			// Closing flushes the written characters too: they travel with the End mark, one
 			// single Send.
 			stdin.close();
@@ -242,35 +250,59 @@ final class InteractiveShell {
 	}
 
 	/**
-	 * The production {@link LineSource}: a queue fed by the helper thread reading the local
-	 * standard input, drained by the pump without ever blocking.
+	 * The production {@link InputSource}: a bounded queue fed by the helper thread reading the
+	 * local standard input, drained by the pump without ever blocking. The reader normalizes
+	 * every line ending (LF, CRLF, lone CR) to the CRLF the remote {@code cmd.exe} expects, and
+	 * never materializes more than one bounded piece at a time — a record longer than
+	 * {@link #MAX_QUEUED_PIECE_CHARS} is queued in slices, so memory stays bounded by characters,
+	 * not by lines.
 	 */
-	static final class QueuedLineSource implements LineSource {
+	static final class QueuedInputSource implements InputSource {
 
-		/** One queued item: a line, or the end of the local input when {@code line} is null. */
+		/** One queued item: a piece of input, or the end of the local input when {@code null}. */
 		private static final class Item {
 
-			private final String line;
+			private final String piece;
 
-			private Item(final String line) {
-				this.line = line;
+			private Item(final String piece) {
+				this.piece = piece;
 			}
 		}
 
 		private final BlockingQueue<Item> queue = new LinkedBlockingQueue<>(INPUT_QUEUE_CAPACITY);
 		private boolean ended;
 
-		/** Feed the queue from the local input, line by line, ending with the EOF marker. */
+		/** Feed the queue from the local input, piece by piece, ending with the EOF marker. */
 		void readAll(final InputStream localInput) {
 			// The local console charset: what the terminal actually feeds System.in with. The
 			// reader is deliberately never closed — the stream is the caller's (System.in).
-			final BufferedReader reader = new BufferedReader(
-				new InputStreamReader(localInput, Charset.defaultCharset())
-			);
+			final Reader reader = new BufferedReader(new InputStreamReader(localInput, Charset.defaultCharset()));
+			final StringBuilder piece = new StringBuilder();
 			try {
-				String line;
-				while ((line = reader.readLine()) != null) {
-					queue.put(new Item(line));
+				boolean skipLoneLineFeed = false;
+				int read;
+				while ((read = reader.read()) != -1) {
+					final char character = (char) read;
+					if (skipLoneLineFeed) {
+						skipLoneLineFeed = false;
+						if (character == '\n') {
+							// The LF of a CRLF pair: its CR already emitted the line ending.
+							continue;
+						}
+					}
+					if (character == '\n' || character == '\r') {
+						skipLoneLineFeed = character == '\r';
+						piece.append("\r\n");
+						put(piece);
+					} else {
+						piece.append(character);
+						if (piece.length() >= MAX_QUEUED_PIECE_CHARS) {
+							put(piece);
+						}
+					}
+				}
+				if (piece.length() > 0) {
+					put(piece);
 				}
 				queue.put(new Item(null));
 			} catch (final IOException e) {
@@ -279,6 +311,11 @@ final class InteractiveShell {
 			} catch (final InterruptedException e) {
 				Thread.currentThread().interrupt();
 			}
+		}
+
+		private void put(final StringBuilder piece) throws InterruptedException {
+			queue.put(new Item(piece.toString()));
+			piece.setLength(0);
 		}
 
 		private void putSilently(final Item item) {
@@ -290,7 +327,7 @@ final class InteractiveShell {
 		}
 
 		@Override
-		public String nextLine() {
+		public String nextPiece() {
 			if (ended) {
 				return null;
 			}
@@ -298,11 +335,11 @@ final class InteractiveShell {
 			if (item == null) {
 				return null;
 			}
-			if (item.line == null) {
+			if (item.piece == null) {
 				ended = true;
 				return null;
 			}
-			return item.line;
+			return item.piece;
 		}
 
 		@Override
