@@ -23,7 +23,9 @@ package org.metricshub.winrm;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.IOException;
 import java.io.Reader;
+import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.nio.charset.Charset;
 import java.time.Duration;
@@ -125,6 +127,16 @@ public final class RemoteProcess implements AutoCloseable {
 		this.stderr = new BufferedReader(new ChannelReader(stderrPending));
 		this.stdin = new BufferedWriter(new StdinWriter());
 		this.stdinClosed = stdinAlreadySupplied;
+		if (stdinAlreadySupplied) {
+			// The writer itself must reject writes immediately, not buffer them into the void:
+			// close it for real. No request leaves here — ending an already-ended input is a no-op.
+			try {
+				stdin.close();
+			} catch (final IOException e) {
+				// Unreachable: closing the empty writer performs no I/O (see sendStdin).
+				throw new UncheckedIOException(e);
+			}
+		}
 	}
 
 	/**

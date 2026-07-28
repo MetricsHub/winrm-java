@@ -676,12 +676,15 @@ final class WsmanClient implements AutoCloseable {
 				final String base64 = length == 0
 					? ""
 					: Base64.getEncoder().encodeToString(Arrays.copyOfRange(data, offset, offset + length));
-				final Decoded resp = request(
-					Envelopes.send(url, shellId, commandId, base64, end && last, operationTimeoutMs)
+				// The same streaming timeout translation as the Receive loop: a server staying
+				// quiet for a whole inactivity timeout is the documented TimeoutException, not a
+				// raw socket failure or fault.
+				exchange(
+					Envelopes.send(url, shellId, commandId, base64, end && last, operationTimeoutMs),
+					"Send",
+					operationTimeoutMs,
+					failOnQuietTimeout
 				);
-				if (resp.status != 200) {
-					throw faultException("Send", resp);
-				}
 				offset += length;
 			} while (offset < data.length);
 			if (end) {
@@ -701,7 +704,21 @@ final class WsmanClient implements AutoCloseable {
 				return;
 			}
 			checkNotCancelled();
-			signal(commandId, Envelopes.CTRL_C_CODE, operationTimeoutMs);
+			try {
+				signal(commandId, Envelopes.CTRL_C_CODE, operationTimeoutMs);
+			} catch (final SocketTimeoutException e) {
+				// Same streaming translation as every other round trip: a server staying quiet
+				// for a whole inactivity timeout is the documented TimeoutException.
+				if (failOnQuietTimeout) {
+					throw quietTimeout("The interrupt Signal was not answered", operationTimeoutMs, e);
+				}
+				throw e;
+			} catch (final WinRMFaultException e) {
+				if (failOnQuietTimeout && FAULT_OPERATION_TIMEOUT.equals(e.getFaultCode())) {
+					throw quietTimeout("The interrupt Signal was not answered", operationTimeoutMs, null);
+				}
+				throw e;
+			}
 		}
 
 		/** Turn one 200 Receive response into a chunk, recording the exit code when it says Done. */

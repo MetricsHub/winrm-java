@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.metricshub.winrm.light.FakeWsmanResponses.commandResponse;
 import static org.metricshub.winrm.light.FakeWsmanResponses.done;
 import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellDeletion;
+import static org.metricshub.winrm.light.FakeWsmanResponses.fault;
 import static org.metricshub.winrm.light.FakeWsmanResponses.envelope;
 import static org.metricshub.winrm.light.FakeWsmanResponses.receiveResponse;
 import static org.metricshub.winrm.light.FakeWsmanResponses.resourceCreated;
@@ -48,6 +49,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.metricshub.winrm.exceptions.WinRMClientException;
+import org.metricshub.winrm.exceptions.WinRMTimeoutException;
 import org.metricshub.winrm.light.FakeWsmanServer;
 
 /**
@@ -204,6 +207,64 @@ class CommandStdinTest {
 		assertEquals(1, chunks.size());
 		assertEquals(0, chunks.get(0).data().length);
 		assertTrue(chunks.get(0).end());
+	}
+
+	@Test
+	void presuppliedStdinWithStartClosesTheWriterFromTheStart() throws Exception {
+		enqueueStartup();
+		server
+			.enqueue(200, envelope(sendResponse()))
+			.enqueue(200, envelope(receiveResponse("", done(COMMAND_ID, 0))))
+			.enqueue(200, envelope(signalResponse()));
+		enqueueShellDeletion(server);
+
+		try (WinRMClient client = builder().build()) {
+			try (RemoteProcess process = client.command("sort").stdin("beta\nalpha\n").start()) {
+				// The input was delivered in full at startup: the writer rejects further input
+				// immediately, instead of silently buffering it into the void.
+				assertThrows(IOException.class, () -> process.stdin().write("more"));
+				assertEquals(0, process.waitFor());
+			}
+		}
+
+		final List<FakeWsmanServer.StdinChunk> chunks = server.stdinChunks();
+		assertEquals(1, chunks.size());
+		assertArrayEquals("beta\nalpha\n".getBytes(StandardCharsets.UTF_8), chunks.get(0).data());
+		assertTrue(chunks.get(0).end());
+	}
+
+	@Test
+	void aSendLeftUnansweredSurfacesAsTheDocumentedTimeout() throws Exception {
+		enqueueStartup();
+		// The Send stays unanswered past the inactivity timeout: the documented timeout must
+		// surface (the CLI maps it to exit 124), not a generic connection or protocol failure.
+		server.enqueueDelayed(200, envelope(sendResponse()), 4_000);
+
+		try (WinRMClient client = builder().timeout(Duration.ofMillis(1_500)).build()) {
+			final RemoteProcess process = client.command("repl.exe").stdin().start();
+			final BufferedWriter stdin = process.stdin();
+			stdin.write("ping\n");
+			assertThrows(WinRMTimeoutException.class, stdin::flush);
+		}
+	}
+
+	@Test
+	void aFailedStdinDeliveryIsNotMaskedByACleanupFailure(@TempDir final Path tempDir) {
+		enqueueStartup();
+		// The terminate Signal cleaning up the failed start is itself answered with a fault: the
+		// original delivery failure must win, with the cleanup failure attached as suppressed.
+		server.enqueue(500, fault("999", "Signal rejected"));
+		enqueueShellDeletion(server);
+
+		try (WinRMClient client = builder().build()) {
+			final Path missing = tempDir.resolve("missing.txt");
+			final WinRMClientException failure = assertThrows(
+				WinRMClientException.class,
+				() -> client.command("sort").stdin(missing).start()
+			);
+			assertTrue(failure.getCause() instanceof java.nio.file.NoSuchFileException, String.valueOf(failure.getCause()));
+			assertEquals(1, failure.getCause().getSuppressed().length);
+		}
 	}
 
 	@Test

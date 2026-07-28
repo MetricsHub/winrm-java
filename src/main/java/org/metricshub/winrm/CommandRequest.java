@@ -378,8 +378,13 @@ public final class CommandRequest {
 					feedStdin(cursor, prepared.charset);
 				} catch (final Exception e) {
 					// The input could not be delivered: terminate the command and release the client's
-					// connection before reporting — a failed start must not leave an open handle behind.
-					cursor.close();
+					// connection before reporting — a failed start must not leave an open handle
+					// behind, and a cleanup failure must not replace the actual one.
+					try {
+						cursor.close();
+					} catch (final RuntimeException cleanup) {
+						e.addSuppressed(cleanup);
+					}
 					throw e;
 				}
 			}
