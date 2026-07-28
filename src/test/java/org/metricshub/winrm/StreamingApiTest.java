@@ -561,6 +561,48 @@ class StreamingApiTest {
 	}
 
 	@Test
+	void completionArrivingNearTheDeadlineIsStillReported() throws Exception {
+		enqueueCommandStartup();
+		// The final Done-carrying response lands close to the wait's deadline: too little budget is
+		// left for a wire Signal, but the completion happened WITHIN the wait and must be reported
+		// as such — never as a spurious expiry.
+		server.enqueueDelayed(200, envelope(receiveResponse(stdoutChunk("late\n"), done(COMMAND_ID, 9))), 520);
+
+		try (WinRMClient client = builder().build()) {
+			try (RemoteProcess process = client.command("barely.exe").charset(StandardCharsets.UTF_8).start()) {
+				assertTrue(process.waitFor(Duration.ofMillis(600)), "completion within the wait must be reported");
+				assertEquals(9, process.exitCode());
+				assertEquals("late", process.stdout().readLine());
+				// The leftover budget could not fit a Signal round trip: none was sent.
+				assertEquals(3, server.decryptedRequests().size());
+			}
+		}
+	}
+
+	@Test
+	void faultAnsweringTheCompletionSignalDoesNotHideCompletion() throws Exception {
+		enqueueCommandStartup();
+		server
+			.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 5))))
+			// The Signal acknowledging the ALREADY-COMPLETED command is answered with a fault: pure
+			// cleanup noise — the completion and its exit code must win.
+			.enqueue(500, fault("999", "Signal rejected"));
+
+		try (WinRMClient client = builder().build()) {
+			try (CommandCursor cursor = client.executor().startCommand("run.exe", null, 10_000)) {
+				final CommandCursor.Chunk chunk = cursor.poll(5_000);
+				assertEquals("done\n", new String(chunk.stdout(), StandardCharsets.UTF_8));
+				assertNull(cursor.poll(5_000), "completion must be reported despite the Signal fault");
+				assertEquals(5, cursor.exitCode());
+			}
+
+			// The fault was a complete, in-sync exchange: the connection remains usable.
+			server.enqueue(200, envelope(enumerationDone(service("WinRM", "Running"))));
+			assertEquals(1, client.wql("SELECT Name FROM Win32_Service").execute().size());
+		}
+	}
+
+	@Test
 	void completionInsideATinyPollSkipsTheSignal() throws Exception {
 		enqueueCommandStartup();
 		server.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 5))));

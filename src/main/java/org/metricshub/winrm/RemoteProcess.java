@@ -160,6 +160,18 @@ public final class RemoteProcess implements AutoCloseable {
 			absorb(advance(remaining));
 			remaining = deadlineMillis - (Utils.getCurrentTimeMillis() - start);
 		}
+		if (!finished) {
+			try {
+				// The last absorbed chunk may have carried completion right as the deadline ran out:
+				// the command DID complete within the wait, so report that rather than a spurious
+				// expiry. exitCode() answers from local state; the follow-up advance then completes
+				// without waiting (its bounded cleanup cannot block on a 1 ms budget).
+				cursor.exitCode();
+				absorb(advance(1));
+			} catch (final IllegalStateException ignored) {
+				// Genuinely still running: the wait expired.
+			}
+		}
 		if (finished && exitCode == null) {
 			throw new IllegalStateException("The process was closed before the command completed.");
 		}

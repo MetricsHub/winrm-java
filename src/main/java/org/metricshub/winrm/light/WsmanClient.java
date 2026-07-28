@@ -689,14 +689,16 @@ final class WsmanClient implements AutoCloseable {
 
 		/**
 		 * Completion cleanup under a poll budget: the Signal acknowledging the ALREADY-COMPLETED
-		 * command must not outlive the caller's remaining wait. A Signal answer that does not
-		 * arrive in time is abandoned (the connection is dropped so its late response cannot
-		 * desync a later request) — never reported: the command completed and its exit code is
-		 * known, and that must not be hidden behind a cleanup hiccup. A budget too small for any
-		 * round trip skips the Signal outright, leaving the healthy connection untouched; the
-		 * server reaps the completed command's state with the shell. Runs at most once.
+		 * command must not outlive the caller's remaining wait — and no failure of it may be
+		 * reported either: the command completed and its exit code is known, and that must never
+		 * be hidden behind a cleanup hiccup. A fault answering the Signal is a complete, in-sync
+		 * exchange and is simply ignored; any other failure (a timeout, a reset, a half-read
+		 * response) leaves the connection in an unknown state, so it is dropped — a late response
+		 * must not desync a later request. A budget too small for any round trip skips the Signal
+		 * outright, leaving the healthy connection untouched; the server reaps the completed
+		 * command's state with the shell. Runs at most once.
 		 */
-		private void finishBounded(final long budgetMs) throws Exception {
+		private void finishBounded(final long budgetMs) {
 			if (finished) {
 				return;
 			}
@@ -707,7 +709,10 @@ final class WsmanClient implements AutoCloseable {
 					transport.pollTimeout(toSocketTimeoutMillis(budget));
 					try {
 						terminate(commandId, budget);
-					} catch (final SocketTimeoutException e) {
+					} catch (final WinRMFaultException ignored) {
+						// The Signal was answered with a fault: the exchange completed, the connection
+						// is in sync — and the command's completion is what matters.
+					} catch (final Exception e) {
 						transport.close();
 					} finally {
 						transport.inactivityTimeout(toSocketTimeoutMillis(operationTimeoutMs));
