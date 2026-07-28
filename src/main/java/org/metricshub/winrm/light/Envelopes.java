@@ -55,6 +55,13 @@ final class Envelopes {
 
 	private static final int MAX_ENVELOPE_SIZE = 153600;
 
+	/**
+	 * Console code page of the remote shell: UTF-8. The shell's output charset must be one the
+	 * client knows without asking, and it must be able to carry every locale's characters — an OEM
+	 * page like 437 can encode neither {@code é} on a French host nor anything CJK at all.
+	 */
+	private static final String CODEPAGE_UTF8 = "65001";
+
 	private Envelopes() {}
 
 	// --- WQL ---------------------------------------------------------------
@@ -121,7 +128,7 @@ final class Envelopes {
 	static String createShell(final String url, final String workingDirectory, final long timeoutMs) {
 		final String optionSet = "<wsman:OptionSet>" +
 			"<wsman:Option Name=\"WINRS_NOPROFILE\">TRUE</wsman:Option>" +
-			"<wsman:Option Name=\"WINRS_CODEPAGE\">437</wsman:Option>" +
+			"<wsman:Option Name=\"WINRS_CODEPAGE\">" + CODEPAGE_UTF8 + "</wsman:Option>" +
 			"</wsman:OptionSet>";
 		final String workingDir = (workingDirectory == null || workingDirectory.trim().isEmpty())
 			? ""

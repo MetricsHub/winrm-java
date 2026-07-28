@@ -88,8 +88,10 @@ failure can therefore leave partial output on standard output, signalled by the 
 
 Remote stdout and stderr are forwarded **live** to the corresponding local streams while the
 command runs — each chunk is flushed as it arrives, so a long-running command can be followed in
-real time. The output is decoded with the remote host's active code page, detected automatically
-before the command starts.
+real time. The output is decoded as UTF-8: the remote shell is created with console code page
+65001, so no code-page detection is needed and non-ASCII output survives whatever the remote
+locale. See [Character encoding](commands.html#character-encoding) for the two legacy tools that
+ignore the console code page.
 
 ## Timeout semantics
 
@@ -98,8 +100,8 @@ before the command starts.
 * For `wql`, it is the **inactivity timeout** of the stream — the longest tolerated silence
   between two server responses. A large result can stream for longer than the timeout, as long as
   the server keeps answering.
-* For `command`, it is the **overall deadline** covering the encoding detection and the command
-  itself.
+* For `command`, it is the **overall deadline** covering the command itself and any file
+  uploads.
 
 See [Timeouts and Errors](timeouts-and-errors.html) for the underlying semantics.
 

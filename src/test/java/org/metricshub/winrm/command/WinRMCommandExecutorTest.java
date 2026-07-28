@@ -192,7 +192,6 @@ class WinRMCommandExecutorTest {
 			fileListVariants.add(singletonList(" \r\t\n "));
 
 			for (final List<String> localFileToCopyList : fileListVariants) {
-				enqueueCodeSetQuery(server, "65001");
 				enqueueShellCreation(server);
 				enqueueCommandExchange(server, "stdout".getBytes(UTF_8), "stderr".getBytes(UTF_8), 0);
 				enqueueShellDeletion(server);
@@ -217,9 +216,9 @@ class WinRMCommandExecutorTest {
 			}
 
 			final List<String> requests = server.decryptedRequests();
-			// Each execution queried the remote code page, ran the command verbatim (no CMD.EXE /C
-			// wrapper on the no-copy path), and deleted its shell on close
-			assertEquals(3, count(requests, "SELECT CodeSet FROM Win32_OperatingSystem"));
+			// Each execution ran the command verbatim (no CMD.EXE /C wrapper on the no-copy path) and
+			// deleted its shell on close, without probing the remote code page (#142)
+			assertEquals(0, count(requests, "SELECT CodeSet FROM Win32_OperatingSystem"));
 			assertEquals(3, count(requests, "<rsp:Command>" + COMMAND + "</rsp:Command>"));
 			assertEquals(3, count(requests, "http://schemas.xmlsoap.org/ws/2004/09/transfer/Delete"));
 		}
@@ -249,8 +248,7 @@ class WinRMCommandExecutorTest {
 			enqueueCommandExchange(server, hashOutput.getBytes(UTF_8), NO_OUTPUT, 0);
 			// 5: publish (MOVE) + digest probe of the destination
 			enqueueCommandExchange(server, hashOutput.getBytes(UTF_8), NO_OUTPUT, 0);
-			// then the code-page query and the actual command
-			enqueueCodeSetQuery(server, "65001");
+			// then the actual command
 			enqueueCommandExchange(server, "stdout".getBytes(UTF_8), "stderr".getBytes(UTF_8), 0);
 			enqueueShellDeletion(server);
 
@@ -291,10 +289,6 @@ class WinRMCommandExecutorTest {
 			// close() deleted the shell
 			assertEquals(1, count(requests, "http://schemas.xmlsoap.org/ws/2004/09/transfer/Delete"));
 		}
-	}
-
-	private static void enqueueCodeSetQuery(final FakeWsmanServer server, final String codeSet) {
-		enqueueEnumeration(server, instance("Win32_OperatingSystem", "CodeSet", codeSet));
 	}
 
 	private static long count(final List<String> requests, final String needle) {

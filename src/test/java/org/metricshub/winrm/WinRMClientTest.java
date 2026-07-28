@@ -36,6 +36,7 @@ import static org.metricshub.winrm.light.FakeWsmanResponses.resourceCreated;
 import static org.metricshub.winrm.light.FakeWsmanResponses.signalResponse;
 import static org.metricshub.winrm.light.FakeWsmanResponses.stream;
 
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
@@ -239,11 +240,8 @@ class WinRMClientTest {
 	}
 
 	@Test
-	void commandDetectsTheOutputCharsetOnceAndCachesIt() throws Exception {
+	void commandDecodesOutputAsUtf8WithoutProbingTheRemoteCodeSet() throws Exception {
 		server
-			// First command: the client detects the remote code set with one WQL query...
-			.enqueue(200, envelope(enumerationDone(instance("Win32_OperatingSystem", "CodeSet", "1252"))))
-			// ...then runs the command in a fresh shell.
 			.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
@@ -251,7 +249,7 @@ class WinRMClientTest {
 				envelope(receiveResponse(stream("stdout", "CMD-1", "first".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
 			)
 			.enqueue(200, envelope(signalResponse()))
-			// Second command: no second WQL — the charset is cached, and the shell is reused.
+			// Second command: the shell is reused, and still no WQL round trip.
 			.enqueue(200, envelope(commandResponse("CMD-2")))
 			.enqueue(
 				200,
@@ -266,12 +264,44 @@ class WinRMClientTest {
 			assertEquals("second", client.command("second.exe").execute().stdout());
 		}
 
+		// The shell is created with code page 65001, so its output charset is known up front: no
+		// SELECT CodeSet FROM Win32_OperatingSystem probe before the first command (#142).
 		final List<String> requests = server.decryptedRequests();
-		final long codeSetQueries = requests.stream().filter(r -> r.contains("SELECT CodeSet FROM Win32_OperatingSystem"))
-			.count();
-		assertEquals(1, codeSetQueries, () -> String.join("\n---\n", requests));
+		assertEquals(
+			0,
+			requests.stream().filter(r -> r.contains("Win32_OperatingSystem")).count(),
+			() -> String.join("\n---\n", requests)
+		);
 		final long shellCreations = requests.stream().filter(r -> r.contains("<rsp:InputStreams>")).count();
 		assertEquals(1, shellCreations, "the second command must reuse the shell");
+	}
+
+	@Test
+	void commandOutputKeepsNonAsciiCharactersOfEveryLocale() throws Exception {
+		// What a French or Japanese host actually sends back through a 65001 shell. Neither line
+		// survives a single-byte OEM code page: CP437 has no 番, and decoding its bytes as the ANSI
+		// code page turned "numéro" into "num‚ro" (#142).
+		final String output = "Le numéro de série du volume est E6B6-D774\r\nボリューム シリアル番号\r\n";
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(
+						stream("stdout", "CMD-1", output.getBytes(StandardCharsets.UTF_8)) +
+							stream("stderr", "CMD-1", "Accès refusé".getBytes(StandardCharsets.UTF_8)),
+						done("CMD-1", 0)
+					)
+				)
+			)
+			.enqueue(200, envelope(signalResponse()));
+
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			final CommandResult result = client.command("dir /A").execute();
+			assertEquals(output, result.stdout());
+			assertEquals("Accès refusé", result.stderr());
+		}
 	}
 
 	@Test
@@ -516,30 +546,23 @@ class WinRMClientTest {
 	}
 
 	@Test
-	void charsetDetectionQueriesCimv2EvenWithACustomDefaultNamespace() throws Exception {
+	void explicitCharsetOverridesTheShellDefault() throws Exception {
+		// charset() is the escape hatch for the handful of legacy tools that write pre-converted OEM
+		// bytes instead of honoring the console code page — net.exe is the notorious one, and this is
+		// exactly what it sends on a French host (0x82 is "é" in CP850, invalid as UTF-8).
+		final Charset oem = Charset.forName("IBM850");
+		final byte[] output = "Code du pays ou de la région".getBytes(oem);
 		server
-			.enqueue(200, envelope(enumerationDone(instance("Win32_OperatingSystem", "CodeSet", "1252"))))
 			.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
-			.enqueue(
-				200,
-				envelope(receiveResponse(stream("stdout", "CMD-1", "ok".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
-			)
+			.enqueue(200, envelope(receiveResponse(stream("stdout", "CMD-1", output), done("CMD-1", 0))))
 			.enqueue(200, envelope(signalResponse()));
 
-		// The client's default namespace points at a custom one, where Win32_OperatingSystem does
-		// not exist: the internal encoding-detection query must still target ROOT\CIMV2.
-		try (WinRMClient client = builder(PASSWORD).namespace("root\\custom").build()) {
-			assertEquals("ok", client.command("whoami").execute().stdout());
-		}
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			final CommandResult result = client.command("net user Administrateur").charset(oem).execute();
 
-		final String codeSetQuery = server
-			.decryptedRequests()
-			.stream()
-			.filter(r -> r.contains("SELECT CodeSet FROM Win32_OperatingSystem"))
-			.findFirst()
-			.orElseThrow();
-		assertTrue(codeSetQuery.contains("http://schemas.microsoft.com/wbem/wsman/1/wmi/ROOT/CIMV2/*"), codeSetQuery);
+			assertEquals("Code du pays ou de la région", result.stdout());
+		}
 	}
 
 	@Test

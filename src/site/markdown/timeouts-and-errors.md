@@ -24,8 +24,8 @@ try (WinRMClient client = WinRMClient.builder("server.example.com")
 ```
 
 The timeout is a **wall-clock deadline for the whole operation**: it covers authentication (on the
-first operation), every WSMan round trip, and — for commands — the file uploads and the
-remote-encoding detection, all budgeted against the same deadline. When it elapses, the operation
+first operation), every WSMan round trip, and — for commands — the file uploads, all budgeted
+against the same deadline. When it elapses, the operation
 fails with
 [`WinRMTimeoutException`](apidocs/org/metricshub/winrm/exceptions/WinRMTimeoutException.html) and
 no part of it (in particular: the command itself) runs afterward.

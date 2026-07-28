@@ -21,6 +21,7 @@ package org.metricshub.winrm;
  */
 
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
@@ -33,6 +34,13 @@ public interface WindowsRemoteExecutor extends AutoCloseable {
 	 * server may return per Enumerate/Pull response.
 	 */
 	int DEFAULT_WQL_MAX_ELEMENTS = 32000;
+
+	/**
+	 * Charset of the output of every command run through this executor: UTF-8, because the remote
+	 * command shell is created with console code page 65001. It is not the remote machine's ANSI or
+	 * OEM code page, and it does not depend on the remote locale.
+	 */
+	Charset SHELL_OUTPUT_CHARSET = StandardCharsets.UTF_8;
 
 	/**
 	 * <p>
@@ -151,7 +159,8 @@ public interface WindowsRemoteExecutor extends AutoCloseable {
 	 *
 	 * @param command The command to execute
 	 * @param workingDirectory Path of the directory for the spawned process on the remote system (can be null)
-	 * @param charset The charset
+	 * @param charset The charset decoding the command output; {@code null} uses
+	 *        {@link #SHELL_OUTPUT_CHARSET}, which is what the remote shell actually emits
 	 * @param timeout Timeout in milliseconds
 	 * @return The command result
 	 * @throws WindowsRemoteException For any problem encountered

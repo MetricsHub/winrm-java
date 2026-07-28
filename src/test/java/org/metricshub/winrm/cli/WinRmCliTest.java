@@ -25,15 +25,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueCommandExchange;
-import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueEnumeration;
 import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellCreation;
 import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellDeletion;
-import static org.metricshub.winrm.light.FakeWsmanResponses.instance;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.net.ConnectException;
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -257,17 +254,14 @@ class WinRmCliTest {
 	}
 
 	@Test
-	void decodesCommandOutputUsingTheRemoteWindowsCodePage() throws Exception {
-		final Charset windowsCharset = Charset.forName("windows-1251");
-
-		// Full stack against the in-process WSMan server, through the CLI's real connect factory
-		// and its streaming forwarders: the remote reports Windows code page 1251 and the command
-		// output arrives in that encoding — the CLI must query the code page and decode the stream
-		// bytes with it, or the Cyrillic output turns into mojibake.
+	void decodesCommandOutputAsUtf8WhateverTheRemoteLocale() throws Exception {
+		// Full stack against the in-process WSMan server, through the CLI's real connect factory and
+		// its streaming forwarders: the remote shell is created with code page 65001, so its output
+		// arrives as UTF-8 and needs no code-page probe. Cyrillic and French accents must survive
+		// verbatim — decoding them as a single-byte code page is what produced mojibake (#142).
 		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
-			enqueueEnumeration(server, instance("Win32_OperatingSystem", "CodeSet", "1251"));
 			enqueueShellCreation(server);
-			enqueueCommandExchange(server, "Результат".getBytes(windowsCharset), new byte[0], 0);
+			enqueueCommandExchange(server, "Результат : numéro".getBytes(StandardCharsets.UTF_8), new byte[0], 0);
 			enqueueShellDeletion(server);
 
 			final Invocation invocation = invoke(
@@ -290,15 +284,18 @@ class WinRmCliTest {
 			);
 
 			assertEquals(0, invocation.exitCode);
-			assertEquals("Результат", invocation.stdout);
+			assertEquals("Результат : numéro", invocation.stdout);
 			assertEquals("", invocation.stderr);
 
-			// The decoding charset really came from the remote code-page query
+			// No code-page probe: the shell's Create request pins 65001, so the charset is known.
+			final List<String> requests = server.decryptedRequests();
 			assertTrue(
-				server
-					.decryptedRequests()
-					.stream()
-					.anyMatch(request -> request.contains("SELECT CodeSet FROM Win32_OperatingSystem"))
+				requests.stream().noneMatch(request -> request.contains("Win32_OperatingSystem")),
+				() -> String.join("\n---\n", requests)
+			);
+			assertTrue(
+				requests.get(0).contains("<wsman:Option Name=\"WINRS_CODEPAGE\">65001</wsman:Option>"),
+				requests.get(0)
 			);
 		}
 	}

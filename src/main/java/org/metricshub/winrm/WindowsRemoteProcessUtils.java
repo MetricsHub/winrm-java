@@ -86,7 +86,15 @@ public class WindowsRemoteProcessUtils {
 	 * @throws WindowsRemoteException For any problem encountered on remote
 	 * @see <a href="https://docs.microsoft.com/en-us/windows/win32/cimwin32prov/win32-operatingsystem">
 	 *      Win32_OperatingSystem class</a>
+	 * @deprecated Not the charset of remote command output, and never was: {@code CodeSet} is the
+	 *             remote machine's <em>ANSI</em> code page, while {@code cmd.exe} writes its output in
+	 *             the <em>console (OEM)</em> code page — the two differ on every non-English locale.
+	 *             Command output is now decoded with
+	 *             {@link WindowsRemoteExecutor#SHELL_OUTPUT_CHARSET}, the code page the remote shell
+	 *             is created with. Use this method only to decode data that a Windows application
+	 *             genuinely wrote in the ANSI code page.
 	 */
+	@Deprecated(since = "2.0.00", forRemoval = false)
 	public static Charset getWindowsEncodingCharset(
 		final WindowsRemoteExecutor windowsRemoteExecutor,
 		final long timeout
