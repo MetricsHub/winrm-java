@@ -322,18 +322,9 @@ public final class WinRmCli {
 			"      --version               Show the project version\n" +
 			"\n" +
 			"If neither password option is given, the password is requested from the interactive console.\n" +
-			"The password options are mutually exclusive. Password files have one final\n" +
-			"LF, CRLF, or CR removed; every other byte is part of the UTF-8 password.\n" +
-			"Kerberos KDC/realm options set the JDK Kerberos configuration for this invocation.\n" +
-			"Without them, the ambient JDK Kerberos configuration is used.\n" +
-			"WQL rows are streamed to stdout as UTF-8 JSON Lines as they arrive from the host; the timeout\n" +
-			"is the longest tolerated silence between two server responses, so large results may stream\n" +
-			"for longer, and a mid-stream failure can leave partial output before the nonzero exit.\n" +
-			"Command stdout and stderr are forwarded live to the corresponding local streams while the\n" +
-			"command runs; the timeout is the overall command deadline.\n" +
 			"\n" +
-			"Exit codes: 0 success; remote command code 0..255 when available; 64 usage;\n" +
-			"69 connection/TLS; 70 WinRM protocol; 77 authentication; 124 timeout.\n";
+			"Full manual - streaming behavior, password files, Kerberos, exit codes:\n" +
+			"  https://metricshub.org/winrm-java/cli.html\n";
 	}
 
 	@FunctionalInterface

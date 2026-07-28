@@ -35,6 +35,13 @@ import java.nio.charset.CodingErrorAction;
  * characters. Malformed and unmappable input is replaced, matching
  * {@link String#String(byte[], Charset)}, so incrementally decoding a byte sequence yields the
  * same text as decoding it in one piece.
+ * <p>
+ * This is a thin push-style convenience over the JDK's own {@link CharsetDecoder}, which does all
+ * the actual decoding. The JDK's ready-made incremental decoders ({@code InputStreamReader} and
+ * its underlying {@code StreamDecoder}) only fit <i>pull</i>-based streams — they block the caller
+ * until input arrives — whereas output chunks here are <i>pushed</i> by the protocol loop as each
+ * Receive response is processed; there is no public JDK type for that direction, only the
+ * {@link CharsetDecoder}/{@link ByteBuffer} primitives this class packages.
  */
 final class ChunkDecoder {
 

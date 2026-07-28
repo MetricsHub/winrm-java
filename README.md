@@ -167,59 +167,15 @@ java -jar target/winrm-java-<version>-standalone.jar \
   exec ipconfig /all
 ```
 
-Use `--help` for the complete option list and `--version` for the build version. HTTP is the
-default transport and uses port 5985; `--https` uses port 5986. `-P`/`--port` overrides either
-default, and `-t`/`--timeout` sets the operation timeout in milliseconds (60,000 by default).
+Use `--help` for the option list and `--version` for the build version. The CLI is built on the
+streaming API: WQL rows are written to stdout as UTF-8 [JSON Lines](https://jsonlines.org/) **as
+the enumeration pages arrive**, and remote command stdout and stderr are forwarded **live** to the
+corresponding local streams while the command runs. Diagnostics go only to stderr, and the exit
+codes are stable for scripting.
 
-NTLM is used when neither authentication flag is supplied. `--ntlm` and `--kerberos` are mutually
-exclusive. Kerberos requires HTTPS. By default it uses the ambient JDK Kerberos configuration. The
-CLI can instead configure the JDK for the current invocation with `--kerberos-kdc <host>`. If no
-`--kerberos-realm <realm>` is supplied, the realm is inferred by removing the KDC hostname's first
-DNS label and uppercasing the remaining suffix. For example:
-
-```bash
-java -jar target/winrm-java-<version>-standalone.jar \
-  -h server.internal.sentrysoftware.net -u 'DOMAIN\user' -pf password.txt \
-  --https --kerberos --kerberos-kdc camus.internal.sentrysoftware.net \
-  command whoami
-```
-
-This infers `INTERNAL.SENTRYSOFTWARE.NET`. The inference follows a common Active Directory DNS
-naming convention; it is not guaranteed by Kerberos. Specify `--kerberos-realm` when the realm does
-not match the KDC's DNS suffix or when the KDC is not a fully qualified DNS name. Both options are
-valid only with `--kerberos`, and `--kerberos-realm` requires `--kerberos-kdc`.
-
-HTTPS validates the certificate and hostname by default. `--https-permissive` trusts any
-certificate and hostname; it is intentionally insecure and should only be used for testing or
-isolated hosts.
-
-`-p`/`--password` is convenient for interactive use, but command-line arguments may be visible to
-other local processes. Prefer `-pf`/`--password-file` for automation. Password files are decoded as
-UTF-8. Exactly one final LF, CRLF, or CR is removed; all other bytes, including whitespace and
-earlier line endings, are part of the password. The two password options are mutually exclusive.
-If neither is supplied, the CLI securely requests the password from the interactive console without
-echoing it. Non-interactive runs must use `--password-file` (or, less securely, `--password`).
-
-WQL writes one compact UTF-8 JSON object per row to stdout
-([JSON Lines](https://jsonlines.org/)); property order follows the WinRM response. Diagnostics go
-only to stderr. The CLI is built on the streaming API: WQL rows are written **as the enumeration
-pages arrive** (a huge query starts producing output immediately, memory stays bounded, and for
-`wql` the timeout is the longest tolerated silence between two server responses rather than an
-overall deadline — a mid-stream failure can leave partial output before the nonzero exit), and
-remote command stdout and stderr are forwarded **live** to the corresponding local streams while
-the command runs (the timeout remains the overall command deadline).
-
-Exit behavior is stable:
-
-| Exit code | Meaning |
-| ---: | --- |
-| `0` | Successful WQL query or remote command |
-| `0`–`255` | Remote command exit code, when representable |
-| `64` | Invalid CLI usage |
-| `69` | Connection, DNS, socket, or TLS failure |
-| `70` | WinRM protocol or other remote failure |
-| `77` | Authentication failure |
-| `124` | Operation timeout |
+The full manual — options, password handling, Kerberos configuration, streaming and timeout
+semantics, exit codes — is the
+[Command-Line Client](https://metricshub.org/winrm-java/cli.html) page.
 
 ## Build instructions
 

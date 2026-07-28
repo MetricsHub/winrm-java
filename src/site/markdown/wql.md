@@ -164,17 +164,5 @@ See [Timeouts and Errors](timeouts-and-errors.html) for the full exception surfa
 
 ## From the command line
 
-The standalone jar exposes the same capability through the `wql` subcommand, printing one compact
-UTF-8 JSON object per row ([JSON Lines](https://jsonlines.org/)):
-
-```bash
-java -jar ${project.artifactId}-${project.version}-standalone.jar \
-  -h server.example.com -u 'DOMAIN\user' -pf password.txt --ntlm \
-  wql 'SELECT Name, State FROM Win32_Service'
-```
-
-The rows are **streamed**: each one is written (and flushed) as it arrives from the host, so a
-pipe consuming the output starts working immediately and memory stays bounded regardless of the
-result size. The `-t`/`--timeout` option is the inactivity timeout of the stream; a mid-stream
-failure can leave partial output on standard output before the nonzero exit. Property order
-follows the WinRM response; diagnostics go only to standard error.
+The standalone jar exposes the same capability through its `wql` subcommand, streaming the rows
+to stdout as JSON Lines — see the [Command-Line Client](cli.html) manual.

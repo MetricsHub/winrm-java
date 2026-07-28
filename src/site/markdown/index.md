@@ -109,6 +109,7 @@ remain available and unchanged, with their checked exceptions.
 * [WQL Queries](wql.html) — query WMI and read the result
 * [Remote Commands](commands.html) — run commands and copy files to the host
 * [File Transfers](file-transfers.html) — how files are copied through the WinRM channel
+* [Command-Line Client](cli.html) — the standalone jar's manual page
 * [Authentication](authentication.html) — NTLM and Kerberos
 * [TLS / HTTPS](tls.html) — certificate validation and trust stores
 * [Timeouts and Errors](timeouts-and-errors.html) — timeout semantics and the exception surface

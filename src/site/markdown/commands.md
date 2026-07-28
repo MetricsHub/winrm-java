@@ -169,13 +169,5 @@ See [Timeouts and Errors](timeouts-and-errors.html) for details.
 
 ## From the command line
 
-The standalone jar runs a command with the `command` subcommand (aliases: `cmd`, `exec`, `run`).
-Standard output and standard error are forwarded **live** to the corresponding local streams while
-the command runs (each chunk is flushed as it arrives, so a long-running command can be followed
-in real time), and the process exits with the remote exit code when it fits in 0–255:
-
-```bash
-java -jar ${project.artifactId}-${project.version}-standalone.jar \
-  -h server.example.com -u 'DOMAIN\user' -pf password.txt --https \
-  exec ipconfig /all
-```
+The standalone jar runs a command with its `command` subcommand, forwarding the output live and
+propagating the exit code — see the [Command-Line Client](cli.html) manual.

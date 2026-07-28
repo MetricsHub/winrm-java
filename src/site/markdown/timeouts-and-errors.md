@@ -1,5 +1,5 @@
-keywords: timeout, exception, error, winrmclientexception, wsmanfault, exit code
-description: Timeout semantics and the exception surface of the WinRM Java Client, plus the command-line exit codes.
+keywords: timeout, exception, error, winrmclientexception, wsmanfault
+description: Timeout semantics and the exception surface of the WinRM Java Client.
 
 # Timeouts and Errors
 
@@ -92,17 +92,5 @@ unaffected by the unchecked hierarchy above.
 
 ## Command-line exit codes
 
-The standalone jar maps outcomes to stable process exit codes:
-
-| Exit code | Meaning |
-| ---: | --- |
-| `0` | Successful WQL query or remote command. |
-| `0`–`255` | Remote command exit code, when it fits in that range. |
-| `64` | Invalid CLI usage. |
-| `69` | Connection, DNS, socket, or TLS failure. |
-| `70` | WinRM protocol or other remote failure. |
-| `77` | Authentication failure. |
-| `124` | Operation timeout. |
-
-Diagnostics are written only to standard error, so a WQL query's JSON Lines output on standard
-output is never mixed with error messages.
+The standalone jar maps these outcomes to stable process exit codes — see the
+[Command-Line Client](cli.html) manual.

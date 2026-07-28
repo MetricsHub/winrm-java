@@ -61,28 +61,12 @@ Download `${project.artifactId}-${project.version}-standalone.jar` from the
 java -jar ${project.artifactId}-${project.version}-standalone.jar --help
 ```
 
-Run a WQL query:
-
-```bash
-java -jar ${project.artifactId}-${project.version}-standalone.jar \
-  --hostname server.example.com --username 'DOMAIN\user' \
-  --password-file password.txt --ntlm \
-  wql 'SELECT Name, State FROM Win32_Service'
-```
-
-Run a remote command (`cmd`, `exec`, and `run` are aliases for `command`):
-
-```bash
-java -jar ${project.artifactId}-${project.version}-standalone.jar \
-  -h server.example.com -u Administrator -pf password.txt --https \
-  exec ipconfig /all
-```
-
-The CLI is covered in more detail throughout the [Usage](wql.html) pages; `--version` prints the
-build version.
+Subcommands, options, password handling, streaming behavior, and exit codes are documented in the
+[Command-Line Client](cli.html) manual.
 
 ## Where to go next
 
 * [WQL Queries](wql.html)
 * [Remote Commands](commands.html)
+* [Command-Line Client](cli.html)
 * [Authentication](authentication.html)

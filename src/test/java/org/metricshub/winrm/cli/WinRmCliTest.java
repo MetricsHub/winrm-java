@@ -58,6 +58,8 @@ class WinRmCliTest {
 		assertTrue(help.stdout.contains("-P, --port"));
 		assertTrue(help.stdout.contains("--kerberos-kdc"));
 		assertTrue(help.stdout.contains("--kerberos-realm"));
+		// The details (streaming behavior, password files, exit codes) live in the online manual.
+		assertTrue(help.stdout.contains("https://metricshub.org/winrm-java/cli.html"));
 		assertEquals("", help.stderr);
 
 		final Invocation version = invoke(new String[] { "--version" }, arguments -> failingRemote());
