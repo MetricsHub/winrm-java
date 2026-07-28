@@ -96,16 +96,19 @@ real time. The output is decoded as UTF-8: the remote shell is created with cons
 locale. See [Character encoding](commands.html#character-encoding) for the two legacy tools that
 ignore the console code page.
 
-When the local standard input is **not** an interactive console — it is piped or redirected — it
-is forwarded as the remote command's standard input, with pipe semantics, so filters just work:
+When the local standard input is piped or redirected, it is forwarded as the remote command's
+standard input, with pipe semantics, so filters just work:
 
 ```bash
 java -jar winrm-java-standalone.jar -h server -u 'DOMAIN\user' -pf pw.txt command sort < data.txt
 ```
 
-The input is delivered in full before the output is read: piping a large input into a command
-that floods its output at the same time can deadlock both sides (the classic pipe deadlock),
-exactly as with `java.lang.Process`.
+Forwarding engages when input is already waiting on a non-console standard input at startup —
+which a `< file` redirection or a normal pipe always satisfies. An interactive terminal is never
+consumed, even when only the *output* is redirected (`... command hostname > result.txt`). The
+input is delivered in full before the output is read: piping a large input into a command that
+floods its output at the same time can deadlock both sides (the classic pipe deadlock), exactly
+as with `java.lang.Process`.
 
 ## Interactive shell
 

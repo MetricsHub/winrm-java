@@ -98,9 +98,30 @@ public final class WinRmCli {
 				System.err,
 				WinRmCli::connect,
 				WinRmCli::readConsolePassword,
-				new LocalInput(System.console() != null, System.in)
+				new LocalInput(!stdinLooksRedirected(System.console() != null, System.in), System.in)
 			)
 		);
+	}
+
+	/**
+	 * Whether the local standard input looks piped or redirected — the signal engaging stdin
+	 * forwarding for the {@code command} subcommand. {@code System.console()} alone is not it: it
+	 * is also null when only the <i>output</i> is redirected ({@code ... > result.txt}), and
+	 * consuming an interactive terminal in that case would hang the CLI waiting for an EOF the
+	 * user never sends. So the input itself is probed: bytes already waiting at startup can only
+	 * come from a redirected file or a pipe — an untouched terminal reports nothing available.
+	 * The trade-off is a pipe whose producer has not written anything yet: its input is not
+	 * forwarded (the JVM startup normally leaves any real producer plenty of time to get ahead).
+	 */
+	static boolean stdinLooksRedirected(final boolean consoleAttached, final InputStream stdin) {
+		if (consoleAttached) {
+			return false;
+		}
+		try {
+			return stdin.available() > 0;
+		} catch (final IOException e) {
+			return false;
+		}
 	}
 
 	static int run(

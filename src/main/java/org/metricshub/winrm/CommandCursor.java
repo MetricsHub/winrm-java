@@ -72,6 +72,29 @@ public interface CommandCursor extends AutoCloseable {
 	}
 
 	/**
+	 * Cadence variant of {@link #poll(long)}: ask the server to answer within
+	 * {@code askMillis} — the polling cadence — while allowing the answer itself up to
+	 * {@code maxWaitMillis} to arrive. A polling consumer (e.g. an interactive session pump)
+	 * wants short idle rounds, but must not fail the stream when a loaded or distant server
+	 * takes longer than one cadence to get its answer across; {@link #poll(long)} is exactly
+	 * this call with {@code askMillis == maxWaitMillis}.
+	 * <p>
+	 * The default implementation delegates to {@link #poll(long)} with the full wait.
+	 *
+	 * @param askMillis when the server should answer at the latest — with output when it has
+	 *        any, with the protocol's "nothing yet" otherwise
+	 * @param maxWaitMillis how long to block at most, capped by the cursor's per-round-trip
+	 *        timeout
+	 * @return the next chunk of raw output — empty when nothing arrived — or {@code null} once
+	 *         the command has completed
+	 * @throws TimeoutException when the server does not even answer the bounded request
+	 * @throws WindowsRemoteException for any other failure while receiving
+	 */
+	default Chunk poll(final long askMillis, final long maxWaitMillis) throws TimeoutException, WindowsRemoteException {
+		return poll(maxWaitMillis);
+	}
+
+	/**
 	 * Feed standard input to the running command — the WSMan Send operation, carrying the bytes to
 	 * the command's {@code stdin} stream. Input larger than one envelope's worth is split into
 	 * several Send requests automatically. A Send is an ordinary request on the executor's serial

@@ -231,29 +231,45 @@ public final class RemoteProcess implements AutoCloseable {
 	}
 
 	/**
-	 * Advance the stream by <b>at most one</b> bounded protocol round trip: block at most the
-	 * given wait for the next chunk of output, buffer whatever arrives for the readers, and report
-	 * whether the command has completed. The wait expiring is not a failure — the server answers
-	 * with the protocol's "nothing yet" and the process stays fully usable — so a polling consumer
-	 * (e.g. an interactive session pump) never trips the inactivity timeout while idle. Unlike
-	 * {@link #waitFor(Duration)}, which keeps polling until its deadline, this returns as soon as
-	 * the server answers: output that is ready arrives (and can be read) immediately.
+	 * Advance the stream by <b>at most one</b> bounded protocol round trip: ask the server to
+	 * answer within the given wait — with output when it has any, with the protocol's "nothing
+	 * yet" otherwise — buffer whatever arrives for the readers, and report whether the command
+	 * has completed. An empty answer is not a failure: the process stays fully usable, so a
+	 * polling consumer (e.g. an interactive session pump) never trips the inactivity timeout
+	 * while idle. Unlike {@link #waitFor(Duration)}, which keeps polling until its deadline, this
+	 * returns as soon as the server answers: output that is ready arrives (and can be read)
+	 * immediately.
 	 * <p>
-	 * A wait too short for a network round trip — the WSMan service holds a bounded Receive for at
-	 * least 500 ms before answering "nothing yet", and the answer needs transit slack on top — is
-	 * waited out locally without touching the wire: the stream then does not advance. Use waits of
-	 * about a second or more to actually poll the server.
+	 * The wait is the polling <i>cadence</i>, not a hard bound on the round trip: how long the
+	 * answer itself may take to arrive is governed by the request timeout (the inactivity
+	 * timeout), so one slow answer from a loaded server does not fail the stream — use
+	 * {@link #waitFor(Duration)} when a hard deadline is needed. A wait too short for a network
+	 * round trip — the WSMan service holds a bounded Receive for at least 500 ms before answering
+	 * "nothing yet" — is waited out locally without touching the wire: the stream then does not
+	 * advance. Use waits of about a second or more to actually poll the server.
 	 *
-	 * @param maxWait how long to block at most (at least one millisecond)
+	 * @param maxWait when the server should answer at the latest (at least one millisecond)
 	 * @return {@code true} when the command has completed — the exit code is then available from
 	 *         {@link #exitCode()} — {@code false} when it is still running
-	 * @throws WinRMTimeoutException when the server does not answer the bounded request in time
+	 * @throws WinRMTimeoutException when the server stays silent for a whole inactivity timeout
 	 * @throws org.metricshub.winrm.exceptions.WinRMClientException for any other failure
 	 */
 	public synchronized boolean poll(final Duration maxWait) {
 		WinRMClient.checkPositive(maxWait, "maxWait");
 		if (!finished) {
-			absorb(advance(WinRMClient.toMillis(maxWait)));
+			final long ask = WinRMClient.toMillis(maxWait);
+			final CommandCursor.Chunk chunk;
+			try {
+				chunk = cursor.poll(ask, Math.max(ask, WinRMClient.toMillis(timeout)));
+			} catch (final TimeoutException e) {
+				throw new WinRMTimeoutException(
+					String.format("Command produced no output within %s on %s", timeout, hostname),
+					e
+				);
+			} catch (final WindowsRemoteException e) {
+				throw WinRMClient.translate(e);
+			}
+			absorb(chunk);
 		}
 		return finished;
 	}

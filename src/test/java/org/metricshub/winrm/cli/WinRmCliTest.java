@@ -168,6 +168,37 @@ class WinRmCliTest {
 	}
 
 	@Test
+	void detectsRedirectedStdinByProbingTheInputItself() {
+		// An attached console is definitely interactive, whatever the input holds.
+		assertFalse(WinRmCli.stdinLooksRedirected(true, new java.io.ByteArrayInputStream(new byte[] { 1 })));
+
+		// No console + bytes already waiting: a pipe or a redirected file.
+		assertTrue(WinRmCli.stdinLooksRedirected(false, new java.io.ByteArrayInputStream(new byte[] { 1 })));
+
+		// No console but nothing waiting: typically an interactive terminal whose OUTPUT is
+		// redirected (System.console() is null then too) — consuming it would hang the CLI.
+		assertFalse(WinRmCli.stdinLooksRedirected(false, new java.io.ByteArrayInputStream(new byte[0])));
+
+		// A probe failure counts as not redirected: never risk blocking on a terminal.
+		assertFalse(
+			WinRmCli.stdinLooksRedirected(
+				false,
+				new java.io.InputStream() {
+					@Override
+					public int read() {
+						return -1;
+					}
+
+					@Override
+					public int available() throws java.io.IOException {
+						throw new java.io.IOException("probe failure");
+					}
+				}
+			)
+		);
+	}
+
+	@Test
 	void mapsUsageTimeoutConnectionAuthenticationAndProtocolFailures() throws Exception {
 		assertEquals(
 			WinRmCli.EXIT_USAGE,

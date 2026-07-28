@@ -562,6 +562,26 @@ class StreamingApiTest {
 	}
 
 	@Test
+	void aPollAnswerSlowerThanTheCadenceDoesNotFailTheStream() throws Exception {
+		enqueueCommandStartup();
+		server
+			// The answer takes clearly longer than the 1 s polling cadence — a loaded server —
+			// but stays well within the configured inactivity timeout: the poll must wait for it
+			// rather than cutting the connection at the cadence.
+			.enqueueDelayed(200, envelope(receiveResponse(stdoutChunk("late but fine\n"), done(COMMAND_ID, 6))), 2_500)
+			.enqueue(200, envelope(signalResponse()));
+
+		try (WinRMClient client = builder().build()) {
+			try (RemoteProcess process = client.command("busy.exe").charset(StandardCharsets.UTF_8).start()) {
+				assertFalse(process.poll(Duration.ofSeconds(1)), "the Done chunk itself is not completion yet");
+				assertTrue(process.poll(Duration.ofSeconds(1)), "completion must be observable");
+				assertEquals(6, process.exitCode());
+				assertEquals("late but fine", process.stdout().readLine());
+			}
+		}
+	}
+
+	@Test
 	void boundedPollsStillReachTheWireWithASubFloorInactivityTimeout() throws Exception {
 		enqueueCommandStartup();
 		server

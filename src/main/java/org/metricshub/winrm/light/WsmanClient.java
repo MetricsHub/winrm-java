@@ -588,6 +588,21 @@ final class WsmanClient implements AutoCloseable {
 		 *        timeout
 		 */
 		Chunk pollChunk(final long maxWaitMs) throws Exception {
+			return pollChunk(maxWaitMs, maxWaitMs);
+		}
+
+		/**
+		 * Cadence variant: ask the server to answer within {@code askMs} (the polling cadence),
+		 * while allowing the answer itself up to {@code maxWaitMs} to arrive — a polling consumer
+		 * (the interactive shell pump) wants short idle rounds without failing the session when a
+		 * loaded or distant server takes longer than one cadence to get its answer across. The
+		 * hard-bound variant above is simply {@code askMs == maxWaitMs}.
+		 *
+		 * @param askMs when the server should answer at the latest (its Receive hold)
+		 * @param maxWaitMs how long to block at most, capped by the handle's own per-round-trip
+		 *        timeout
+		 */
+		Chunk pollChunk(final long askMs, final long maxWaitMs) throws Exception {
 			if (finished) {
 				return null;
 			}
@@ -608,14 +623,15 @@ final class WsmanClient implements AutoCloseable {
 				Thread.sleep(budget);
 				return new Chunk(new byte[0], new byte[0]);
 			}
-			// Split the budget: the server may hold the Receive for the first part, and the rest is
-			// transit slack for its "nothing yet" op-timeout fault to arrive BEFORE the socket cuts
-			// at the full budget — the expected expiry of a bounded poll is that fault, and it must
-			// win the race or the poll would desync the connection it is supposed to leave intact.
-			// The hold never asks for less than the service's own floor: the answer would not come
-			// any earlier, and the requested timeout should reflect when the server may answer.
+			// Split the budget: the server may hold the Receive for the first part (never more
+			// than the requested cadence), and the rest is transit slack for its "nothing yet"
+			// op-timeout fault to arrive BEFORE the socket cuts at the full budget — the expected
+			// expiry of a bounded poll is that fault, and it must win the race or the poll would
+			// desync the connection it is supposed to leave intact. The hold never asks for less
+			// than the service's own floor: the answer would not come any earlier, and the
+			// requested timeout should reflect when the server may answer.
 			final long transit = Math.min(1_000, budget / 2);
-			final long hold = Math.max(MIN_OPERATION_TIMEOUT_MS, budget - transit);
+			final long hold = Math.max(MIN_OPERATION_TIMEOUT_MS, Math.min(askMs, budget - transit));
 			transport.pollTimeout(toSocketTimeoutMillis(budget));
 			try {
 				checkNotCancelled();

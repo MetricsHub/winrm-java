@@ -317,6 +317,12 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 				return adapt(callStreaming(() -> remoteCommand.pollChunk(maxWaitMillis)));
 			}
 
+			@Override
+			public Chunk poll(final long askMillis, final long maxWaitMillis)
+				throws TimeoutException, WindowsRemoteException {
+				return adapt(callStreaming(() -> remoteCommand.pollChunk(askMillis, maxWaitMillis)));
+			}
+
 			private Chunk adapt(final WsmanClient.RemoteCommand.Chunk chunk) {
 				return chunk == null ? null : new Chunk(chunk.stdout, chunk.stderr);
 			}
