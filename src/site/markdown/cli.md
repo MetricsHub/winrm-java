@@ -129,7 +129,9 @@ The remote exit code is propagated through the usual [exit-code contract](#Exit_
   and ends the CLI (terminating the remote shell with it).
 * **An idle session does not time out** — `-t`/`--timeout` bounds each protocol round trip, and
   every round trip of an idle session completes with the protocol's "nothing yet" answer. Only a
-  server that stops answering altogether trips the timeout.
+  server that stops answering altogether trips the timeout. A `--timeout` below 1000 ms is
+  rejected for `shell`: one poll round trip cannot complete faster (the WSMan service holds a
+  bounded request for at least 500 ms before answering "nothing yet").
 
 ## Timeout semantics
 

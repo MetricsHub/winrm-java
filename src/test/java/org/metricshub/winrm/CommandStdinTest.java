@@ -225,7 +225,7 @@ class CommandStdinTest {
 		enqueueShellDeletion(server);
 
 		try (WinRMClient client = builder().build()) {
-			try (RemoteProcess process = client.command("repl.exe").start()) {
+			try (RemoteProcess process = client.command("repl.exe").stdin().start()) {
 				final BufferedWriter stdin = process.stdin();
 				final BufferedReader stdout = process.stdout();
 
@@ -245,9 +245,10 @@ class CommandStdinTest {
 		assertEquals(0, chunks.get(1).data().length);
 		assertTrue(chunks.get(1).end());
 
-		// Without programmatic pre-supplied input the historical console semantics are kept.
+		// The no-argument stdin() declared interactive input: pipe semantics on the wire, so the
+		// End mark above actually delivered EOF to the command.
 		assertTrue(
-			server.decryptedRequests().get(1).contains("<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">TRUE</wsman:Option>")
+			server.decryptedRequests().get(1).contains("<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">FALSE</wsman:Option>")
 		);
 	}
 
@@ -359,6 +360,93 @@ class CommandStdinTest {
 		final List<String> requests = server.decryptedRequests();
 		assertTrue(requests.get(2).contains("signal/ctrl_c"), requests.get(2));
 		assertTrue(requests.get(4).contains("signal/terminate"), requests.get(4));
+
+		// Without any stdin declaration the historical console semantics are kept.
+		assertTrue(
+			requests.get(1).contains("<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">TRUE</wsman:Option>"),
+			requests.get(1)
+		);
+	}
+
+	@Test
+	void stdinEncodingIsStatefulAcrossFlushes() throws Exception {
+		// U+1F600 as its surrogate halves: the pair is split across two flushes below.
+		final char high = (char) 0xD83D;
+		final char low = (char) 0xDE00;
+		final String emoji = new String(new char[] { high, low });
+
+		enqueueStartup();
+		server
+			.enqueue(200, envelope(sendResponse()))
+			.enqueue(200, envelope(sendResponse()))
+			.enqueue(200, envelope(sendResponse()))
+			.enqueue(200, envelope(signalResponse()));
+		enqueueShellDeletion(server);
+
+		try (WinRMClient client = builder().build()) {
+			try (
+				RemoteProcess process = client.command("consume.exe")
+					.charset(StandardCharsets.UTF_16)
+					.stdin()
+					.start()) {
+				final BufferedWriter stdin = process.stdin();
+				// Two flushes of a charset with a byte-order mark, the second one ending on a lone
+				// high surrogate: incremental encoding must yield exactly one whole-string encode.
+				stdin.write("ab");
+				stdin.flush();
+				stdin.write("cd");
+				stdin.write(high);
+				stdin.flush();
+				stdin.write(low);
+				stdin.close();
+			}
+		}
+
+		final List<FakeWsmanServer.StdinChunk> chunks = server.stdinChunks();
+		assertEquals(3, chunks.size());
+		final ByteArrayOutputStream reassembled = new ByteArrayOutputStream();
+		for (final FakeWsmanServer.StdinChunk chunk : chunks) {
+			reassembled.writeBytes(chunk.data());
+		}
+		assertArrayEquals(("abcd" + emoji).getBytes(StandardCharsets.UTF_16), reassembled.toByteArray());
+		// The byte-order mark travels once, with the first chunk only.
+		assertArrayEquals("ab".getBytes(StandardCharsets.UTF_16), chunks.get(0).data());
+		// The half pair was withheld at its flush and completed by the final write: the second
+		// chunk carries "cd" alone, the last one the whole character.
+		assertArrayEquals("cd".getBytes(StandardCharsets.UTF_16BE), chunks.get(1).data());
+		assertArrayEquals(emoji.getBytes(StandardCharsets.UTF_16BE), chunks.get(2).data());
+		assertTrue(chunks.get(2).end());
+	}
+
+	@Test
+	void cursorRejectsInputAfterTheEndMark() throws Exception {
+		enqueueStartup();
+		server.enqueue(200, envelope(sendResponse())).enqueue(200, envelope(signalResponse()));
+		enqueueShellDeletion(server);
+
+		try (WinRMClient client = builder().build()) {
+			try (CommandCursor cursor = client.executor().startCommand("sort", null, 10_000, false)) {
+				cursor.send("all of it".getBytes(StandardCharsets.UTF_8), true);
+				final int requestsAfterEnd = server.decryptedRequests().size();
+
+				// The remote stdin reached EOF: later input is a caller bug, rejected locally.
+				assertThrows(
+					IllegalStateException.class,
+					() -> cursor.send("too late".getBytes(StandardCharsets.UTF_8), false)
+				);
+				assertEquals(requestsAfterEnd, server.decryptedRequests().size());
+			}
+		}
+	}
+
+	@Test
+	void interactiveStdinDeclarationIsRejectedByExecute() {
+		try (WinRMClient client = builder().build()) {
+			// execute() cannot take interactive input: the misconfiguration is rejected before any
+			// request leaves the client — a command waiting on a never-fed pipe would hang instead.
+			assertThrows(IllegalStateException.class, () -> client.command("sort").stdin().execute());
+		}
+		assertEquals(0, server.decryptedRequests().size());
 	}
 
 	/** Write then flush, unwrapping nothing: the assertion targets the raised exception type. */

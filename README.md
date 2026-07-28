@@ -131,7 +131,7 @@ try (RemoteProcess p = client.command("wevtutil qe System /f:text").start()) {
 CommandResult sorted = client.command("sort").stdin(Path.of("data.txt")).execute();
 
 // ...or written interactively through the process handle (flush() delivers, close() is EOF):
-try (RemoteProcess p = client.command("some-repl.exe").start()) {
+try (RemoteProcess p = client.command("some-repl.exe").stdin().start()) {
     try (BufferedWriter in = p.stdin()) {
         in.write("first request\n");
         in.flush();

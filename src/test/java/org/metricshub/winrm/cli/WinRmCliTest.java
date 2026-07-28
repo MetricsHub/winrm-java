@@ -130,6 +130,19 @@ class WinRmCliTest {
 	}
 
 	@Test
+	void shellRejectsATimeoutBelowThePollFloor() throws Exception {
+		// A --timeout below one poll round trip would make the session pump spin locally without
+		// ever fetching output: the WSMan service holds a bounded Receive for at least 500 ms.
+		final Invocation invocation = invoke(concat(REQUIRED, "-t", "500", "shell"), args -> failingRemote());
+		assertEquals(WinRmCli.EXIT_USAGE, invocation.exitCode);
+		assertTrue(invocation.stderr.contains("shell requires --timeout of at least 1000 milliseconds"));
+
+		// The same timeout stays perfectly valid for the other subcommands.
+		final FakeRemote remote = new FakeRemote();
+		assertEquals(0, invoke(concat(REQUIRED, "-t", "500", "command", "whoami"), args -> remote).exitCode);
+	}
+
+	@Test
 	void pipedLocalStandardInputIsForwardedToTheCommandButAConsoleIsNot() throws Exception {
 		final java.io.ByteArrayInputStream piped = new java.io.ByteArrayInputStream(
 			"beta\nalpha\n".getBytes(StandardCharsets.UTF_8)

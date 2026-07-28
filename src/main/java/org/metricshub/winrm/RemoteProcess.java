@@ -83,10 +83,10 @@ public final class RemoteProcess implements AutoCloseable {
 	private final CommandCursor cursor;
 	private final String hostname;
 	private final Duration timeout;
-	private final Charset charset;
 
 	private final ChunkDecoder stdoutDecoder;
 	private final ChunkDecoder stderrDecoder;
+	private final ChunkEncoder stdinEncoder;
 
 	// Decoded output that has arrived but has not been read yet, per channel.
 	private final StringBuilder stdoutPending = new StringBuilder();
@@ -118,9 +118,9 @@ public final class RemoteProcess implements AutoCloseable {
 		this.cursor = cursor;
 		this.hostname = hostname;
 		this.timeout = timeout;
-		this.charset = charset;
 		this.stdoutDecoder = new ChunkDecoder(charset);
 		this.stderrDecoder = new ChunkDecoder(charset);
+		this.stdinEncoder = new ChunkEncoder(charset);
 		this.stdout = new BufferedReader(new ChannelReader(stdoutPending));
 		this.stderr = new BufferedReader(new ChannelReader(stderrPending));
 		this.stdin = new BufferedWriter(new StdinWriter());
@@ -159,6 +159,11 @@ public final class RemoteProcess implements AutoCloseable {
 	 * <p>
 	 * When the request pre-supplied the input ({@code stdin(...)} on the builder), that input was
 	 * already delivered in full: this writer is then closed from the start.
+	 * <p>
+	 * A command that must <i>observe</i> the EOF — a filter like {@code sort} that only acts once
+	 * its input ends — needs pipe semantics: declare the interactive input with the no-argument
+	 * {@link CommandRequest#stdin()} on the builder. Without it the remote stdin keeps the
+	 * historical console semantics, where writes are delivered but the end of input is not.
 	 * <p>
 	 * Failures while sending are reported through the unchecked
 	 * {@link org.metricshub.winrm.exceptions.WinRMClientException} hierarchy; writing after the end
@@ -385,7 +390,9 @@ public final class RemoteProcess implements AutoCloseable {
 			}
 			throw new IllegalStateException("The command's standard input has already been closed.");
 		}
-		final byte[] bytes = stdinPending.toString().getBytes(charset);
+		// Stateful encoding: a charset mark is emitted once (not per flush) and a surrogate pair
+		// split across two flushes is withheld until complete, exactly as one whole-string encode.
+		final byte[] bytes = stdinEncoder.encode(stdinPending.toString(), end);
 		stdinPending.setLength(0);
 		if (finished) {
 			if (end) {

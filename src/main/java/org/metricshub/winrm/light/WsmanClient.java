@@ -545,6 +545,10 @@ final class WsmanClient implements AutoCloseable {
 		private Integer exitCode;
 		private boolean finished;
 
+		// The end-of-input Send was delivered: the remote stdin reached EOF, later sends are a
+		// caller bug and are rejected locally instead of drawing a server fault.
+		private boolean stdinEnded;
+
 		private RemoteCommand(final String commandId, final long operationTimeoutMs, final boolean failOnQuietTimeout) {
 			this.commandId = commandId;
 			this.operationTimeoutMs = operationTimeoutMs;
@@ -653,6 +657,9 @@ final class WsmanClient implements AutoCloseable {
 			if (finished || exitCode != null) {
 				throw new IllegalStateException("The command has completed: its standard input is closed.");
 			}
+			if (stdinEnded) {
+				throw new IllegalStateException("The command's standard input has already been closed.");
+			}
 			if (data.length == 0 && !end) {
 				// Nothing to say and no EOF to announce: an empty Send would be a pure round trip.
 				return;
@@ -673,6 +680,9 @@ final class WsmanClient implements AutoCloseable {
 				}
 				offset += length;
 			} while (offset < data.length);
+			if (end) {
+				stdinEnded = true;
+			}
 		}
 
 		/**

@@ -49,6 +49,13 @@ final class CliArguments implements AutoCloseable {
 
 	static final long DEFAULT_TIMEOUT = 60_000L;
 
+	/**
+	 * Smallest usable {@code --timeout} for the interactive shell: it caps each bounded poll of
+	 * the session pump, and a poll below the WSMan floor (a 500 ms server-side hold plus transit
+	 * slack) never reaches the wire — the shell would spin locally without ever fetching output.
+	 */
+	static final long MIN_SHELL_TIMEOUT = 1_000L;
+
 	private final Operation operation;
 	private final String hostname;
 	private final String username;
@@ -227,6 +234,9 @@ final class CliArguments implements AutoCloseable {
 		}
 		if (builder.permissiveHttps && !builder.https) {
 			throw new CliUsageException("--https-permissive requires --https");
+		}
+		if (builder.operation == Operation.SHELL && builder.timeout < MIN_SHELL_TIMEOUT) {
+			throw new CliUsageException("shell requires --timeout of at least " + MIN_SHELL_TIMEOUT + " milliseconds");
 		}
 	}
 

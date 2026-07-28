@@ -48,6 +48,7 @@ Everything between `command(...)` and `execute()` is optional:
 | `workingDirectory(String)` | remote default | Working directory of the remote process. The remote shell is created by the client's **first** command and reused afterward, so this only takes effect on that first command. |
 | `upload(Path...)` | none | Local files to copy to the host before running (see below). |
 | `stdin(String)` / `stdin(Path)` / `stdin(InputStream)` | none | Standard input fed to the command — the remote equivalent of a `< file` redirection (see below). |
+| `stdin()` | console semantics | Declare interactive input through `RemoteProcess.stdin()` (with `start()`): pipe semantics without pre-supplied content (see below). |
 | `onStdout(Consumer<String>)` / `onStderr(Consumer<String>)` | none | Callbacks receiving each chunk of output live while `execute()` runs (see below). |
 
 ## The result
@@ -123,10 +124,12 @@ semantics are kept.
 
 For a request started with `start()`, `RemoteProcess.stdin()` completes the `java.lang.Process`
 shape: written text is buffered locally, `flush()` carries it to the host (one WSMan `Send`),
-and `close()` marks the end of input:
+and `close()` marks the end of input. Declare the interactive input with the no-argument
+`stdin()` on the request — it switches the remote stdin to pipe semantics, so closing the writer
+actually delivers EOF:
 
 ```java
-try (RemoteProcess p = client.command("some-repl.exe").start()) {
+try (RemoteProcess p = client.command("some-repl.exe").stdin().start()) {
     try (BufferedWriter in = p.stdin()) {
         in.write("first request\n");
         in.flush();                              // delivers the buffered text
@@ -135,6 +138,12 @@ try (RemoteProcess p = client.command("some-repl.exe").start()) {
     p.waitFor();
 }
 ```
+
+Without the declaration, the remote stdin keeps the historical console semantics: writes are
+still delivered, but a filter waiting for its input to *end* (`sort`, `findstr`, `more`) never
+sees the EOF. Text is encoded statefully across flushes — a charset mark is emitted once and a
+surrogate pair split by a flush is completed by the next write, exactly as one whole-string
+encode.
 
 Writes and reads alternate on the caller's thread, exactly like `java.lang.Process` pipes —
 including the classic deadlock, which is the caller's to avoid: blocking on a read while the

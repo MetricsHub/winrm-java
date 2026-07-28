@@ -57,6 +57,7 @@ public final class CommandRequest {
 	private Consumer<String> stdoutConsumer;
 	private Consumer<String> stderrConsumer;
 	private StdinSource stdinSource;
+	private boolean pipeStdin;
 
 	/** A deferred source of pre-supplied standard input, opened when the command starts. */
 	@FunctionalInterface
@@ -173,6 +174,35 @@ public final class CommandRequest {
 	public CommandRequest stdin(final String text) {
 		Utils.checkNonNull(text, "text");
 		this.stdinSource = charset -> new ByteArrayInputStream(text.getBytes(charset));
+		this.pipeStdin = true;
+		return this;
+	}
+
+	/**
+	 * Declare that the command will be fed standard input <b>interactively</b>, through
+	 * {@link RemoteProcess#stdin()}, without pre-supplying it: the remote stdin switches to
+	 * <b>pipe semantics</b> ({@code WINRS_CONSOLEMODE_STDIN=FALSE}), so closing the writer
+	 * actually delivers EOF — a console-mode stdin never reaches EOF for tools like {@code sort}
+	 * or {@code findstr}.
+	 *
+	 * <pre>{@code
+	 * try (RemoteProcess p = client.command("sort").stdin().start()) {
+	 * 	try (BufferedWriter in = p.stdin()) {
+	 * 		in.write("beta\nalpha\n");
+	 * 	} // EOF: sort now sorts and exits
+	 * 	p.waitFor();
+	 * }
+	 * }</pre>
+	 *
+	 * Only meaningful with {@link #start()} — {@link #execute()} cannot take interactive input and
+	 * rejects a request configured this way. Without any {@code stdin} call, the historical
+	 * console semantics are kept (what a command that never reads input, and the interactive CLI
+	 * shell, want).
+	 *
+	 * @return this request
+	 */
+	public CommandRequest stdin() {
+		this.pipeStdin = true;
 		return this;
 	}
 
@@ -187,6 +217,7 @@ public final class CommandRequest {
 	public CommandRequest stdin(final Path file) {
 		Utils.checkNonNull(file, "file");
 		this.stdinSource = charset -> Files.newInputStream(file);
+		this.pipeStdin = true;
 		return this;
 	}
 
@@ -202,6 +233,7 @@ public final class CommandRequest {
 	public CommandRequest stdin(final InputStream stream) {
 		Utils.checkNonNull(stream, "stream");
 		this.stdinSource = charset -> stream;
+		this.pipeStdin = true;
 		return this;
 	}
 
@@ -256,6 +288,13 @@ public final class CommandRequest {
 	 * @throws org.metricshub.winrm.exceptions.WinRMClientException for any other failure
 	 */
 	public CommandResult execute() {
+		if (pipeStdin && stdinSource == null) {
+			// stdin() without content promises interactive input, which only start() can take: a
+			// command waiting on its never-fed pipe would hang for a whole timeout.
+			throw new IllegalStateException(
+				"stdin() without content declares interactive input: use start(), or supply the input to stdin(...)."
+			);
+		}
 		final long start = Utils.getCurrentTimeMillis();
 		final long timeoutMillis = WinRMClient.toMillis(timeout);
 		try {
@@ -333,7 +372,7 @@ public final class CommandRequest {
 			// round trip (inactivity), not the overall exchange the preparation steps count against.
 			final CommandCursor cursor = client
 				.executor()
-				.startCommand(prepared.command, prepared.workingDirectory, timeoutMillis, stdinSource == null);
+				.startCommand(prepared.command, prepared.workingDirectory, timeoutMillis, !pipeStdin);
 			if (stdinSource != null) {
 				try {
 					feedStdin(cursor, prepared.charset);
@@ -411,7 +450,7 @@ public final class CommandRequest {
 		final StringBuilder stderr = new StringBuilder();
 		try (
 			CommandCursor cursor = client.executor()
-				.startCommand(prepared.command, prepared.workingDirectory, timeoutMillis, stdinSource == null)) {
+				.startCommand(prepared.command, prepared.workingDirectory, timeoutMillis, !pipeStdin)) {
 			if (stdinSource != null) {
 				feedStdin(cursor, prepared.charset);
 			}
