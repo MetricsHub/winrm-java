@@ -603,6 +603,29 @@ class StreamingApiTest {
 	}
 
 	@Test
+	void faultAnsweringTheCompletionSignalDoesNotFailThePlainFetchEither() throws Exception {
+		enqueueCommandStartup();
+		server
+			.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 5))))
+			// Same as the bounded-poll case, but on the ordinary next() path: reading EOF from a
+			// COMPLETED command must not fail because the cleanup Signal was answered with a fault.
+			.enqueue(500, fault("999", "Signal rejected"));
+
+		try (WinRMClient client = builder().build()) {
+			try (CommandCursor cursor = client.executor().startCommand("run.exe", null, 10_000)) {
+				final CommandCursor.Chunk chunk = cursor.next();
+				assertEquals("done\n", new String(chunk.stdout(), StandardCharsets.UTF_8));
+				assertNull(cursor.next(), "completion must be reported despite the Signal fault");
+				assertEquals(5, cursor.exitCode());
+			}
+
+			// The fault was a complete, in-sync exchange: the connection remains usable.
+			server.enqueue(200, envelope(enumerationDone(service("WinRM", "Running"))));
+			assertEquals(1, client.wql("SELECT Name FROM Win32_Service").execute().size());
+		}
+	}
+
+	@Test
 	void completionInsideATinyPollSkipsTheSignal() throws Exception {
 		enqueueCommandStartup();
 		server.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 5))));

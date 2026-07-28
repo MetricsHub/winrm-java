@@ -669,7 +669,13 @@ final class WsmanClient implements AutoCloseable {
 			return exitCode;
 		}
 
-		/** Signal the command (terminate) and release the connection; runs at most once. */
+		/**
+		 * Signal the command (terminate) and release the connection; runs at most once. For a
+		 * still-running command (an early close) the Signal is what actually stops it, so its
+		 * failures are reported; once the command has COMPLETED the Signal is best-effort cleanup
+		 * (see {@link #terminateCompleted}) — a completed command with a known exit code must
+		 * never turn into a failure because its acknowledgement hiccuped.
+		 */
 		private void finish() throws Exception {
 			if (finished) {
 				return;
@@ -680,7 +686,11 @@ final class WsmanClient implements AutoCloseable {
 				// is gone, and the request would reconnect and re-authenticate just to be thrown away —
 				// the server reaps the shell (and its commands) on its own IdleTimeout instead.
 				if (!closed) {
-					terminate(commandId, operationTimeoutMs);
+					if (exitCode != null) {
+						terminateCompleted(operationTimeoutMs);
+					} else {
+						terminate(commandId, operationTimeoutMs);
+					}
 				}
 			} finally {
 				connectionPermit.release();
@@ -688,15 +698,8 @@ final class WsmanClient implements AutoCloseable {
 		}
 
 		/**
-		 * Completion cleanup under a poll budget: the Signal acknowledging the ALREADY-COMPLETED
-		 * command must not outlive the caller's remaining wait — and no failure of it may be
-		 * reported either: the command completed and its exit code is known, and that must never
-		 * be hidden behind a cleanup hiccup. A fault answering the Signal is a complete, in-sync
-		 * exchange and is simply ignored; any other failure (a timeout, a reset, a half-read
-		 * response) leaves the connection in an unknown state, so it is dropped — a late response
-		 * must not desync a later request. A budget too small for any round trip skips the Signal
-		 * outright, leaving the healthy connection untouched; the server reaps the completed
-		 * command's state with the shell. Runs at most once.
+		 * Completion cleanup under a poll budget: like {@link #finish()} after completion, but the
+		 * Signal must not outlive the caller's remaining wait either. Runs at most once.
 		 */
 		private void finishBounded(final long budgetMs) {
 			if (finished) {
@@ -704,22 +707,39 @@ final class WsmanClient implements AutoCloseable {
 			}
 			finished = true;
 			try {
-				final long budget = Math.max(1, Math.min(budgetMs, operationTimeoutMs));
-				if (!closed && budget >= MIN_WIRE_POLL_MS) {
-					transport.pollTimeout(toSocketTimeoutMillis(budget));
-					try {
-						terminate(commandId, budget);
-					} catch (final WinRMFaultException ignored) {
-						// The Signal was answered with a fault: the exchange completed, the connection
-						// is in sync — and the command's completion is what matters.
-					} catch (final Exception e) {
-						transport.close();
-					} finally {
-						transport.inactivityTimeout(toSocketTimeoutMillis(operationTimeoutMs));
-					}
+				if (!closed) {
+					terminateCompleted(budgetMs);
 				}
 			} finally {
 				connectionPermit.release();
+			}
+		}
+
+		/**
+		 * Best-effort Signal for an ALREADY-COMPLETED command, bounded by the given budget. No
+		 * failure of it may be reported: the command completed and its exit code is known, and
+		 * that must never be hidden behind a cleanup hiccup. A fault answering the Signal is a
+		 * complete, in-sync exchange and is simply ignored; any other failure (a timeout, a reset,
+		 * a half-read response) leaves the connection in an unknown state, so it is dropped — a
+		 * late response must not desync a later request. A budget too small for any round trip
+		 * skips the Signal outright, leaving the healthy connection untouched; the server reaps
+		 * the completed command's state with the shell.
+		 */
+		private void terminateCompleted(final long budgetMs) {
+			final long budget = Math.max(1, Math.min(budgetMs, operationTimeoutMs));
+			if (budget < MIN_WIRE_POLL_MS) {
+				return;
+			}
+			transport.pollTimeout(toSocketTimeoutMillis(budget));
+			try {
+				terminate(commandId, budget);
+			} catch (final WinRMFaultException ignored) {
+				// The Signal was answered with a fault: the exchange completed, the connection is in
+				// sync — and the command's completion is what matters.
+			} catch (final Exception e) {
+				transport.close();
+			} finally {
+				transport.inactivityTimeout(toSocketTimeoutMillis(operationTimeoutMs));
 			}
 		}
 

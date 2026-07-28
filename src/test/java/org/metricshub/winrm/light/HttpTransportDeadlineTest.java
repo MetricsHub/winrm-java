@@ -77,31 +77,7 @@ class HttpTransportDeadlineTest {
 	@Test
 	void aTricklingPeerCannotStretchABoundedPollPastItsDeadline() throws Exception {
 		try (ServerSocket server = new ServerSocket(0)) {
-			final Thread handler = new Thread(
-				() -> {
-					// One connection: read the request head, then trickle the response one byte
-					// every 300 ms. SO_TIMEOUT applies per read, so without the deadline every byte
-					// would reset the clock and the ~40-byte response would take ~12 s.
-					try (Socket socket = server.accept()) {
-						final InputStream in = new BufferedInputStream(socket.getInputStream());
-						final OutputStream out = socket.getOutputStream();
-						if (readRequestHead(in)) {
-							for (final byte b : "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".getBytes(
-								StandardCharsets.ISO_8859_1
-							)) {
-								Thread.sleep(300);
-								out.write(b);
-								out.flush();
-							}
-						}
-					} catch (final IOException | InterruptedException ignored) {
-						// client timed out or test over
-					}
-				},
-				"trickle-http-server"
-			);
-			handler.setDaemon(true);
-			handler.start();
+			startTricklingServer(server);
 
 			final HttpTransport transport = new HttpTransport("127.0.0.1", server.getLocalPort(), 60_000);
 			try {
@@ -117,6 +93,59 @@ class HttpTransportDeadlineTest {
 				transport.close();
 			}
 		}
+	}
+
+	@Test
+	void aTricklingPeerCannotStretchAStreamingRoundTrip() throws Exception {
+		try (ServerSocket server = new ServerSocket(0)) {
+			startTricklingServer(server);
+
+			final HttpTransport transport = new HttpTransport("127.0.0.1", server.getLocalPort(), 60_000);
+			try {
+				// Streaming (inactivity) mode: one WHOLE response must arrive within the timeout —
+				// a peer trickling one byte per 300 ms must not restart the clock with every byte.
+				transport.inactivityTimeout(2_000);
+				final long start = System.nanoTime();
+				assertThrows(SocketTimeoutException.class, () -> transport.post("/wsman", new byte[0], null, null));
+				final long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+				assertTrue(
+					elapsedMillis < 3_000,
+					"the whole response must be bounded by the inactivity timeout; took " + elapsedMillis + " ms"
+				);
+			} finally {
+				transport.close();
+			}
+		}
+	}
+
+	/**
+	 * One connection: read the request head, then trickle the response one byte every 300 ms.
+	 * {@code SO_TIMEOUT} applies per read, so without an absolute bound every byte would reset the
+	 * clock and the ~40-byte response would take ~12 s.
+	 */
+	private static void startTricklingServer(final ServerSocket server) {
+		final Thread handler = new Thread(
+			() -> {
+				try (Socket socket = server.accept()) {
+					final InputStream in = new BufferedInputStream(socket.getInputStream());
+					final OutputStream out = socket.getOutputStream();
+					if (readRequestHead(in)) {
+						for (final byte b : "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".getBytes(
+							StandardCharsets.ISO_8859_1
+						)) {
+							Thread.sleep(300);
+							out.write(b);
+							out.flush();
+						}
+					}
+				} catch (final IOException | InterruptedException ignored) {
+					// client timed out or test over
+				}
+			},
+			"trickle-http-server"
+		);
+		handler.setDaemon(true);
+		handler.start();
 	}
 
 	/** Serve every request of every connection with a minimal 200 response, 600 ms late. */

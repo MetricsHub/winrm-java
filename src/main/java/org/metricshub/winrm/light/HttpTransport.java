@@ -69,6 +69,12 @@ final class HttpTransport implements AutoCloseable {
 	// active — see pollTimeout(int). Cleared by the other timeout modes.
 	private long deadlineEpochMillis;
 
+	// Streaming (inactivity) mode: every request leg (re)arms the absolute deadline for itself, so
+	// one WHOLE response — not each of its reads — is bounded by the inactivity timeout. SO_TIMEOUT
+	// alone restarts on every byte, and a peer trickling an endless incomplete response would
+	// otherwise hold a streaming fetch forever.
+	private boolean deadlinePerLeg;
+
 	HttpTransport(final String host, final int port, final int timeoutMillis) {
 		this(host, port, timeoutMillis, null, false);
 	}
@@ -101,7 +107,7 @@ final class HttpTransport implements AutoCloseable {
 	 * @param operationTimeoutMillis the current operation's timeout in milliseconds
 	 */
 	void operationTimeout(final int operationTimeoutMillis) {
-		applyTimeouts(operationTimeoutMillis, operationTimeoutMillis + 10_000, 0);
+		applyTimeouts(operationTimeoutMillis, operationTimeoutMillis + 10_000, 0, false);
 	}
 
 	/**
@@ -119,7 +125,7 @@ final class HttpTransport implements AutoCloseable {
 	 * @param budgetMillis the poll's whole budget in milliseconds
 	 */
 	void pollTimeout(final int budgetMillis) {
-		applyTimeouts(budgetMillis, budgetMillis, Utils.getCurrentTimeMillis() + budgetMillis);
+		applyTimeouts(budgetMillis, budgetMillis, Utils.getCurrentTimeMillis() + budgetMillis, false);
 	}
 
 	/**
@@ -129,15 +135,20 @@ final class HttpTransport implements AutoCloseable {
 	 * long" — so the socket must give up at the inactivity bound itself, not ten seconds later.
 	 * A server that enforces the WSMan OperationTimeout by answering with the op-timeout fault
 	 * reaches the caller through that fault instead; both surface as the same timeout.
+	 * <p>
+	 * The bound is absolute per request leg (armed at the start of each {@link #post}): one whole
+	 * response must arrive within the inactivity timeout — a peer trickling bytes must not restart
+	 * the clock with every byte and hold a streaming fetch forever.
 	 *
 	 * @param inactivityTimeoutMillis the longest tolerated silence in milliseconds
 	 */
 	void inactivityTimeout(final int inactivityTimeoutMillis) {
-		applyTimeouts(inactivityTimeoutMillis, inactivityTimeoutMillis, 0);
+		applyTimeouts(inactivityTimeoutMillis, inactivityTimeoutMillis, 0, true);
 	}
 
-	private void applyTimeouts(final int connectMillis, final int readMillis, final long deadline) {
+	private void applyTimeouts(final int connectMillis, final int readMillis, final long deadline, final boolean perLeg) {
 		deadlineEpochMillis = deadline;
+		deadlinePerLeg = perLeg;
 		connectTimeoutMillis = connectMillis;
 		readTimeoutMillis = readMillis;
 		if (socket != null && !socket.isClosed()) {
@@ -310,6 +321,11 @@ final class HttpTransport implements AutoCloseable {
 
 	Response post(final String path, final byte[] body, final String contentType, final String authorization)
 		throws IOException {
+		if (deadlinePerLeg) {
+			// Streaming mode: this whole leg — a reconnect included — must complete within the
+			// inactivity timeout, however many reads it takes (see inactivityTimeout(int)).
+			deadlineEpochMillis = Utils.getCurrentTimeMillis() + readTimeoutMillis;
+		}
 		ensureConnected();
 		try {
 			if (deadlineEpochMillis != 0) {
