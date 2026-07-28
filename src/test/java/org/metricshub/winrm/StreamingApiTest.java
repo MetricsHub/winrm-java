@@ -562,6 +562,26 @@ class StreamingApiTest {
 	}
 
 	@Test
+	void boundedPollsStillReachTheWireWithASubFloorInactivityTimeout() throws Exception {
+		enqueueCommandStartup();
+		server
+			.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 4))))
+			.enqueue(200, envelope(signalResponse()));
+
+		// The process's inactivity timeout (500 ms) sits below the wire-poll minimum: the poll cap
+		// must not push a caller's comfortable wait under the protocol floor, or no poll would ever
+		// reach the wire and completion could never be observed.
+		try (WinRMClient client = builder().timeout(Duration.ofMillis(500)).build()) {
+			try (RemoteProcess process = client.command("run.exe").charset(StandardCharsets.UTF_8).start()) {
+				assertFalse(process.poll(Duration.ofSeconds(5)), "the Done chunk itself is not completion yet");
+				assertTrue(process.poll(Duration.ofSeconds(5)), "completion must be observable");
+				assertEquals(4, process.exitCode());
+				assertEquals("done", process.stdout().readLine());
+			}
+		}
+	}
+
+	@Test
 	void completionArrivingNearTheDeadlineIsStillReported() throws Exception {
 		enqueueCommandStartup();
 		// The final Done-carrying response lands close to the wait's deadline: too little budget is
@@ -716,6 +736,36 @@ class StreamingApiTest {
 		final WindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor();
 		assertThrows(UnsupportedOperationException.class, () -> executor.streamWql("ROOT\\CIMV2", "SELECT 1", 1000, 10, 0));
 		assertThrows(UnsupportedOperationException.class, () -> executor.startCommand("dir", null, 1000));
+		assertThrows(UnsupportedOperationException.class, () -> executor.startCommand("dir", null, 1000, true));
+	}
+
+	@Test
+	void executorsOverridingTheHistoricalStartCommandKeepWorkingThroughTheNewOverload() throws Exception {
+		// A pre-existing executor overrides only the three-argument startCommand: the new
+		// console-mode default must delegate to it, and only pipe mode may be unsupported.
+		final CommandCursor canned = new CommandCursor() {
+			@Override
+			public Chunk next() {
+				return null;
+			}
+
+			@Override
+			public int exitCode() {
+				return 0;
+			}
+
+			@Override
+			public void close() {}
+		};
+		final WindowsRemoteExecutor legacy = new ScriptedWindowsRemoteExecutor() {
+			@Override
+			public CommandCursor startCommand(final String command, final String workingDirectory, final long timeout) {
+				return canned;
+			}
+		};
+
+		assertEquals(canned, legacy.startCommand("dir", null, 1000, true));
+		assertThrows(UnsupportedOperationException.class, () -> legacy.startCommand("dir", null, 1000, false));
 	}
 
 	private static byte[] concat(final byte[] a, final byte[] b) {

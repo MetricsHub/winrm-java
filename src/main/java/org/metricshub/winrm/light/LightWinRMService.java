@@ -285,6 +285,12 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	}
 
 	@Override
+	public CommandCursor startCommand(final String command, final String workingDirectory, final long timeout)
+		throws TimeoutException, WindowsRemoteException {
+		return startCommand(command, workingDirectory, timeout, true);
+	}
+
+	@Override
 	public CommandCursor startCommand(
 		final String command,
 		final String workingDirectory,

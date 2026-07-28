@@ -151,7 +151,7 @@ public interface WindowsRemoteExecutor extends AutoCloseable {
 	 */
 	default CommandCursor startCommand(final String command, final String workingDirectory, final long timeout)
 		throws TimeoutException, WindowsRemoteException {
-		return startCommand(command, workingDirectory, timeout, true);
+		throw new UnsupportedOperationException(getClass().getName() + " does not support streaming command execution.");
 	}
 
 	/**
@@ -163,8 +163,11 @@ public interface WindowsRemoteExecutor extends AutoCloseable {
 	 * console-mode stdin never reaches EOF for tools like {@code sort} or {@code more}.
 	 * </p>
 	 * <p>
-	 * The default implementation throws {@link UnsupportedOperationException}: only executors that
-	 * support streaming (such as the built-in lightweight backend) implement this method.
+	 * The default implementation delegates console-mode requests to
+	 * {@link #startCommand(String, String, long)} — an executor that overrides only the historical
+	 * three-argument variant keeps working for ordinary commands — and throws
+	 * {@link UnsupportedOperationException} for pipe mode: only executors that support command
+	 * input (such as the built-in lightweight backend) implement it.
 	 * </p>
 	 *
 	 * @param command The command to execute
@@ -185,7 +188,10 @@ public interface WindowsRemoteExecutor extends AutoCloseable {
 		final long timeout,
 		final boolean consoleModeStdin
 	) throws TimeoutException, WindowsRemoteException {
-		throw new UnsupportedOperationException(getClass().getName() + " does not support streaming command execution.");
+		if (consoleModeStdin) {
+			return startCommand(command, workingDirectory, timeout);
+		}
+		throw new UnsupportedOperationException(getClass().getName() + " does not support pipe-mode standard input.");
 	}
 
 	/**

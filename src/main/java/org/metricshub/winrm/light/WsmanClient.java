@@ -597,10 +597,14 @@ final class WsmanClient implements AutoCloseable {
 				finishBounded(maxWaitMs);
 				return null;
 			}
-			final long budget = Math.max(1, Math.min(maxWaitMs, operationTimeoutMs));
+			// The per-round-trip timeout caps the poll — but never below the wire minimum: an
+			// inactivity timeout under the protocol floor would otherwise turn EVERY poll into a
+			// local sleep, and a poller could never observe the command's completion.
+			final long budget = Math.max(1, Math.min(maxWaitMs, Math.max(operationTimeoutMs, MIN_WIRE_POLL_MS)));
 			if (budget < MIN_WIRE_POLL_MS) {
-				// No answer could come back in time: waiting the budget out locally is the only way
-				// to honor it. The protocol advances on the next full-size fetch or poll.
+				// The CALLER asked for less than any network round trip can honor: waiting the
+				// budget out locally is the only way. The protocol advances on the next fetch or
+				// full-size poll.
 				Thread.sleep(budget);
 				return new Chunk(new byte[0], new byte[0]);
 			}
@@ -807,7 +811,9 @@ final class WsmanClient implements AutoCloseable {
 		 * the completed command's state with the shell.
 		 */
 		private void terminateCompleted(final long budgetMs) {
-			final long budget = Math.max(1, Math.min(budgetMs, operationTimeoutMs));
+			// Same clamp as the bounded poll: an inactivity timeout under the wire minimum must not
+			// starve the best-effort Signal that a caller's comfortable budget could well afford.
+			final long budget = Math.max(1, Math.min(budgetMs, Math.max(operationTimeoutMs, MIN_WIRE_POLL_MS)));
 			if (budget < MIN_WIRE_POLL_MS) {
 				return;
 			}
