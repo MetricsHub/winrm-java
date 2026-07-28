@@ -69,9 +69,39 @@ Connection-scoped options on the builder: `https()`, `port(int)`,
 
 Per-operation options: `namespace(...)`, `timeout(...)`, and for WQL enumeration tuning
 `pageSize(int)` (WS-Enumeration `MaxElements`, 32000 by default) and `pullTimeout(Duration)`
-(`MaxTime` per Pull). Commands accept `workingDirectory(String)`, `charset(Charset)` (detected
-from the remote code set by default), and `upload(Path...)` to copy local script files and rewrite
-the command to reference the remote copies.
+(`MaxTime` per Pull). Commands accept `workingDirectory(String)`, `charset(Charset)` (see
+[Character encoding](#character-encoding)), and `upload(Path...)` to copy local script files and
+rewrite the command to reference the remote copies.
+
+### Character encoding
+
+The remote command shell is created with console code page **65001**, so command output is decoded
+as **UTF-8** — whatever the remote machine's locale. Accented and non-Latin characters come back
+exactly as the remote host wrote them, and nothing needs to be detected or configured:
+
+```java
+// On a French Windows host:
+client.command("vol").execute().stdout();   // " Le numéro de série du volume est …"
+```
+
+A few legacy console tools — `net.exe` and `chcp.com` are the known ones — ignore the console code
+page and write text pre-converted to the machine's **OEM** code page. Their accented characters
+cannot be decoded as UTF-8 (they arrive as `U+FFFD`); decode such a command with the matching OEM
+charset instead:
+
+```java
+client.command("net user Administrateur")
+    .charset(Charset.forName("IBM850"))     // French/Western European OEM code page
+    .execute();
+```
+
+WQL results are unaffected: they travel as UTF-8 inside the SOAP envelope.
+
+> **Changed in 2.0.00** — earlier versions ran a `SELECT CodeSet FROM Win32_OperatingSystem` query
+> before each command and decoded the output with the code page it reported. That is the remote
+> machine's *ANSI* code page, which never matched what the shell emitted, so all non-ASCII output
+> was mangled on non-English hosts. `WindowsRemoteProcessUtils.getWindowsEncodingCharset()` is
+> deprecated as a result, and the extra query is gone.
 
 ### Streaming
 

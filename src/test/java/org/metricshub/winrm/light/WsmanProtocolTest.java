@@ -253,7 +253,9 @@ class WsmanProtocolTest {
 		assertTrue(requests.size() >= 5, () -> String.join("\n---\n", requests));
 		final String create = requests.get(0);
 		assertTrue(create.contains("<wsman:Option Name=\"WINRS_NOPROFILE\">TRUE</wsman:Option>"), create);
-		assertTrue(create.contains("<wsman:Option Name=\"WINRS_CODEPAGE\">437</wsman:Option>"), create);
+		// UTF-8: the only console code page that can carry every remote locale's output, and the one
+		// the decoding side assumes without asking the remote host (see #142).
+		assertTrue(create.contains("<wsman:Option Name=\"WINRS_CODEPAGE\">65001</wsman:Option>"), create);
 		assertTrue(create.contains("<rsp:OutputStreams>stdout stderr</rsp:OutputStreams>"), create);
 		final String command = requests.get(1);
 		assertTrue(command.contains("echo héllo!"), command);

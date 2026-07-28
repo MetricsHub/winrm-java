@@ -43,8 +43,8 @@ Everything between `command(...)` and `execute()` is optional:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `timeout(Duration)` | the client's timeout | Wall-clock deadline covering file uploads, encoding detection, and the command itself with `execute()`; inactivity timeout with `start()`. |
-| `charset(Charset)` | detected from the remote code set | The charset used to decode the command output (see below). |
+| `timeout(Duration)` | the client's timeout | Wall-clock deadline covering file uploads and the command itself with `execute()`; inactivity timeout with `start()`. |
+| `charset(Charset)` | `UTF-8` | The charset used to decode the command output (see below). |
 | `workingDirectory(String)` | remote default | Working directory of the remote process. The remote shell is created by the client's **first** command and reused afterward, so this only takes effect on that first command. |
 | `upload(Path...)` | none | Local files to copy to the host before running (see below). |
 | `onStdout(Consumer<String>)` / `onStderr(Consumer<String>)` | none | Callbacks receiving each chunk of output live while `execute()` runs (see below). |
@@ -110,12 +110,36 @@ Each callback receives the output chunk by chunk as the server delivers it (not 
 lines), on an internal worker thread, never concurrently. The wall-clock timeout of `execute()`
 applies unchanged.
 
-## Character set
+## Character encoding
 
-By default the output character set does not need to be specified: the client detects the remote
-host's active code page (one WQL query, always in `ROOT\CIMV2`) before the first command runs, and
-**caches the result for the lifetime of the client** — later commands pay nothing. Set an explicit
-`charset(...)` to skip the detection entirely.
+The output character set never needs to be specified. The remote command shell is created with
+console code page **65001**, so its output is UTF-8 whatever the remote machine's locale, and it is
+decoded as such — no detection query, no per-host configuration:
+
+```java
+// On a French Windows host:
+client.command("vol").execute().stdout();   // " Le numéro de série du volume est …"
+```
+
+A handful of legacy console tools — `net.exe` and `chcp.com` are the known ones — ignore the
+console code page and write their text pre-converted to the machine's **OEM** code page. Their
+accented characters are not valid UTF-8 and arrive as `U+FFFD`; decode those commands with the
+matching OEM charset instead:
+
+```java
+client.command("net user Administrateur")
+    .charset(Charset.forName("IBM850"))     // French/Western European OEM code page
+    .execute();
+```
+
+`charset(...)` is also what you want for a command that repoints the console itself (a leading
+`chcp`) or writes raw bytes in a known encoding to its standard output. WQL results are unaffected
+by all of this: they travel as UTF-8 inside the SOAP envelope.
+
+> **Changed in 2.0.00** — earlier versions ran a `SELECT CodeSet FROM Win32_OperatingSystem` query
+> before the first command and decoded the output with the code page it reported. That property is
+> the remote machine's *ANSI* code page, which never matched what the shell emitted, so non-ASCII
+> command output was mangled on every non-English host.
 
 ## Copying local files to the host
 
