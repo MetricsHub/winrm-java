@@ -360,13 +360,19 @@ class InteractiveShellTest {
 		}
 
 		assertEquals(0, exitCode);
-		// Two bounded batches instead of one unbounded drain: the output side polled in between.
+		// Two bounded batches instead of one unbounded drain: the oversized record was SPLIT at
+		// the round budget — the output side polled in between — and nothing was lost or
+		// reordered.
 		final List<FakeWsmanServer.StdinChunk> chunks = server.stdinChunks();
 		assertEquals(2, chunks.size());
-		assertArrayEquals((hugeLine + "\r\n").getBytes(StandardCharsets.UTF_8), chunks.get(0).data());
+		assertEquals(InteractiveShell.MAX_INPUT_CHARS_PER_ROUND, chunks.get(0).data().length);
 		assertFalse(chunks.get(0).end());
-		assertArrayEquals("exit\r\n".getBytes(StandardCharsets.UTF_8), chunks.get(1).data());
 		assertTrue(chunks.get(1).end());
+		final ByteArrayOutputStream reassembled = new ByteArrayOutputStream();
+		for (final FakeWsmanServer.StdinChunk chunk : chunks) {
+			reassembled.writeBytes(chunk.data());
+		}
+		assertArrayEquals((hugeLine + "\r\nexit\r\n").getBytes(StandardCharsets.UTF_8), reassembled.toByteArray());
 	}
 
 	@Test

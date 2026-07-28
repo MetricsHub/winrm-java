@@ -41,6 +41,7 @@ takes no argument.
 | `-pf, --password-file <file>` | Read the password from a UTF-8 file (preferred for automation, see below). |
 | `-P, --port <port>` | Target port. Default: 5985 for HTTP, 5986 for HTTPS. |
 | `-t, --timeout <ms>` | Operation timeout in milliseconds. Default: 60000. See [Timeout semantics](#Timeout_semantics). |
+| `-i, --stdin` | Forward the local standard input to the remote command (only with `command`); see below. |
 | `--https` | Connect over HTTPS. |
 | `--https-permissive` | Trust any HTTPS certificate and hostname. Intentionally insecure: testing and isolated hosts only. Requires `--https`. |
 | `--ntlm` | Authenticate with NTLM (the default). |
@@ -103,12 +104,14 @@ standard input, with pipe semantics, so filters just work:
 java -jar winrm-java-standalone.jar -h server -u 'DOMAIN\user' -pf pw.txt command sort < data.txt
 ```
 
-Forwarding engages when input is already waiting on a non-console standard input at startup —
-which a `< file` redirection or a normal pipe always satisfies. An interactive terminal is never
-consumed, even when only the *output* is redirected (`... command hostname > result.txt`). The
-input is delivered in full before the output is read: piping a large input into a command that
-floods its output at the same time can deadlock both sides (the classic pipe deadlock), exactly
-as with `java.lang.Process`.
+Forwarding engages automatically when the standard input is detectably redirected: it is a
+seekable file (any `< file` redirection, including an empty file or the null device), or bytes
+are already waiting on it at startup (a normal pipe). An interactive terminal is never consumed,
+even when only the *output* is redirected (`... command hostname > result.txt`). The one
+undetectable case is a pipe whose producer has written nothing by the time the CLI starts: pass
+`-i`/`--stdin` to force forwarding there. The input is delivered in full before the output is
+read: piping a large input into a command that floods its output at the same time can deadlock
+both sides (the classic pipe deadlock), exactly as with `java.lang.Process`.
 
 ## Interactive shell
 

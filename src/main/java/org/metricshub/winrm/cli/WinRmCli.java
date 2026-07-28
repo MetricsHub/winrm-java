@@ -21,6 +21,8 @@ package org.metricshub.winrm.cli;
  */
 
 import java.io.Console;
+import java.io.FileDescriptor;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
@@ -98,27 +100,46 @@ public final class WinRmCli {
 				System.err,
 				WinRmCli::connect,
 				WinRmCli::readConsolePassword,
-				new LocalInput(!stdinLooksRedirected(System.console() != null, System.in), System.in)
+				new LocalInput(!detectRedirectedStdin(), System.in)
 			)
 		);
 	}
 
 	/**
-	 * Whether the local standard input looks piped or redirected — the signal engaging stdin
-	 * forwarding for the {@code command} subcommand. {@code System.console()} alone is not it: it
-	 * is also null when only the <i>output</i> is redirected ({@code ... > result.txt}), and
-	 * consuming an interactive terminal in that case would hang the CLI waiting for an EOF the
-	 * user never sends. So the input itself is probed: bytes already waiting at startup can only
-	 * come from a redirected file or a pipe — an untouched terminal reports nothing available.
-	 * The trade-off is a pipe whose producer has not written anything yet: its input is not
-	 * forwarded (the JVM startup normally leaves any real producer plenty of time to get ahead).
+	 * Whether the local standard input looks piped or redirected — the signal engaging automatic
+	 * stdin forwarding for the {@code command} subcommand. {@code System.console()} alone is not
+	 * it: it is also null when only the <i>output</i> is redirected ({@code ... > result.txt}),
+	 * and consuming an interactive terminal in that case would hang the CLI waiting for an EOF
+	 * the user never sends. So the input itself is probed: a seekable descriptor is a redirected
+	 * file (terminals and pipes are not seekable — this catches empty files and the null device
+	 * too), and bytes already waiting can only come from a pipe or a redirection. The undetectable
+	 * remainder — a pipe whose producer has not written anything by the time the CLI starts — is
+	 * what the explicit {@code --stdin} option is for.
 	 */
-	static boolean stdinLooksRedirected(final boolean consoleAttached, final InputStream stdin) {
-		if (consoleAttached) {
+	private static boolean detectRedirectedStdin() {
+		if (System.console() != null) {
 			return false;
 		}
+		return stdinIsSeekable() || stdinHasAvailableInput(System.in);
+	}
+
+	/** Bytes already waiting on the given (non-console) input: a pipe or a redirection. */
+	static boolean stdinHasAvailableInput(final InputStream stdin) {
 		try {
 			return stdin.available() > 0;
+		} catch (final IOException e) {
+			return false;
+		}
+	}
+
+	/** Whether descriptor 0 is seekable — a redirected file or the null device. */
+	private static boolean stdinIsSeekable() {
+		// Deliberately never closed: closing a stream created on FileDescriptor.in closes the
+		// process's standard input itself.
+		final FileInputStream probe = new FileInputStream(FileDescriptor.in);
+		try {
+			probe.getChannel().position();
+			return true;
 		} catch (final IOException e) {
 			return false;
 		}
@@ -229,11 +250,12 @@ public final class WinRmCli {
 					return interactiveShell(arguments, standardOutput, standardError, remote, localInput);
 				}
 				// Forward each output chunk as it arrives, so a long-running command can be followed live.
-				// Piped/redirected local standard input travels the other way, as the command's stdin.
+				// Piped/redirected local standard input travels the other way, as the command's stdin —
+				// automatically when detected, unconditionally with --stdin.
 				final int exitCode = remote.executeCommand(
 					arguments.input(),
 					arguments.timeout(),
-					localInput.terminal ? null : localInput.stream,
+					arguments.forwardStdin() || !localInput.terminal ? localInput.stream : null,
 					chunk -> {
 						standardOutput.print(chunk);
 						standardOutput.flush();
@@ -460,6 +482,7 @@ public final class WinRmCli {
 			"  -pf, --password-file <file> Read a UTF-8 password from a file (preferred for automation)\n" +
 			"  -P, --port <port>           Target port (default: HTTP 5985, HTTPS 5986)\n" +
 			"  -t, --timeout <ms>          Operation timeout in milliseconds (default: 60000)\n" +
+			"  -i, --stdin                 Forward the local standard input to the remote command\n" +
 			"      --https                 Use HTTPS\n" +
 			"      --https-permissive      Trust any HTTPS certificate and hostname (insecure)\n" +
 			"      --ntlm                  Use NTLM authentication (default)\n" +

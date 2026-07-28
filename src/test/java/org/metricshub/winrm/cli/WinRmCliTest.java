@@ -169,20 +169,16 @@ class WinRmCliTest {
 
 	@Test
 	void detectsRedirectedStdinByProbingTheInputItself() {
-		// An attached console is definitely interactive, whatever the input holds.
-		assertFalse(WinRmCli.stdinLooksRedirected(true, new java.io.ByteArrayInputStream(new byte[] { 1 })));
+		// Bytes already waiting on a non-console stdin: a pipe or a redirected file.
+		assertTrue(WinRmCli.stdinHasAvailableInput(new java.io.ByteArrayInputStream(new byte[] { 1 })));
 
-		// No console + bytes already waiting: a pipe or a redirected file.
-		assertTrue(WinRmCli.stdinLooksRedirected(false, new java.io.ByteArrayInputStream(new byte[] { 1 })));
-
-		// No console but nothing waiting: typically an interactive terminal whose OUTPUT is
-		// redirected (System.console() is null then too) — consuming it would hang the CLI.
-		assertFalse(WinRmCli.stdinLooksRedirected(false, new java.io.ByteArrayInputStream(new byte[0])));
+		// Nothing waiting: typically an interactive terminal whose OUTPUT is redirected
+		// (System.console() is null then too) — consuming it would hang the CLI.
+		assertFalse(WinRmCli.stdinHasAvailableInput(new java.io.ByteArrayInputStream(new byte[0])));
 
 		// A probe failure counts as not redirected: never risk blocking on a terminal.
 		assertFalse(
-			WinRmCli.stdinLooksRedirected(
-				false,
+			WinRmCli.stdinHasAvailableInput(
 				new java.io.InputStream() {
 					@Override
 					public int read() {
@@ -196,6 +192,26 @@ class WinRmCliTest {
 				}
 			)
 		);
+	}
+
+	@Test
+	void explicitStdinOptionForcesForwardingAndRequiresTheCommandSubcommand() throws Exception {
+		// --stdin forwards even when the local input looks interactive (the undetectable cases:
+		// an empty redirection, a pipe whose producer starts slowly).
+		final java.io.ByteArrayInputStream local = new java.io.ByteArrayInputStream(new byte[0]);
+		final FakeRemote remote = new FakeRemote();
+		final Invocation invocation = invoke(
+			concat(REQUIRED, "--stdin", "command", "sort"),
+			args -> remote,
+			new WinRmCli.LocalInput(true, local)
+		);
+		assertEquals(0, invocation.exitCode);
+		assertEquals(local, remote.forwardedStdin);
+
+		// The option is meaningless outside the command subcommand.
+		final Invocation rejected = invoke(concat(REQUIRED, "--stdin", "wql", "SELECT 1"), args -> failingRemote());
+		assertEquals(WinRmCli.EXIT_USAGE, rejected.exitCode);
+		assertTrue(rejected.stderr.contains("--stdin requires the command subcommand"));
 	}
 
 	@Test

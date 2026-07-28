@@ -68,6 +68,7 @@ final class CliArguments implements AutoCloseable {
 	private final String kerberosKdc;
 	private final String kerberosRealm;
 	private final boolean kerberosRealmInferred;
+	private final boolean forwardStdin;
 	private final String input;
 
 	private CliArguments(final Builder builder) {
@@ -83,6 +84,7 @@ final class CliArguments implements AutoCloseable {
 		kerberosKdc = builder.kerberosKdc;
 		kerberosRealm = builder.kerberosRealm;
 		kerberosRealmInferred = builder.kerberosRealmInferred;
+		forwardStdin = builder.forwardStdin;
 		input = builder.input;
 	}
 
@@ -170,6 +172,10 @@ final class CliArguments implements AutoCloseable {
 		case "--https-permissive":
 			builder.permissiveHttps = true;
 			return index + 1;
+		case "--stdin":
+		case "-i":
+			builder.forwardStdin = true;
+			return index + 1;
 		default:
 			throw new CliUsageException("unknown option " + safeOptionName(argument));
 		}
@@ -234,6 +240,9 @@ final class CliArguments implements AutoCloseable {
 		}
 		if (builder.permissiveHttps && !builder.https) {
 			throw new CliUsageException("--https-permissive requires --https");
+		}
+		if (builder.forwardStdin && builder.operation != Operation.COMMAND) {
+			throw new CliUsageException("--stdin requires the command subcommand");
 		}
 		if (builder.operation == Operation.SHELL && builder.timeout < MIN_SHELL_TIMEOUT) {
 			throw new CliUsageException("shell requires --timeout of at least " + MIN_SHELL_TIMEOUT + " milliseconds");
@@ -467,6 +476,10 @@ final class CliArguments implements AutoCloseable {
 		return kerberosRealmInferred;
 	}
 
+	boolean forwardStdin() {
+		return forwardStdin;
+	}
+
 	String input() {
 		return input;
 	}
@@ -493,6 +506,7 @@ final class CliArguments implements AutoCloseable {
 		private String kerberosKdc;
 		private String kerberosRealm;
 		private boolean kerberosRealmInferred;
+		private boolean forwardStdin;
 		private Integer port;
 		private long timeout = DEFAULT_TIMEOUT;
 		private String input;

@@ -149,6 +149,9 @@ final class InteractiveShell {
 		final AtomicBoolean interruptRequested,
 		final long pollMillis
 	) throws IOException {
+		// The tail of a record the current round could not fit entirely (an oversized line):
+		// forwarded first on the next rounds, before any new line is pulled.
+		final StringBuilder pendingInput = new StringBuilder();
 		boolean eofForwarded = false;
 		boolean completed = false;
 		while (!completed) {
@@ -157,7 +160,7 @@ final class InteractiveShell {
 			}
 			if (!eofForwarded) {
 				try {
-					eofForwarded = forwardLocalInput(lines, process.stdin());
+					eofForwarded = forwardLocalInput(lines, process.stdin(), pendingInput);
 				} catch (final IllegalStateException e) {
 					// The command completed while this input was being queued (the final Receive
 					// beat it): nothing can consume it anymore. Stop forwarding — the next poll
@@ -178,24 +181,40 @@ final class InteractiveShell {
 	}
 
 	/**
-	 * Forward the queued local lines — at most {@link #MAX_INPUT_CHARS_PER_ROUND} characters per
-	 * round, the rest stays queued for the next one — as one flushed write (one WSMan Send).
-	 * Lines are terminated with CRLF — what the remote {@code cmd.exe} console expects. Once the
-	 * local input ends, the remote stdin is closed (the final Send carries {@code End="true"})
-	 * and {@code true} is returned: no further input will be forwarded.
+	 * Forward the queued local input — at most {@link #MAX_INPUT_CHARS_PER_ROUND} characters per
+	 * round — as one flushed write (one WSMan Send). Lines are terminated with CRLF — what the
+	 * remote {@code cmd.exe} console expects — and a record longer than one round's budget is
+	 * split: the surplus stays in {@code pendingInput} and leads the next round, so even a giant
+	 * newline-free record keeps the rounds (and the output side) alternating. Once the local
+	 * input ends and every pending character is out, the remote stdin is closed (the final Send
+	 * carries {@code End="true"}) and {@code true} is returned: no further input will be
+	 * forwarded.
 	 */
-	private static boolean forwardLocalInput(final LineSource lines, final BufferedWriter stdin) throws IOException {
+	private static boolean forwardLocalInput(
+		final LineSource lines,
+		final BufferedWriter stdin,
+		final StringBuilder pendingInput
+	) throws IOException {
+		int budget = MAX_INPUT_CHARS_PER_ROUND;
 		boolean wrote = false;
-		int batchedChars = 0;
-		String line;
-		while (batchedChars < MAX_INPUT_CHARS_PER_ROUND && (line = lines.nextLine()) != null) {
-			stdin.write(line);
-			stdin.write("\r\n");
-			batchedChars += line.length() + 2;
-			wrote = true;
+		while (budget > 0) {
+			if (pendingInput.length() > 0) {
+				final int take = Math.min(budget, pendingInput.length());
+				stdin.write(pendingInput.substring(0, take));
+				pendingInput.delete(0, take);
+				budget -= take;
+				wrote = true;
+				continue;
+			}
+			final String line = lines.nextLine();
+			if (line == null) {
+				break;
+			}
+			pendingInput.append(line).append("\r\n");
 		}
-		if (lines.endOfInput()) {
-			// Closing flushes the pending lines too: they travel with the End mark, one single Send.
+		if (pendingInput.length() == 0 && lines.endOfInput()) {
+			// Closing flushes the written characters too: they travel with the End mark, one
+			// single Send.
 			stdin.close();
 			return true;
 		}
