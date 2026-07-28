@@ -28,7 +28,7 @@ import java.util.UUID;
 
 /**
  * WS-Management SOAP envelope templates — the only "WSDL" the light client needs.
- * Covers Identify, WQL Enumerate/Pull, and the command shell lifecycle
+ * Covers Identify, WQL enumeration (Enumerate / Pull / Release), and the command shell lifecycle
  * (Create / Command / Receive / Signal / Delete).
  */
 final class Envelopes {
@@ -42,6 +42,7 @@ final class Envelopes {
 
 	private static final String ACTION_ENUMERATE = "http://schemas.xmlsoap.org/ws/2004/09/enumeration/Enumerate";
 	private static final String ACTION_PULL = "http://schemas.xmlsoap.org/ws/2004/09/enumeration/Pull";
+	private static final String ACTION_RELEASE = "http://schemas.xmlsoap.org/ws/2004/09/enumeration/Release";
 	private static final String ACTION_CREATE = "http://schemas.xmlsoap.org/ws/2004/09/transfer/Create";
 	private static final String ACTION_DELETE = "http://schemas.xmlsoap.org/ws/2004/09/transfer/Delete";
 	private static final String ACTION_COMMAND = RSP + "/Command";
@@ -100,6 +101,19 @@ final class Envelopes {
 			maxElements +
 			"</wsen:MaxElements>" +
 			"</wsen:Pull></s:Body></s:Envelope>";
+	}
+
+	static String release(final String url, final String namespace, final String context, final long timeoutMs) {
+		// WS-Enumeration Release: tells the server to discard an enumeration context that will not be
+		// pulled to its end, freeing the server-side operation slot immediately instead of waiting for
+		// its idle timeout.
+		return envelopeOpen(false) +
+			header(url, wmiResourceUri(namespace), ACTION_RELEASE, timeoutMs, null, null) +
+			"<s:Body><wsen:Release>" +
+			"<wsen:EnumerationContext>" +
+			escape(context) +
+			"</wsen:EnumerationContext>" +
+			"</wsen:Release></s:Body></s:Envelope>";
 	}
 
 	// --- Command shell -----------------------------------------------------

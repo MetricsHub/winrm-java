@@ -43,10 +43,11 @@ Everything between `command(...)` and `execute()` is optional:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `timeout(Duration)` | the client's timeout | Wall-clock deadline covering file uploads, encoding detection, and the command itself. |
+| `timeout(Duration)` | the client's timeout | Wall-clock deadline covering file uploads, encoding detection, and the command itself with `execute()`; inactivity timeout with `start()`. |
 | `charset(Charset)` | detected from the remote code set | The charset used to decode the command output (see below). |
 | `workingDirectory(String)` | remote default | Working directory of the remote process. The remote shell is created by the client's **first** command and reused afterward, so this only takes effect on that first command. |
 | `upload(Path...)` | none | Local files to copy to the host before running (see below). |
+| `onStdout(Consumer<String>)` / `onStderr(Consumer<String>)` | none | Callbacks receiving each chunk of output live while `execute()` runs (see below). |
 
 ## The result
 
@@ -58,6 +59,56 @@ Everything between `command(...)` and `execute()` is optional:
 | `stderr()` | `String` | The command's standard error. |
 | `exitCode()` | `int` | The process exit code (Windows HRESULT codes reported as unsigned 32-bit values are narrowed to the equivalent signed `int`). |
 | `elapsed()` | `java.time.Duration` | Wall-clock time of the operation. |
+
+## Streaming the output
+
+`execute()` collects the complete output in memory and returns only when the command has exited.
+For long-running or verbose commands, end the same request with `start()` instead: it returns a
+[`RemoteProcess`](apidocs/org/metricshub/winrm/RemoteProcess.html) — shaped like
+`java.lang.Process` — whose output can be consumed **while the command is still running**:
+
+```java
+try (RemoteProcess process = client.command("wevtutil qe System /f:text").start()) {
+    try (BufferedReader out = process.stdout()) {
+        out.lines().forEach(this::process);
+    }
+    int exitCode = process.waitFor();       // or waitFor(Duration) for an overall deadline
+}
+```
+
+Points to know:
+
+* **Close the process** — use try-with-resources. Closing before completion sends the WinRM
+  terminate `Signal`, which actually stops the remote command; a command drained to its end cleans
+  up on its own. Closing the readers does *not* close the process.
+* `stdout()` and `stderr()` are fed by the same protocol loop: reading either channel (or calling
+  `waitFor()`) advances it, and output arriving for the channel not being read is buffered until
+  read — memory is bounded by the *unread* channel, not by the total output.
+* Output is **decoded incrementally** with the request's charset; a multibyte character split
+  across protocol chunks is decoded correctly.
+* The process **holds the client's serial connection** until completion or close: other operations
+  on the same client wait in the meantime.
+* The timeout is an **inactivity** timeout — the longest silence tolerated from the server — not
+  an overall deadline: a command may run (and stream) far longer than the timeout as long as it
+  keeps producing output. Use `waitFor(Duration)` when you need a hard deadline. See
+  [Timeouts and Errors](timeouts-and-errors.html).
+
+### Tailing the output of a blocking execution
+
+When you only want to *observe* the output live — logging, progress reporting — but still want the
+blocking call and its complete [`CommandResult`](apidocs/org/metricshub/winrm/CommandResult.html),
+register `onStdout(...)` / `onStderr(...)` callbacks and keep `execute()` as the terminal:
+
+```java
+CommandResult result = client.command("longRunningThing.exe")
+    .onStdout(chunk -> log.info(chunk))
+    .onStderr(chunk -> log.warn(chunk))
+    .execute();
+```
+
+Each callback receives the output chunk by chunk as the server delivers it (not necessarily whole
+lines), on an internal worker thread, never concurrently. The wall-clock timeout of `execute()`
+applies unchanged.
 
 ## Character set
 
@@ -118,12 +169,5 @@ See [Timeouts and Errors](timeouts-and-errors.html) for details.
 
 ## From the command line
 
-The standalone jar runs a command with the `command` subcommand (aliases: `cmd`, `exec`, `run`).
-Standard output and standard error are forwarded to the corresponding local streams, and the
-process exits with the remote exit code when it fits in 0–255:
-
-```bash
-java -jar ${project.artifactId}-${project.version}-standalone.jar \
-  -h server.example.com -u 'DOMAIN\user' -pf password.txt --https \
-  exec ipconfig /all
-```
+The standalone jar runs a command with its `command` subcommand, forwarding the output live and
+propagating the exit code — see the [Command-Line Client](cli.html) manual.
