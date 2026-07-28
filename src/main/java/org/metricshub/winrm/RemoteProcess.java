@@ -137,18 +137,18 @@ public final class RemoteProcess implements AutoCloseable {
 
 	/**
 	 * Wait at most the given duration for the command to complete — an overall deadline, on top of
-	 * the per-response inactivity timeout. The remaining wait also bounds the active protocol
-	 * round trip (the server is asked to answer within it), so the wait returns promptly at the
-	 * deadline instead of hanging on a silent command. Expiry does not affect the command: it
-	 * keeps running, the process stays fully usable, and the caller decides whether to keep
-	 * waiting or {@link #close()}.
+	 * the per-response inactivity timeout. The remaining wait is a hard bound on the active
+	 * protocol round trip: the server is asked to answer early enough for its reply to arrive
+	 * within it, and a wait too short for any network round trip is waited out locally without
+	 * touching the wire. Expiry does not affect the command: it keeps running, the process stays
+	 * fully usable, and the caller decides whether to keep waiting or {@link #close()}.
 	 *
 	 * @param deadline how long to wait (at least one millisecond)
 	 * @return {@code true} when the command completed within the given duration — the exit code is
 	 *         then available from {@link #exitCode()} — {@code false} when the wait expired first
-	 * @throws WinRMTimeoutException when the server does not even answer the bounded requests — a
-	 *         peer that stopped answering is detected within the remaining wait plus a small
-	 *         network headroom, not the full inactivity timeout
+	 * @throws WinRMTimeoutException when the server does not answer the bounded requests within
+	 *         the remaining wait — a peer that stopped answering cannot hold the wait past its
+	 *         deadline
 	 * @throws org.metricshub.winrm.exceptions.WinRMClientException for any other failure
 	 */
 	public synchronized boolean waitFor(final Duration deadline) {

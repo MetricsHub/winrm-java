@@ -50,10 +50,10 @@ class HttpTransportDeadlineTest {
 
 			final HttpTransport transport = new HttpTransport("127.0.0.1", server.getLocalPort(), 60_000);
 			try {
-				// Budget: 500 ms wait + 1 s fault headroom = 1.5 s for EVERY leg together. The server
-				// answers each leg after 600 ms — fast enough for any single leg, so only the shared
-				// deadline can stop the sequence (leg 1 at ~0.6 s, leg 2 at ~1.2 s, leg 3 runs out).
-				transport.pollTimeout(500);
+				// One 2 s budget for EVERY leg together. The server answers each leg after 600 ms —
+				// fast enough for any single leg, so only the shared deadline can stop the sequence
+				// (legs 1-3 complete by ~1.8 s, leg 4 runs out of budget at 2 s).
+				transport.pollTimeout(2_000);
 				final long start = System.nanoTime();
 				assertThrows(
 					SocketTimeoutException.class,
@@ -105,7 +105,7 @@ class HttpTransportDeadlineTest {
 
 			final HttpTransport transport = new HttpTransport("127.0.0.1", server.getLocalPort(), 60_000);
 			try {
-				transport.pollTimeout(500);
+				transport.pollTimeout(2_000);
 				final long start = System.nanoTime();
 				assertThrows(SocketTimeoutException.class, () -> transport.post("/wsman", new byte[0], null, null));
 				final long elapsedMillis = (System.nanoTime() - start) / 1_000_000;

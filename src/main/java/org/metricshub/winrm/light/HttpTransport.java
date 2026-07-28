@@ -105,21 +105,21 @@ final class HttpTransport implements AutoCloseable {
 	}
 
 	/**
-	 * Socket timeouts for one deadline-bounded poll round trip: the read timeout is the wait plus
-	 * a small fault headroom — enough for the server's "nothing yet" op-timeout fault (generated
-	 * the moment the requested wait expires) to cross the network, yet small enough that a peer
-	 * that stopped answering entirely cannot hold a deadline-bounded wait hostage the way the
-	 * blocking paths' ten-second headroom would.
-	 * The wait-plus-headroom also becomes an ABSOLUTE deadline shared by every socket operation
-	 * until the next timeout-mode switch: one poll may span several HTTP round trips (a dropped
-	 * connection forces a reconnect and a whole re-authentication exchange), and each leg must
-	 * only get what is left of the poll's budget — not a fresh full timeout each, which would let
-	 * a slow peer stretch a deadline-bounded wait to several multiples of the requested duration.
+	 * Socket timeouts for one deadline-bounded poll round trip: the budget is the deadline itself
+	 * — no headroom on top, or a peer that stopped answering could hold a deadline-bounded wait
+	 * past its advertised bound (the caller carves the fault-transit slack out of the INSIDE of
+	 * the budget instead, by asking the server to answer earlier than the budget).
+	 * <p>
+	 * The budget also becomes an ABSOLUTE deadline shared by every socket operation until the
+	 * next timeout-mode switch: one poll may span several HTTP round trips (a dropped connection
+	 * forces a reconnect and a whole re-authentication exchange), and each leg must only get what
+	 * is left of the budget — not a fresh full timeout each, which would let a slow peer stretch
+	 * a deadline-bounded wait to several multiples of the requested duration.
 	 *
-	 * @param waitMillis the bounded wait of this round trip in milliseconds
+	 * @param budgetMillis the poll's whole budget in milliseconds
 	 */
-	void pollTimeout(final int waitMillis) {
-		applyTimeouts(waitMillis, waitMillis + 1_000, Utils.getCurrentTimeMillis() + waitMillis + 1_000L);
+	void pollTimeout(final int budgetMillis) {
+		applyTimeouts(budgetMillis, budgetMillis, Utils.getCurrentTimeMillis() + budgetMillis);
 	}
 
 	/**

@@ -55,6 +55,10 @@ final class WsmanClient implements AutoCloseable {
 	private static final String FAULT_OPERATION_TIMEOUT = "2150858793";
 	private static final String FAULT_SHELL_NOT_FOUND = "2150858843";
 
+	// A bounded poll shorter than this cannot be honored by a network round trip (the answer could
+	// not come back in time): it is waited out locally instead of going to the wire.
+	private static final long MIN_WIRE_POLL_MS = 100;
+
 	// WS-Enumeration namespace: the EndOfSequence / EnumerationContext markers live here. Match them by
 	// namespace, never by local name alone, so a WMI property that happens to be named "EndOfSequence"
 	// or "EnumerationContext" inside <Items> cannot be mistaken for the enumeration control element.
@@ -553,16 +557,16 @@ final class WsmanClient implements AutoCloseable {
 		}
 
 		/**
-		 * Bounded variant of {@link #nextChunk()}: one Receive round trip whose WSMan
-		 * OperationTimeout is the given wait, so a compliant server answers within it — with output,
-		 * or with the "nothing yet" op-timeout fault, which is returned as an EMPTY chunk instead of
-		 * failing the handle. This is how a deadline-bounded wait polls without risking the
-		 * connection: the fault is the protocol's clean expiry, the exchange completes, and the
-		 * command (and this handle) remain fully usable. Returns {@code null} exactly like
-		 * {@link #nextChunk()} once the command has completed.
+		 * Bounded variant of {@link #nextChunk()}: block at most the given wait — a hard bound. A
+		 * wire poll asks the server to answer EARLIER than the wait (the difference is transit
+		 * slack for its "nothing yet" op-timeout fault to reach us before the socket cuts at the
+		 * full wait); that fault is returned as an EMPTY chunk instead of failing the handle —
+		 * the protocol's clean expiry, leaving the command and this handle fully usable. A wait
+		 * too short for any network round trip is waited out locally instead. Returns {@code null}
+		 * exactly like {@link #nextChunk()} once the command has completed.
 		 *
-		 * @param maxWaitMs how long the server may hold the Receive, capped by the handle's own
-		 *        per-round-trip timeout
+		 * @param maxWaitMs how long to block at most, capped by the handle's own per-round-trip
+		 *        timeout
 		 */
 		Chunk pollChunk(final long maxWaitMs) throws Exception {
 			if (finished) {
@@ -572,24 +576,30 @@ final class WsmanClient implements AutoCloseable {
 				finish();
 				return null;
 			}
-			final long wait = Math.max(1, Math.min(maxWaitMs, operationTimeoutMs));
-			// The socket gets a small fault headroom on purpose: the expected answer to an expired
-			// bounded Receive is the op-timeout FAULT, and it must win the race against the socket
-			// timeout or the poll would desync the connection it is supposed to leave intact. It is
-			// deliberately much smaller than the blocking paths' headroom, so a peer that stopped
-			// answering entirely cannot hold a deadline-bounded wait far past its deadline.
-			transport.pollTimeout(toSocketTimeoutMillis(wait));
+			final long budget = Math.max(1, Math.min(maxWaitMs, operationTimeoutMs));
+			if (budget < MIN_WIRE_POLL_MS) {
+				// No answer could come back in time: waiting the budget out locally is the only way
+				// to honor it. The protocol advances on the next full-size fetch or poll.
+				Thread.sleep(budget);
+				return new Chunk(new byte[0], new byte[0]);
+			}
+			// Split the budget: the server may hold the Receive for the first part, and the rest is
+			// transit slack for its "nothing yet" op-timeout fault to arrive BEFORE the socket cuts
+			// at the full budget — the expected expiry of a bounded poll is that fault, and it must
+			// win the race or the poll would desync the connection it is supposed to leave intact.
+			final long transit = Math.min(1_000, budget / 2);
+			transport.pollTimeout(toSocketTimeoutMillis(budget));
 			try {
 				checkNotCancelled();
 				final Decoded resp;
 				try {
-					resp = request(Envelopes.receive(url, shellId, commandId, wait));
+					resp = request(Envelopes.receive(url, shellId, commandId, budget - transit));
 				} catch (final SocketTimeoutException e) {
-					// The peer did not even answer the bounded request it was asked to answer within
-					// the wait. The Receive is abandoned mid-flight, so drop the connection outright:
-					// a late response must not be readable as the answer to a LATER request.
+					// The peer answered neither within its shortened hold nor within the transit
+					// slack. The Receive is abandoned mid-flight, so drop the connection outright: a
+					// late response must not be readable as the answer to a LATER request.
 					transport.close();
-					throw quietTimeout("No response from the WinRM service", wait, e);
+					throw quietTimeout("No response from the WinRM service", budget, e);
 				}
 				if (resp.status != 200) {
 					if (FAULT_OPERATION_TIMEOUT.equals(wsmanFaultCode(resp.document))) {

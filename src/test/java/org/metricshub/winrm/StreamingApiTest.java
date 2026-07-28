@@ -428,8 +428,12 @@ class StreamingApiTest {
 
 		try (WinRMClient client = builder().build()) {
 			try (RemoteProcess process = client.command("slow.exe").charset(StandardCharsets.UTF_8).start()) {
-				assertFalse(process.waitFor(Duration.ofMillis(100)), "the command must still be running");
-				// The output that arrived while waiting stays readable.
+				// A wait too short for any network round trip is waited out locally: no request goes
+				// to the wire, and the process is untouched.
+				assertFalse(process.waitFor(Duration.ofMillis(50)), "the command must still be running");
+				assertEquals(2, server.decryptedRequests().size(), "a sub-round-trip wait must not touch the wire");
+
+				// The process remains fully usable: reading advances the protocol as usual.
 				assertEquals("slow", process.stdout().readLine());
 			}
 			assertTrue(server.decryptedRequests().get(3).contains("signal/terminate"));
@@ -469,32 +473,35 @@ class StreamingApiTest {
 	}
 
 	@Test
-	void waitForDeadlineBoundsTheActiveReceive() throws Exception {
+	void boundedPollTreatsAFaultWithinBudgetAsNothingYet() throws Exception {
 		enqueueCommandStartup();
 		server
-			// Answers the bounded Receive after the wait would have expired: with a compliant server
-			// this is the "nothing yet" op-timeout fault at the requested OperationTimeout. It must
-			// read as an expired poll, NOT as an inactivity failure — the handle stays usable.
-			.enqueueDelayed(500, fault(FAULT_OPERATION_TIMEOUT, "The operation timed out."), 300)
+			// The "nothing yet" op-timeout fault answering the bounded poll, arriving well within
+			// the poll's budget — a compliant server answering at the shortened OperationTimeout.
+			.enqueueDelayed(500, fault(FAULT_OPERATION_TIMEOUT, "The operation timed out."), 150)
 			.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 3))))
 			.enqueue(200, envelope(signalResponse()));
 
 		try (WinRMClient client = builder().build()) {
-			try (RemoteProcess process = client.command("slow.exe").charset(StandardCharsets.UTF_8).start()) {
-				assertFalse(process.waitFor(Duration.ofMillis(200)), "the command must still be running");
+			try (CommandCursor cursor = client.executor().startCommand("run.exe", null, 10_000)) {
+				// The fault reads as an expired poll (empty chunk), not as a failure.
+				final CommandCursor.Chunk nothingYet = cursor.poll(2_000);
+				assertEquals(0, nothingYet.stdout().length + nothingYet.stderr().length);
 
-				// The active Receive was bounded by the remaining wait, not by the 10 s inactivity
-				// timeout: its WSMan OperationTimeout is sub-second.
+				// The bounded Receive asked the server to answer EARLY: its OperationTimeout is the
+				// budget minus the fault-transit slack, so the answer arrives within the budget.
 				final String boundedReceive = server.decryptedRequests().get(2);
 				assertTrue(boundedReceive.contains("/Receive"), boundedReceive);
 				assertTrue(
-					boundedReceive.contains("<wsman:OperationTimeout>PT0."),
-					"the bounded Receive must carry the remaining wait as its OperationTimeout"
+					boundedReceive.contains("<wsman:OperationTimeout>PT1S<"),
+					"a 2 s poll must ask the server to answer within 1 s"
 				);
 
-				// The expired wait was non-destructive: the process completes normally afterward.
-				assertEquals(3, process.waitFor());
-				assertEquals("done", process.stdout().readLine());
+				// The expired poll was non-destructive: the cursor completes normally afterward.
+				final CommandCursor.Chunk chunk = cursor.next();
+				assertEquals("done\n", new String(chunk.stdout(), StandardCharsets.UTF_8));
+				assertNull(cursor.next());
+				assertEquals(3, cursor.exitCode());
 			}
 		}
 	}
@@ -503,9 +510,9 @@ class StreamingApiTest {
 	void deadPeerCannotHoldABoundedWaitHostage() throws Exception {
 		enqueueCommandStartup();
 		server
-			// The peer answers the bounded Receive long after the wait AND its small fault headroom:
-			// a peer that stopped answering. The wait must fail at wait + headroom (~1.2 s here),
-			// not at the blocking paths' ten-second socket headroom.
+			// The peer answers the bounded Receive long after the wait: a peer that stopped
+			// answering. The wait must fail AT its deadline — the socket cuts at the poll budget
+			// itself, with no headroom a dead peer could hide behind.
 			.enqueueDelayed(500, fault(FAULT_OPERATION_TIMEOUT, "The operation timed out."), 4_000)
 			.enqueue(200, envelope(signalResponse()));
 
@@ -516,8 +523,10 @@ class StreamingApiTest {
 				final long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
 				assertTrue(
 					elapsedMillis < 3_000,
-					"a dead peer must be detected near the bounded wait, not " + elapsedMillis + " ms later"
+					"a dead peer must be detected at the bounded wait, not " + elapsedMillis + " ms later"
 				);
+				// The server was asked to answer within half the 200 ms budget.
+				assertTrue(server.decryptedRequests().get(2).contains("<wsman:OperationTimeout>PT0.1S<"));
 			}
 			// close() terminated the command over a fresh connection (the abandoned one was dropped).
 			final List<String> requests = server.decryptedRequests();
