@@ -22,7 +22,11 @@ package org.metricshub.winrm.cli;
 
 import java.io.Console;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintStream;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.net.ConnectException;
 import java.net.NoRouteToHostException;
 import java.net.SocketException;
@@ -32,10 +36,13 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import javax.net.ssl.SSLException;
 import org.metricshub.winrm.AuthScheme;
+import org.metricshub.winrm.CommandRequest;
+import org.metricshub.winrm.RemoteProcess;
 import org.metricshub.winrm.WinRMClient;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
 import org.metricshub.winrm.WqlRow;
@@ -50,7 +57,10 @@ import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
  * WS-Enumeration pages arrive</b> — a large query starts producing output immediately and memory
  * stays bounded, but a mid-stream failure can leave partial output on standard output (with a
  * nonzero exit code). Remote command output is forwarded <b>live</b> to the matching local output
- * stream while the command runs. Diagnostics are written only to standard error.
+ * stream while the command runs; when the local standard input is not an interactive console
+ * (piped or redirected), it is forwarded as the remote command's standard input. The {@code shell}
+ * subcommand starts {@code cmd.exe} on the remote host and bridges it to the local terminal,
+ * line by line, until the remote shell exits. Diagnostics are written only to standard error.
  * <p>
  * NTLM is the default authentication scheme. Kerberos requires HTTPS. HTTPS validates certificates
  * and hostnames unless the explicitly insecure {@code --https-permissive} option is used.
@@ -81,7 +91,16 @@ public final class WinRmCli {
 	 * @param arguments command-line arguments
 	 */
 	public static void main(final String[] arguments) {
-		System.exit(run(arguments, System.out, System.err, WinRmCli::connect));
+		System.exit(
+			run(
+				arguments,
+				System.out,
+				System.err,
+				WinRmCli::connect,
+				WinRmCli::readConsolePassword,
+				new LocalInput(System.console() != null, System.in)
+			)
+		);
 	}
 
 	static int run(
@@ -100,6 +119,26 @@ public final class WinRmCli {
 		final RemoteFactory remoteFactory,
 		final PasswordReader passwordReader
 	) {
+		// Tests reaching this overload behave as if run from an interactive console: no local
+		// standard input is forwarded implicitly (the test JVM's System.in is not theirs to consume).
+		return run(
+			arguments,
+			standardOutput,
+			standardError,
+			remoteFactory,
+			passwordReader,
+			new LocalInput(true, System.in)
+		);
+	}
+
+	static int run(
+		final String[] arguments,
+		final PrintStream standardOutput,
+		final PrintStream standardError,
+		final RemoteFactory remoteFactory,
+		final PasswordReader passwordReader,
+		final LocalInput localInput
+	) {
 		try (CliArguments parsed = CliArguments.parse(arguments)) {
 			if (parsed.operation() == CliArguments.Operation.HELP) {
 				standardOutput.print(help());
@@ -110,7 +149,7 @@ public final class WinRmCli {
 				return 0;
 			}
 			ensurePassword(parsed, passwordReader);
-			return execute(parsed, standardOutput, standardError, remoteFactory);
+			return execute(parsed, standardOutput, standardError, remoteFactory, localInput);
 		} catch (final CliUsageException e) {
 			standardError.println("winrm-java: " + e.getMessage());
 			standardError.println("Try 'winrm-java --help' for usage.");
@@ -144,7 +183,8 @@ public final class WinRmCli {
 		final CliArguments arguments,
 		final PrintStream standardOutput,
 		final PrintStream standardError,
-		final RemoteFactory remoteFactory
+		final RemoteFactory remoteFactory,
+		final LocalInput localInput
 	) {
 		final String previousKerberosKdc = System.getProperty(KERBEROS_KDC_PROPERTY);
 		final String previousKerberosRealm = System.getProperty(KERBEROS_REALM_PROPERTY);
@@ -164,10 +204,15 @@ public final class WinRmCli {
 					);
 					return 0;
 				}
+				if (arguments.operation() == CliArguments.Operation.SHELL) {
+					return interactiveShell(arguments, standardOutput, standardError, remote, localInput);
+				}
 				// Forward each output chunk as it arrives, so a long-running command can be followed live.
+				// Piped/redirected local standard input travels the other way, as the command's stdin.
 				final int exitCode = remote.executeCommand(
 					arguments.input(),
 					arguments.timeout(),
+					localInput.terminal ? null : localInput.stream,
 					chunk -> {
 						standardOutput.print(chunk);
 						standardOutput.flush();
@@ -189,6 +234,87 @@ public final class WinRmCli {
 		} finally {
 			restoreProperty(KERBEROS_KDC_PROPERTY, previousKerberosKdc);
 			restoreProperty(KERBEROS_REALM_PROPERTY, previousKerberosRealm);
+		}
+	}
+
+	/**
+	 * Run the interactive {@code shell} session: local Ctrl+C is rerouted to the remote child (a
+	 * WSMan {@code ctrl_c} Signal) for the duration of the session, and the remote shell's exit
+	 * code is propagated through the usual contract.
+	 */
+	private static int interactiveShell(
+		final CliArguments arguments,
+		final PrintStream standardOutput,
+		final PrintStream standardError,
+		final RemoteOperations remote,
+		final LocalInput localInput
+	) throws Exception {
+		final AtomicBoolean interruptRequested = new AtomicBoolean();
+		final Runnable restoreInterruptHandler = forwardSigint(interruptRequested);
+		try {
+			final int exitCode = remote.shell(
+				arguments.timeout(),
+				localInput.stream,
+				standardOutput,
+				standardError,
+				interruptRequested
+			);
+			return remoteExitCode(exitCode, standardError);
+		} finally {
+			restoreInterruptHandler.run();
+		}
+	}
+
+	/**
+	 * Reroute Ctrl+C (SIGINT) into the given flag instead of killing this JVM, so the interactive
+	 * shell can forward it to the remote child process. Uses {@code sun.misc.Signal} reflectively:
+	 * the JDK ships it in {@code jdk.unsupported}, but it is not part of the Java SE API, so a
+	 * runtime without it simply keeps the default behavior (Ctrl+C ends the CLI — and the remote
+	 * shell with it, through the client's close). Returns the action restoring the previous
+	 * handler.
+	 */
+	private static Runnable forwardSigint(final AtomicBoolean interruptRequested) {
+		try {
+			final Class<?> signalClass = Class.forName("sun.misc.Signal");
+			final Class<?> handlerClass = Class.forName("sun.misc.SignalHandler");
+			final InvocationHandler invocationHandler = (proxy, method, args) -> {
+				if ("handle".equals(method.getName())) {
+					interruptRequested.set(true);
+					return null;
+				}
+				// Object methods a well-behaved proxy must answer (equals/hashCode/toString).
+				return invokeObjectMethod(proxy, method, args);
+			};
+			final Object handler = Proxy.newProxyInstance(
+				handlerClass.getClassLoader(),
+				new Class<?>[]
+				{ handlerClass },
+				invocationHandler
+			);
+			final Object sigint = signalClass.getConstructor(String.class).newInstance("INT");
+			final Method handle = signalClass.getMethod("handle", signalClass, handlerClass);
+			final Object previous = handle.invoke(null, sigint, handler);
+			return () -> {
+				try {
+					handle.invoke(null, sigint, previous);
+				} catch (final ReflectiveOperationException | RuntimeException ignored) {
+					// The session is over either way; the JVM exits right after.
+				}
+			};
+		} catch (final ReflectiveOperationException | RuntimeException | LinkageError e) {
+			return () -> {};
+		}
+	}
+
+	/** Default implementations of the {@link Object} methods for a reflective proxy. */
+	private static Object invokeObjectMethod(final Object proxy, final Method method, final Object[] args) {
+		switch (method.getName()) {
+		case "equals":
+			return proxy == args[0];
+		case "hashCode":
+			return System.identityHashCode(proxy);
+		default:
+			return "winrm-java SIGINT forwarder";
 		}
 	}
 
@@ -304,6 +430,7 @@ public final class WinRmCli {
 		return "Usage:\n" +
 			"  winrm-java [options] wql <query>\n" +
 			"  winrm-java [options] command|cmd|exec|run <command line...>\n" +
+			"  winrm-java [options] shell\n" +
 			"\n" +
 			"Connection options:\n" +
 			"  -h, --hostname <host>       Target hostname or IP address (required)\n" +
@@ -337,15 +464,40 @@ public final class WinRmCli {
 		char[] readPassword() throws CliUsageException;
 	}
 
+	/** The local standard input: whether it is an interactive console, and the stream itself. */
+	static final class LocalInput {
+
+		private final boolean terminal;
+		private final InputStream stream;
+
+		LocalInput(final boolean terminal, final InputStream stream) {
+			this.terminal = terminal;
+			this.stream = stream;
+		}
+	}
+
 	interface RemoteOperations extends AutoCloseable {
 		/** Run the WQL query, handing each row to the consumer as it arrives. */
 		void streamWql(String query, long timeout, Consumer<Map<String, Object>> rowConsumer) throws Exception;
 
 		/**
 		 * Run the command, forwarding each decoded output chunk to the matching consumer as it
-		 * arrives, and return the remote exit code.
+		 * arrives, and return the remote exit code. A non-null {@code stdin} is consumed to its end
+		 * and forwarded as the command's standard input.
 		 */
-		int executeCommand(String command, long timeout, Consumer<String> stdoutConsumer, Consumer<String> stderrConsumer)
+		int executeCommand(
+			String command,
+			long timeout,
+			InputStream stdin,
+			Consumer<String> stdoutConsumer,
+			Consumer<String> stderrConsumer
+		) throws Exception;
+
+		/**
+		 * Start {@code cmd.exe} on the remote host and bridge it to the given local streams until
+		 * it exits; return its exit code. See {@link InteractiveShell}.
+		 */
+		int shell(long timeout, InputStream localInput, PrintStream out, PrintStream err, AtomicBoolean interruptRequested)
 			throws Exception;
 
 		@Override
@@ -372,16 +524,39 @@ public final class WinRmCli {
 		public int executeCommand(
 			final String command,
 			final long timeout,
+			final InputStream stdin,
 			final Consumer<String> stdoutConsumer,
 			final Consumer<String> stderrConsumer
 		) {
-			return client
+			final CommandRequest request = client
 				.command(command)
 				.timeout(Duration.ofMillis(timeout))
 				.onStdout(stdoutConsumer)
-				.onStderr(stderrConsumer)
-				.execute()
-				.exitCode();
+				.onStderr(stderrConsumer);
+			if (stdin != null) {
+				request.stdin(stdin);
+			}
+			return request.execute().exitCode();
+		}
+
+		@Override
+		public int shell(
+			final long timeout,
+			final InputStream localInput,
+			final PrintStream out,
+			final PrintStream err,
+			final AtomicBoolean interruptRequested
+		) throws Exception {
+			// The remote side of the bridge: cmd.exe with console-mode stdin, exactly like winrs.
+			// The timeout bounds each protocol round trip; an idle session never trips it, because
+			// every poll completes with output or the protocol's "nothing yet" answer.
+			try (
+				RemoteProcess process = client.command("cmd.exe")
+					.timeout(Duration.ofMillis(timeout))
+					.start()) {
+				return InteractiveShell
+					.run(process, localInput, out, err, interruptRequested, InteractiveShell.DEFAULT_POLL_MILLIS);
+			}
 		}
 
 		@Override

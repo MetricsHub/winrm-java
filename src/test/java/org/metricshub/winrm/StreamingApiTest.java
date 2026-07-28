@@ -519,14 +519,15 @@ class StreamingApiTest {
 		try (WinRMClient client = builder().build()) {
 			try (RemoteProcess process = client.command("dead.exe").charset(StandardCharsets.UTF_8).start()) {
 				final long start = System.nanoTime();
-				assertThrows(WinRMTimeoutException.class, () -> process.waitFor(Duration.ofMillis(200)));
+				assertThrows(WinRMTimeoutException.class, () -> process.waitFor(Duration.ofMillis(1_000)));
 				final long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
 				assertTrue(
 					elapsedMillis < 3_000,
 					"a dead peer must be detected at the bounded wait, not " + elapsedMillis + " ms later"
 				);
-				// The server was asked to answer within half the 200 ms budget.
-				assertTrue(server.decryptedRequests().get(2).contains("<wsman:OperationTimeout>PT0.1S<"));
+				// The server was asked to answer at the WSMan floor (the budget minus the transit
+				// slack, never below 500 ms — the service would not answer earlier anyway).
+				assertTrue(server.decryptedRequests().get(2).contains("<wsman:OperationTimeout>PT0.5S<"));
 			}
 			// close() terminated the command over a fresh connection (the abandoned one was dropped).
 			final List<String> requests = server.decryptedRequests();
@@ -566,11 +567,11 @@ class StreamingApiTest {
 		// The final Done-carrying response lands close to the wait's deadline: too little budget is
 		// left for a wire Signal, but the completion happened WITHIN the wait and must be reported
 		// as such — never as a spurious expiry.
-		server.enqueueDelayed(200, envelope(receiveResponse(stdoutChunk("late\n"), done(COMMAND_ID, 9))), 520);
+		server.enqueueDelayed(200, envelope(receiveResponse(stdoutChunk("late\n"), done(COMMAND_ID, 9))), 800);
 
 		try (WinRMClient client = builder().build()) {
 			try (RemoteProcess process = client.command("barely.exe").charset(StandardCharsets.UTF_8).start()) {
-				assertTrue(process.waitFor(Duration.ofMillis(600)), "completion within the wait must be reported");
+				assertTrue(process.waitFor(Duration.ofMillis(1_000)), "completion within the wait must be reported");
 				assertEquals(9, process.exitCode());
 				assertEquals("late", process.stdout().readLine());
 				// The leftover budget could not fit a Signal round trip: none was sent.

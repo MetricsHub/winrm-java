@@ -43,7 +43,8 @@ final class CliArguments implements AutoCloseable {
 		HELP,
 		VERSION,
 		WQL,
-		COMMAND
+		COMMAND,
+		SHELL
 	}
 
 	static final long DEFAULT_TIMEOUT = 60_000L;
@@ -169,6 +170,13 @@ final class CliArguments implements AutoCloseable {
 
 	private static void parseOperation(final Builder builder, final String name, final List<String> values)
 		throws CliUsageException {
+		if ("shell".equals(name)) {
+			builder.operation = Operation.SHELL;
+			if (!values.isEmpty()) {
+				throw new CliUsageException("shell takes no argument");
+			}
+			return;
+		}
 		if ("wql".equals(name)) {
 			builder.operation = Operation.WQL;
 			builder.input = String.join(" ", values);
@@ -186,9 +194,9 @@ final class CliArguments implements AutoCloseable {
 			return;
 		}
 		if (builder.operation == null) {
-			throw new CliUsageException("missing subcommand (wql or command)");
+			throw new CliUsageException("missing subcommand (wql, command, or shell)");
 		}
-		if (isBlank(builder.input)) {
+		if (builder.operation != Operation.SHELL && isBlank(builder.input)) {
 			throw new CliUsageException(
 				builder.operation == Operation.WQL ? "wql requires a query" : "command requires a command line"
 			);
@@ -383,7 +391,9 @@ final class CliArguments implements AutoCloseable {
 			||
 			"exec".equals(value)
 			||
-			"run".equals(value);
+			"run".equals(value)
+			||
+			"shell".equals(value);
 	}
 
 	private static boolean isBlank(final String value) {

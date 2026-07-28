@@ -72,6 +72,43 @@ public interface CommandCursor extends AutoCloseable {
 	}
 
 	/**
+	 * Feed standard input to the running command — the WSMan Send operation, carrying the bytes to
+	 * the command's {@code stdin} stream. Input larger than one envelope's worth is split into
+	 * several Send requests automatically. A Send is an ordinary request on the executor's serial
+	 * connection: it alternates with {@link #next()}/{@link #poll(long)} on the caller's thread,
+	 * it never runs concurrently with them.
+	 * <p>
+	 * The default implementation throws {@link UnsupportedOperationException}: only executors that
+	 * support command input (such as the built-in lightweight backend) implement this method.
+	 *
+	 * @param data the input bytes (possibly empty — with {@code end}, a pure end-of-input Send)
+	 * @param end {@code true} to mark the end of input: the command's stdin then reaches EOF, and
+	 *        no further input may be sent
+	 * @throws IllegalStateException when the command has already completed or the cursor is closed
+	 * @throws TimeoutException when the server does not answer the Send in time
+	 * @throws WindowsRemoteException for any other failure while sending
+	 */
+	default void send(final byte[] data, final boolean end) throws TimeoutException, WindowsRemoteException {
+		throw new UnsupportedOperationException(getClass().getName() + " does not support command input.");
+	}
+
+	/**
+	 * Interrupt the command the way a console Ctrl+C would — the WSMan Signal operation with the
+	 * {@code ctrl_c} code. Unlike {@link #close()}'s terminate Signal, it interrupts the command's
+	 * child process without ending the command itself: the cursor stays fully usable. A no-op once
+	 * the command has completed or the cursor is closed.
+	 * <p>
+	 * The default implementation throws {@link UnsupportedOperationException}: only executors that
+	 * support it (such as the built-in lightweight backend) implement this method.
+	 *
+	 * @throws TimeoutException when the server does not answer the Signal in time
+	 * @throws WindowsRemoteException for any other failure while signaling
+	 */
+	default void interrupt() throws TimeoutException, WindowsRemoteException {
+		throw new UnsupportedOperationException(getClass().getName() + " does not support command interruption.");
+	}
+
+	/**
 	 * Get the command's exit code.
 	 *
 	 * @return the exit code

@@ -1,5 +1,5 @@
-keywords: command, execute, cmd, stdout, stderr, exit code, file copy, script
-description: Execute remote commands with the fluent WinRMClient API, capture output and exit codes, and copy local files to the host.
+keywords: command, execute, cmd, stdout, stderr, stdin, exit code, file copy, script
+description: Execute remote commands with the fluent WinRMClient API, capture output and exit codes, feed standard input, and copy local files to the host.
 
 # Remote Commands
 
@@ -47,6 +47,7 @@ Everything between `command(...)` and `execute()` is optional:
 | `charset(Charset)` | `UTF-8` | The charset used to decode the command output (see below). |
 | `workingDirectory(String)` | remote default | Working directory of the remote process. The remote shell is created by the client's **first** command and reused afterward, so this only takes effect on that first command. |
 | `upload(Path...)` | none | Local files to copy to the host before running (see below). |
+| `stdin(String)` / `stdin(Path)` / `stdin(InputStream)` | none | Standard input fed to the command — the remote equivalent of a `< file` redirection (see below). |
 | `onStdout(Consumer<String>)` / `onStderr(Consumer<String>)` | none | Callbacks receiving each chunk of output live while `execute()` runs (see below). |
 
 ## The result
@@ -92,6 +93,57 @@ Points to know:
   an overall deadline: a command may run (and stream) far longer than the timeout as long as it
   keeps producing output. Use `waitFor(Duration)` when you need a hard deadline. See
   [Timeouts and Errors](timeouts-and-errors.html).
+
+## Standard input
+
+Commands that read their standard input can be fed in two ways.
+
+### Pre-supplied input
+
+`stdin(...)` on the request delivers the whole input right after the command starts, ending with
+the protocol's end-of-input mark so the remote stdin reaches EOF — the remote equivalent of a
+local `< file` redirection. It works with both `execute()` and `start()`:
+
+```java
+CommandResult result = client.command("sort")
+    .stdin(Path.of("data.txt"))     // also stdin(InputStream) and stdin(String)
+    .execute();
+```
+
+`stdin(String)` is encoded with the request's charset (see `charset(...)`); the `Path` and
+`InputStream` variants send the bytes exactly as stored. Large input is split into
+protocol-sized chunks automatically.
+
+Supplying input switches the remote stdin to **pipe semantics**
+(`WINRS_CONSOLEMODE_STDIN=FALSE`): filters like `sort`, `findstr`, or `more` consume it and
+terminate on EOF, exactly as with a local redirection. Without it, the historical console
+semantics are kept.
+
+### Interactive input
+
+For a request started with `start()`, `RemoteProcess.stdin()` completes the `java.lang.Process`
+shape: written text is buffered locally, `flush()` carries it to the host (one WSMan `Send`),
+and `close()` marks the end of input:
+
+```java
+try (RemoteProcess p = client.command("some-repl.exe").start()) {
+    try (BufferedWriter in = p.stdin()) {
+        in.write("first request\n");
+        in.flush();                              // delivers the buffered text
+        System.out.println(p.stdout().readLine());
+    }                                            // close() = end of input (EOF)
+    p.waitFor();
+}
+```
+
+Writes and reads alternate on the caller's thread, exactly like `java.lang.Process` pipes —
+including the classic deadlock, which is the caller's to avoid: blocking on a read while the
+remote command itself is blocked waiting for input (or feeding a large input to a command that
+floods its output in the meantime) hangs both sides until the inactivity timeout fires.
+
+`RemoteProcess` also exposes `interrupt()` — the WSMan `ctrl_c` Signal, the remote equivalent of
+a console Ctrl+C: it interrupts the command's child process without terminating the command or
+the process handle.
 
 ### Tailing the output of a blocking execution
 

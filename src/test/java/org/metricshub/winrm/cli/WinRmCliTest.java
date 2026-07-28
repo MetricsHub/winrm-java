@@ -52,6 +52,7 @@ class WinRmCliTest {
 		final Invocation help = invoke(new String[] { "--help" }, arguments -> failingRemote());
 		assertEquals(0, help.exitCode);
 		assertTrue(help.stdout.contains("command|cmd|exec|run"));
+		assertTrue(help.stdout.contains("[options] shell"));
 		assertTrue(help.stdout.contains("-P, --port"));
 		assertTrue(help.stdout.contains("--kerberos-kdc"));
 		assertTrue(help.stdout.contains("--kerberos-realm"));
@@ -105,6 +106,52 @@ class WinRmCliTest {
 		assertEquals("output", invocation.stdout);
 		assertEquals("warning", invocation.stderr);
 		assertEquals("echo \"hello world\"", remote.command);
+	}
+
+	@Test
+	void shellSubcommandBridgesTheRemoteShellAndPropagatesItsExitCode() throws Exception {
+		final FakeRemote remote = new FakeRemote();
+		remote.stdoutChunks = List.of("Microsoft Windows\r\nC:\\>");
+		remote.commandExitCode = 3;
+
+		final Invocation invocation = invoke(concat(REQUIRED, "shell"), args -> remote);
+
+		assertEquals(3, invocation.exitCode);
+		assertTrue(remote.shellStarted);
+		assertEquals("Microsoft Windows\r\nC:\\>", invocation.stdout);
+		assertTrue(remote.closed);
+	}
+
+	@Test
+	void shellTakesNoArgument() throws Exception {
+		final Invocation invocation = invoke(concat(REQUIRED, "shell", "cmd.exe"), args -> failingRemote());
+		assertEquals(WinRmCli.EXIT_USAGE, invocation.exitCode);
+		assertTrue(invocation.stderr.contains("shell takes no argument"));
+	}
+
+	@Test
+	void pipedLocalStandardInputIsForwardedToTheCommandButAConsoleIsNot() throws Exception {
+		final java.io.ByteArrayInputStream piped = new java.io.ByteArrayInputStream(
+			"beta\nalpha\n".getBytes(StandardCharsets.UTF_8)
+		);
+		final FakeRemote remote = new FakeRemote();
+		Invocation invocation = invoke(
+			concat(REQUIRED, "command", "sort"),
+			args -> remote,
+			new WinRmCli.LocalInput(false, piped)
+		);
+		assertEquals(0, invocation.exitCode);
+		assertEquals(piped, remote.forwardedStdin);
+
+		// From an interactive console, nothing is forwarded implicitly.
+		final FakeRemote interactive = new FakeRemote();
+		invocation = invoke(
+			concat(REQUIRED, "command", "sort"),
+			args -> interactive,
+			new WinRmCli.LocalInput(true, piped)
+		);
+		assertEquals(0, invocation.exitCode);
+		org.junit.jupiter.api.Assertions.assertNull(interactive.forwardedStdin);
 	}
 
 	@Test
@@ -333,6 +380,34 @@ class WinRmCliTest {
 		}
 	}
 
+	private static Invocation invoke(
+		final String[] arguments,
+		final WinRmCli.RemoteFactory factory,
+		final WinRmCli.LocalInput localInput
+	) throws Exception {
+		final ByteArrayOutputStream stdoutBytes = new ByteArrayOutputStream();
+		final ByteArrayOutputStream stderrBytes = new ByteArrayOutputStream();
+		try (
+			PrintStream stdout = new PrintStream(stdoutBytes, true, StandardCharsets.UTF_8.name());
+			PrintStream stderr = new PrintStream(stderrBytes, true, StandardCharsets.UTF_8.name())) {
+			final int exitCode = WinRmCli.run(
+				arguments,
+				stdout,
+				stderr,
+				factory,
+				() -> {
+					throw new AssertionError("No password prompt expected");
+				},
+				localInput
+			);
+			return new Invocation(
+				exitCode,
+				stdoutBytes.toString(StandardCharsets.UTF_8.name()),
+				stderrBytes.toString(StandardCharsets.UTF_8.name())
+			);
+		}
+	}
+
 	private static String[] concat(final String[] prefix, final String... suffix) {
 		final String[] result = new String[prefix.length + suffix.length];
 		System.arraycopy(prefix, 0, result, 0, prefix.length);
@@ -369,6 +444,8 @@ class WinRmCliTest {
 		private int commandExitCode;
 		private Exception failure;
 		private String command;
+		private java.io.InputStream forwardedStdin;
+		private boolean shellStarted;
 		private boolean closed;
 
 		@Override
@@ -382,13 +459,32 @@ class WinRmCliTest {
 		public int executeCommand(
 			final String command,
 			final long timeout,
+			final java.io.InputStream stdin,
 			final Consumer<String> stdoutConsumer,
 			final Consumer<String> stderrConsumer
 		) throws Exception {
 			this.command = command;
+			this.forwardedStdin = stdin;
 			failIfConfigured();
 			stdoutChunks.forEach(stdoutConsumer);
 			stderrChunks.forEach(stderrConsumer);
+			return commandExitCode;
+		}
+
+		@Override
+		public int shell(
+			final long timeout,
+			final java.io.InputStream localInput,
+			final java.io.PrintStream out,
+			final java.io.PrintStream err,
+			final java.util.concurrent.atomic.AtomicBoolean interruptRequested
+		) throws Exception {
+			shellStarted = true;
+			failIfConfigured();
+			stdoutChunks.forEach(chunk -> {
+				out.print(chunk);
+				out.flush();
+			});
 			return commandExitCode;
 		}
 

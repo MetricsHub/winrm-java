@@ -26,6 +26,7 @@ import java.net.SocketTimeoutException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -56,9 +57,16 @@ final class WsmanClient implements AutoCloseable {
 	private static final String FAULT_OPERATION_TIMEOUT = "2150858793";
 	private static final String FAULT_SHELL_NOT_FOUND = "2150858843";
 
-	// A bounded poll shorter than this cannot be honored by a network round trip (the answer could
-	// not come back in time): it is waited out locally instead of going to the wire.
-	private static final long MIN_WIRE_POLL_MS = 100;
+	// The WSMan service clamps an OperationTimeout below 500 ms UP to 500 ms (MS-WSMV; measured on
+	// Windows Server 2008 R2): a bounded Receive's "nothing yet" fault never arrives before this
+	// floor, however early the header asks for it.
+	private static final long MIN_OPERATION_TIMEOUT_MS = 500;
+
+	// A bounded poll shorter than this cannot be honored by a network round trip: the server
+	// answers no earlier than MIN_OPERATION_TIMEOUT_MS, and the fault needs transit slack to beat
+	// the socket cut at the budget. Shorter waits are waited out locally instead of going to the
+	// wire.
+	private static final long MIN_WIRE_POLL_MS = 750;
 
 	// WS-Enumeration namespace: the EndOfSequence / EnumerationContext markers live here. Match them by
 	// namespace, never by local name alone, so a WMI property that happens to be named "EndOfSequence"
@@ -428,7 +436,7 @@ final class WsmanClient implements AutoCloseable {
 		final Charset cs = charset != null ? charset : WindowsRemoteExecutor.SHELL_OUTPUT_CHARSET;
 		final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
 		final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
-		try (RemoteCommand command = startCommand(commandLine, workingDirectory, operationTimeoutMs, false)) {
+		try (RemoteCommand command = startCommand(commandLine, workingDirectory, operationTimeoutMs, false, true)) {
 			RemoteCommand.Chunk chunk;
 			while ((chunk = command.nextChunk()) != null) {
 				stdout.write(chunk.stdout, 0, chunk.stdout.length);
@@ -457,12 +465,15 @@ final class WsmanClient implements AutoCloseable {
 	 *        fault or a socket read timeout into a {@link TimeoutException} instead of re-issuing
 	 *        the Receive forever (the blocking path is bounded by the caller's wall-clock deadline
 	 *        instead)
+	 * @param consoleModeStdin value of the {@code WINRS_CONSOLEMODE_STDIN} option; see
+	 *        {@link Envelopes#command(String, String, String, long, boolean)}
 	 */
 	RemoteCommand startCommand(
 		final String commandLine,
 		final String workingDirectory,
 		final long operationTimeoutMs,
-		final boolean failOnQuietTimeout
+		final boolean failOnQuietTimeout,
+		final boolean consoleModeStdin
 	) throws Exception {
 		// Serialize the whole shell lifecycle (Create + Command + Receive loop + Signal) against any
 		// other operation sharing this connection and the shellId field; see connectionPermit.
@@ -482,7 +493,7 @@ final class WsmanClient implements AutoCloseable {
 			checkNotCancelled();
 			String commandId;
 			try {
-				commandId = sendCommand(commandLine, operationTimeoutMs, failOnQuietTimeout);
+				commandId = sendCommand(commandLine, operationTimeoutMs, failOnQuietTimeout, consoleModeStdin);
 			} catch (final WinRMFaultException e) {
 				if (!FAULT_SHELL_NOT_FOUND.equals(e.getFaultCode())) {
 					throw e;
@@ -493,7 +504,7 @@ final class WsmanClient implements AutoCloseable {
 				shellId = null;
 				createShell(shellWorkingDirectory, operationTimeoutMs, failOnQuietTimeout);
 				checkNotCancelled();
-				commandId = sendCommand(commandLine, operationTimeoutMs, failOnQuietTimeout);
+				commandId = sendCommand(commandLine, operationTimeoutMs, failOnQuietTimeout, consoleModeStdin);
 			}
 			opened = true;
 			return new RemoteCommand(commandId, operationTimeoutMs, failOnQuietTimeout);
@@ -593,13 +604,16 @@ final class WsmanClient implements AutoCloseable {
 			// transit slack for its "nothing yet" op-timeout fault to arrive BEFORE the socket cuts
 			// at the full budget — the expected expiry of a bounded poll is that fault, and it must
 			// win the race or the poll would desync the connection it is supposed to leave intact.
+			// The hold never asks for less than the service's own floor: the answer would not come
+			// any earlier, and the requested timeout should reflect when the server may answer.
 			final long transit = Math.min(1_000, budget / 2);
+			final long hold = Math.max(MIN_OPERATION_TIMEOUT_MS, budget - transit);
 			transport.pollTimeout(toSocketTimeoutMillis(budget));
 			try {
 				checkNotCancelled();
 				final Decoded resp;
 				try {
-					resp = request(Envelopes.receive(url, shellId, commandId, budget - transit));
+					resp = request(Envelopes.receive(url, shellId, commandId, hold));
 				} catch (final SocketTimeoutException e) {
 					// The peer answered neither within its shortened hold nor within the transit
 					// slack. The Receive is abandoned mid-flight, so drop the connection outright: a
@@ -619,6 +633,61 @@ final class WsmanClient implements AutoCloseable {
 				// Back to the strict streaming bound for the ordinary (unbounded) fetches.
 				transport.inactivityTimeout(toSocketTimeoutMillis(operationTimeoutMs));
 			}
+		}
+
+		/**
+		 * Feed standard input to the running command: one or more WSMan Send requests carrying the
+		 * bytes as base64 {@code stdin} streams, the last one flagged {@code End} when {@code end} is
+		 * set. Payloads larger than {@link Envelopes#MAX_STDIN_CHUNK} are split so no envelope
+		 * exceeds the MaxEnvelopeSize the client advertises; the split happens on the ENCODED bytes,
+		 * so a multibyte character straddling two Sends is reassembled by the remote pipe.
+		 * <p>
+		 * A Send is an ordinary request under this handle's connection permit: it does not interleave
+		 * with the Receive loop, it alternates with it on the caller's thread — the same discipline
+		 * {@link java.lang.Process} pipes require.
+		 *
+		 * @param data the input bytes (may be empty, e.g. for a pure end-of-input Send)
+		 * @param end whether this is the last input the command will get
+		 */
+		void send(final byte[] data, final boolean end) throws Exception {
+			if (finished || exitCode != null) {
+				throw new IllegalStateException("The command has completed: its standard input is closed.");
+			}
+			if (data.length == 0 && !end) {
+				// Nothing to say and no EOF to announce: an empty Send would be a pure round trip.
+				return;
+			}
+			int offset = 0;
+			do {
+				checkNotCancelled();
+				final int length = Math.min(Envelopes.MAX_STDIN_CHUNK, data.length - offset);
+				final boolean last = offset + length >= data.length;
+				final String base64 = length == 0
+					? ""
+					: Base64.getEncoder().encodeToString(Arrays.copyOfRange(data, offset, offset + length));
+				final Decoded resp = request(
+					Envelopes.send(url, shellId, commandId, base64, end && last, operationTimeoutMs)
+				);
+				if (resp.status != 200) {
+					throw faultException("Send", resp);
+				}
+				offset += length;
+			} while (offset < data.length);
+		}
+
+		/**
+		 * Interrupt the command's child process the way a console Ctrl+C would, WITHOUT terminating
+		 * the command or its shell: the session stays usable afterward, which is what an interactive
+		 * shell needs. A missing shell is tolerated, exactly like the terminate Signal.
+		 */
+		void interrupt() throws Exception {
+			// Nothing to interrupt once the command completed (or the handle was closed): the child
+			// is gone, and the Signal would only draw a fault.
+			if (finished || exitCode != null) {
+				return;
+			}
+			checkNotCancelled();
+			signal(commandId, Envelopes.CTRL_C_CODE, operationTimeoutMs);
 		}
 
 		/** Turn one 200 Receive response into a chunk, recording the exit code when it says Done. */
@@ -775,10 +844,14 @@ final class WsmanClient implements AutoCloseable {
 		throw new IllegalStateException("Shell ID not found in Create response");
 	}
 
-	private String sendCommand(final String commandLine, final long timeoutMs, final boolean failOnQuietTimeout)
-		throws Exception {
+	private String sendCommand(
+		final String commandLine,
+		final long timeoutMs,
+		final boolean failOnQuietTimeout,
+		final boolean consoleModeStdin
+	) throws Exception {
 		final Document doc = exchange(
-			Envelopes.command(url, shellId, commandLine, timeoutMs),
+			Envelopes.command(url, shellId, commandLine, timeoutMs, consoleModeStdin),
 			"Command",
 			timeoutMs,
 			failOnQuietTimeout
@@ -791,7 +864,16 @@ final class WsmanClient implements AutoCloseable {
 	}
 
 	private void terminate(final String commandId, final long timeoutMs) throws Exception {
-		final Decoded resp = request(Envelopes.signal(url, shellId, commandId, timeoutMs));
+		signal(commandId, Envelopes.TERMINATE_CODE, timeoutMs);
+	}
+
+	/**
+	 * Send one Signal for a command. A missing shell is tolerated (the command may already be gone),
+	 * and the cached shell id is then dropped so the next command creates a fresh one up front
+	 * instead of discovering the stale one the hard way.
+	 */
+	private void signal(final String commandId, final String code, final long timeoutMs) throws Exception {
+		final Decoded resp = request(Envelopes.signal(url, shellId, commandId, code, timeoutMs));
 		// A missing shell is fine here — the command already finished and the shell may be gone.
 		// But drop the cached ID so the next command creates a fresh shell up front instead of
 		// discovering the stale one the hard way.

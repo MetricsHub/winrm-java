@@ -285,8 +285,12 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	}
 
 	@Override
-	public CommandCursor startCommand(final String command, final String workingDirectory, final long timeout)
-		throws TimeoutException, WindowsRemoteException {
+	public CommandCursor startCommand(
+		final String command,
+		final String workingDirectory,
+		final long timeout,
+		final boolean consoleModeStdin
+	) throws TimeoutException, WindowsRemoteException {
 		checkNotClosed();
 		Utils.checkNonNull(command, "command");
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
@@ -294,7 +298,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		// Shell creation and command startup happen here, on the caller's thread, so failures
 		// surface immediately rather than on the first output chunk.
 		final WsmanClient.RemoteCommand remoteCommand = callStreaming(
-			() -> client.startCommand(command, workingDirectory, timeout, true)
+			() -> client.startCommand(command, workingDirectory, timeout, true, consoleModeStdin)
 		);
 		return new CommandCursor() {
 			@Override
@@ -309,6 +313,22 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 
 			private Chunk adapt(final WsmanClient.RemoteCommand.Chunk chunk) {
 				return chunk == null ? null : new Chunk(chunk.stdout, chunk.stderr);
+			}
+
+			@Override
+			public void send(final byte[] data, final boolean end) throws TimeoutException, WindowsRemoteException {
+				callStreaming(() -> {
+					remoteCommand.send(data, end);
+					return null;
+				});
+			}
+
+			@Override
+			public void interrupt() throws TimeoutException, WindowsRemoteException {
+				callStreaming(() -> {
+					remoteCommand.interrupt();
+					return null;
+				});
 			}
 
 			@Override
