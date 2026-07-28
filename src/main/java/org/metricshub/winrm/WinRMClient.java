@@ -22,7 +22,6 @@ package org.metricshub.winrm;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.IOException;
-import java.nio.charset.Charset;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -33,7 +32,6 @@ import org.metricshub.winrm.exceptions.WinRMClientException;
 import org.metricshub.winrm.exceptions.WinRMException;
 import org.metricshub.winrm.exceptions.WinRMTimeoutException;
 import org.metricshub.winrm.exceptions.WindowsRemoteException;
-import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
 import org.metricshub.winrm.service.WinRMEndpoint;
 import org.metricshub.winrm.service.WinRMExecutorFactory;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
@@ -84,10 +82,6 @@ public final class WinRMClient implements AutoCloseable {
 	private final String hostname;
 	private final String namespace;
 	private final Duration timeout;
-
-	// The remote OS code set does not change during a session: detect it once, on the first
-	// command that needs it, and reuse it for every later command.
-	private volatile Charset detectedCharset;
 
 	private WinRMClient(
 		final WindowsRemoteExecutor executor,
@@ -190,23 +184,6 @@ public final class WinRMClient implements AutoCloseable {
 	/** The client-level default operation timeout. */
 	Duration defaultTimeout() {
 		return timeout;
-	}
-
-	/**
-	 * The charset of the remote command output, detected from the remote OS code set on first
-	 * use and cached for the lifetime of the client.
-	 */
-	Charset detectCharset(final long timeoutMillis, final long start)
-		throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
-		Charset charset = detectedCharset;
-		if (charset == null) {
-			charset = WindowsRemoteProcessUtils.getWindowsEncodingCharset(
-				executor,
-				TimeoutHelper.getRemainingTime(timeoutMillis, start, "No time left to detect the remote encoding")
-			);
-			detectedCharset = charset;
-		}
-		return charset;
 	}
 
 	/**

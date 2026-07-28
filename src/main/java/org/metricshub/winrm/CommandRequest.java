@@ -33,7 +33,6 @@ import java.util.stream.Collectors;
 import org.metricshub.winrm.exceptions.WinRMClientException;
 import org.metricshub.winrm.exceptions.WinRMTimeoutException;
 import org.metricshub.winrm.exceptions.WindowsRemoteException;
-import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
 
 /**
  * A command being prepared for execution, created by {@link WinRMClient#command(String)}.
@@ -81,7 +80,7 @@ public final class CommandRequest {
 
 	/**
 	 * Set the timeout of this command. For {@link #execute()} it is a wall-clock deadline covering
-	 * file uploads, encoding detection, and the command itself; for {@link #start()} it is an
+	 * file uploads and the command itself; for {@link #start()} it is an
 	 * <i>inactivity</i> timeout — the longest silence tolerated from the server between two
 	 * responses, with no overall deadline. Default: the client's timeout.
 	 *
@@ -94,8 +93,11 @@ public final class CommandRequest {
 	}
 
 	/**
-	 * Set the charset used to decode the command output. Default: detected from the remote
-	 * operating system's code set (one extra WQL query, cached on the client).
+	 * Set the charset used to decode the command output. Default:
+	 * {@link WindowsRemoteExecutor#SHELL_OUTPUT_CHARSET} (UTF-8), which is what the remote shell
+	 * emits — its console code page is set to 65001 when the shell is created, whatever the remote
+	 * locale. Override this only for a command that changes the console code page itself (a leading
+	 * {@code chcp}) or writes raw bytes in another encoding to its standard output.
 	 *
 	 * @param charset the output charset
 	 * @return this request
@@ -212,7 +214,7 @@ public final class CommandRequest {
 			return Utils.execute(() -> drainWithCallbacks(prepared, remaining, start), remaining);
 		} catch (final TimeoutException e) {
 			throw timeoutException(e);
-		} catch (final IOException | WqlQuerySyntaxException e) {
+		} catch (final IOException e) {
 			throw new WinRMClientException(e.getMessage(), e);
 		} catch (final InterruptedException e) {
 			Thread.currentThread().interrupt();
@@ -241,8 +243,8 @@ public final class CommandRequest {
 	 * <b>The process must be closed</b> — use try-with-resources. It holds the client's serial
 	 * connection until the command completes or the handle is closed; closing early terminates
 	 * the remote command (WinRM terminate {@code Signal}). The timeout acts as an
-	 * <i>inactivity</i> timeout — see {@link RemoteProcess}. File uploads and encoding detection
-	 * run here, before the command starts.
+	 * <i>inactivity</i> timeout — see {@link RemoteProcess}. File uploads run here, before the
+	 * command starts.
 	 *
 	 * @return the running process handle, to use with try-with-resources
 	 * @throws org.metricshub.winrm.exceptions.WinRMTimeoutException when the command startup times out
@@ -263,7 +265,7 @@ public final class CommandRequest {
 			return new RemoteProcess(cursor, prepared.charset, client.hostname(), timeout);
 		} catch (final TimeoutException e) {
 			throw timeoutException(e);
-		} catch (final IOException | WqlQuerySyntaxException e) {
+		} catch (final IOException e) {
 			throw new WinRMClientException(e.getMessage(), e);
 		} catch (final WindowsRemoteException e) {
 			throw WinRMClient.translate(e);
@@ -290,7 +292,7 @@ public final class CommandRequest {
 	 * resolve the output charset.
 	 */
 	private Prepared prepare(final long timeoutMillis, final long start)
-		throws IOException, TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
+		throws IOException, TimeoutException, WindowsRemoteException {
 		String actualCommand = commandLine;
 		String actualWorkingDirectory = workingDirectory;
 
@@ -309,7 +311,7 @@ public final class CommandRequest {
 			actualWorkingDirectory = null;
 		}
 
-		final Charset actualCharset = charset != null ? charset : client.detectCharset(timeoutMillis, start);
+		final Charset actualCharset = charset != null ? charset : WindowsRemoteExecutor.SHELL_OUTPUT_CHARSET;
 		return new Prepared(actualCommand, actualWorkingDirectory, actualCharset);
 	}
 

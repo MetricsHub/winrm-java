@@ -36,6 +36,7 @@ import javax.net.ssl.SSLSocketFactory;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import org.metricshub.winrm.WindowsRemoteExecutor;
 import org.metricshub.winrm.exceptions.WinRMAuthenticationException;
 import org.metricshub.winrm.exceptions.WinRMFaultException;
 import org.w3c.dom.Document;
@@ -413,7 +414,8 @@ final class WsmanClient implements AutoCloseable {
 	 *
 	 * @param commandLine the command line to run
 	 * @param workingDirectory working directory of the shell (only honored when the shell is created)
-	 * @param charset the charset decoding the output streams
+	 * @param charset the charset decoding the output streams; {@code null} uses
+	 *        {@link WindowsRemoteExecutor#SHELL_OUTPUT_CHARSET}
 	 * @param operationTimeoutMs this operation's timeout, driving the WSMan OperationTimeout header
 	 *        and the socket read timeout
 	 */
@@ -423,7 +425,7 @@ final class WsmanClient implements AutoCloseable {
 		final Charset charset,
 		final long operationTimeoutMs
 	) throws Exception {
-		final Charset cs = charset != null ? charset : StandardCharsets.UTF_8;
+		final Charset cs = charset != null ? charset : WindowsRemoteExecutor.SHELL_OUTPUT_CHARSET;
 		final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
 		final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
 		try (RemoteCommand command = startCommand(commandLine, workingDirectory, operationTimeoutMs, false)) {

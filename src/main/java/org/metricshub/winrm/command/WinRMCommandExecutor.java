@@ -21,7 +21,6 @@ package org.metricshub.winrm.command;
  */
 
 import java.io.IOException;
-import java.nio.charset.Charset;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
@@ -33,9 +32,7 @@ import org.metricshub.winrm.Utils;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
 import org.metricshub.winrm.WindowsRemoteExecutor;
-import org.metricshub.winrm.WindowsRemoteProcessUtils;
 import org.metricshub.winrm.exceptions.WindowsRemoteException;
-import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
 import org.metricshub.winrm.service.WinRMEndpoint;
 import org.metricshub.winrm.service.WinRMExecutorFactory;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
@@ -108,12 +105,12 @@ public class WinRMCommandExecutor {
 				authentications
 			)) {
 			if (localFiles.isEmpty()) {
-				final Charset charset = WindowsRemoteProcessUtils.getWindowsEncodingCharset(
-					winRMService,
-					TimeoutHelper.getRemainingTime(timeout, start, "No time left to retrieve the code set")
+				return winRMService.executeCommand(
+					command,
+					workingDirectory,
+					WindowsRemoteExecutor.SHELL_OUTPUT_CHARSET,
+					timeout
 				);
-
-				return winRMService.executeCommand(command, workingDirectory, charset, timeout);
 			}
 
 			// Copy the specified list of files through the command shell, and update the command accordingly
@@ -124,19 +121,12 @@ public class WinRMCommandExecutor {
 				TimeoutHelper.getRemainingTime(timeout, start, "No time left to copy the local files")
 			);
 
-			final Charset charset = WindowsRemoteProcessUtils.getWindowsEncodingCharset(
-				winRMService,
-				TimeoutHelper.getRemainingTime(timeout, start, "No time left to retrieve the code set")
-			);
-
 			return winRMService.executeCommand(
 				String.format("CMD.EXE /C (%s)", localFilesUpdatedCommand),
 				null,
-				charset,
+				WindowsRemoteExecutor.SHELL_OUTPUT_CHARSET,
 				TimeoutHelper.getRemainingTime(timeout, start, "No time left to execute command")
 			);
-		} catch (final WqlQuerySyntaxException e) {
-			throw new IOException(e);
 		}
 	}
 }
