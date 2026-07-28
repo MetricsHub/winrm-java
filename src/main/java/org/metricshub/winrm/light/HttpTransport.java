@@ -65,6 +65,16 @@ final class HttpTransport implements AutoCloseable {
 	private int connectTimeoutMillis;
 	private int readTimeoutMillis;
 
+	// Absolute bound (epoch ms, 0 = none) on every socket wait while a deadline-bounded poll is
+	// active — see pollTimeout(int). Cleared by the other timeout modes.
+	private long deadlineEpochMillis;
+
+	// Streaming (inactivity) mode: every request leg (re)arms the absolute deadline for itself, so
+	// one WHOLE response — not each of its reads — is bounded by the inactivity timeout. SO_TIMEOUT
+	// alone restarts on every byte, and a peer trickling an endless incomplete response would
+	// otherwise hold a streaming fetch forever.
+	private boolean deadlinePerLeg;
+
 	HttpTransport(final String host, final int port, final int timeoutMillis) {
 		this(host, port, timeoutMillis, null, false);
 	}
@@ -87,23 +97,80 @@ final class HttpTransport implements AutoCloseable {
 	}
 
 	/**
-	 * Align the socket timeouts with the current operation's timeout: the connect timeout for a
-	 * (re)connection made on behalf of this operation, and the read timeout (plus headroom, so
-	 * the WSMan OperationTimeout fault arrives before the socket read gives up). Applies to the
-	 * live connection immediately and to any future reconnection.
+	 * Align the socket timeouts with the current blocking operation's timeout: the connect timeout
+	 * for a (re)connection made on behalf of this operation, and the read timeout (plus headroom,
+	 * so the WSMan OperationTimeout fault the Receive loop retries on reliably arrives before the
+	 * socket read gives up — the blocking paths are bounded by their caller's wall-clock deadline,
+	 * not by the socket). Applies to the live connection immediately and to any future
+	 * reconnection.
 	 *
 	 * @param operationTimeoutMillis the current operation's timeout in milliseconds
 	 */
 	void operationTimeout(final int operationTimeoutMillis) {
-		connectTimeoutMillis = operationTimeoutMillis;
-		readTimeoutMillis = operationTimeoutMillis + 10_000;
+		applyTimeouts(operationTimeoutMillis, operationTimeoutMillis + 10_000, 0, false);
+	}
+
+	/**
+	 * Socket timeouts for one deadline-bounded poll round trip: the budget is the deadline itself
+	 * — no headroom on top, or a peer that stopped answering could hold a deadline-bounded wait
+	 * past its advertised bound (the caller carves the fault-transit slack out of the INSIDE of
+	 * the budget instead, by asking the server to answer earlier than the budget).
+	 * <p>
+	 * The budget also becomes an ABSOLUTE deadline shared by every socket operation until the
+	 * next timeout-mode switch: one poll may span several HTTP round trips (a dropped connection
+	 * forces a reconnect and a whole re-authentication exchange), and each leg must only get what
+	 * is left of the budget — not a fresh full timeout each, which would let a slow peer stretch
+	 * a deadline-bounded wait to several multiples of the requested duration.
+	 *
+	 * @param budgetMillis the poll's whole budget in milliseconds
+	 */
+	void pollTimeout(final int budgetMillis) {
+		applyTimeouts(budgetMillis, budgetMillis, Utils.getCurrentTimeMillis() + budgetMillis, false);
+	}
+
+	/**
+	 * Align the socket timeouts with a STREAMING operation's inactivity timeout. Unlike
+	 * {@link #operationTimeout(int)} the read timeout gets NO headroom: the streaming paths have
+	 * no outer wall-clock timer, and a read timeout there means "the server stayed silent too
+	 * long" — so the socket must give up at the inactivity bound itself, not ten seconds later.
+	 * A server that enforces the WSMan OperationTimeout by answering with the op-timeout fault
+	 * reaches the caller through that fault instead; both surface as the same timeout.
+	 * <p>
+	 * The bound is absolute per request leg (armed at the start of each {@link #post}): one whole
+	 * response must arrive within the inactivity timeout — a peer trickling bytes must not restart
+	 * the clock with every byte and hold a streaming fetch forever.
+	 *
+	 * @param inactivityTimeoutMillis the longest tolerated silence in milliseconds
+	 */
+	void inactivityTimeout(final int inactivityTimeoutMillis) {
+		applyTimeouts(inactivityTimeoutMillis, inactivityTimeoutMillis, 0, true);
+	}
+
+	private void applyTimeouts(final int connectMillis, final int readMillis, final long deadline, final boolean perLeg) {
+		deadlineEpochMillis = deadline;
+		deadlinePerLeg = perLeg;
+		connectTimeoutMillis = connectMillis;
+		readTimeoutMillis = readMillis;
 		if (socket != null && !socket.isClosed()) {
 			try {
-				socket.setSoTimeout(readTimeoutMillis);
+				socket.setSoTimeout(boundedByDeadline(readTimeoutMillis));
 			} catch (final IOException ignored) {
 				// the next read fails and request() re-establishes the connection
 			}
 		}
+	}
+
+	/**
+	 * Cap a configured timeout by what is left of the poll deadline, when one is active. The 1 ms
+	 * floor keeps an already-expired deadline from disabling the timeout (0 would mean "infinite"
+	 * to a socket): the next blocking operation then fails almost immediately instead.
+	 */
+	private int boundedByDeadline(final int timeoutMillis) {
+		if (deadlineEpochMillis == 0) {
+			return timeoutMillis;
+		}
+		final long remaining = deadlineEpochMillis - Utils.getCurrentTimeMillis();
+		return (int) Math.max(1, Math.min(timeoutMillis, remaining));
 	}
 
 	static final class Response {
@@ -225,8 +292,8 @@ final class HttpTransport implements AutoCloseable {
 				params.setEndpointIdentificationAlgorithm("HTTPS");
 				sslSocket.setSSLParameters(params);
 			}
-			newSocket.connect(new InetSocketAddress(host, port), connectTimeoutMillis);
-			newSocket.setSoTimeout(readTimeoutMillis);
+			newSocket.connect(new InetSocketAddress(host, port), boundedByDeadline(connectTimeoutMillis));
+			newSocket.setSoTimeout(boundedByDeadline(readTimeoutMillis));
 			if (newSocket instanceof SSLSocket) {
 				// Force the TLS handshake now so certificate/hostname failures surface here, not on
 				// the first read after we have already sent the request.
@@ -254,8 +321,19 @@ final class HttpTransport implements AutoCloseable {
 
 	Response post(final String path, final byte[] body, final String contentType, final String authorization)
 		throws IOException {
+		if (deadlinePerLeg) {
+			// Streaming mode: this whole leg — a reconnect included — must complete within the
+			// inactivity timeout, however many reads it takes (see inactivityTimeout(int)).
+			deadlineEpochMillis = Utils.getCurrentTimeMillis() + readTimeoutMillis;
+		}
 		ensureConnected();
 		try {
+			if (deadlineEpochMillis != 0) {
+				// Several HTTP legs can run under one poll deadline (reconnect, authentication
+				// exchange, the request itself): re-cap the read wait to what is left of the budget
+				// at the start of every leg.
+				socket.setSoTimeout(boundedByDeadline(readTimeoutMillis));
+			}
 			final StringBuilder head = new StringBuilder();
 			head.append("POST ").append(path).append(" HTTP/1.1\r\n");
 			head.append("Accept: */*\r\n");
@@ -343,7 +421,7 @@ final class HttpTransport implements AutoCloseable {
 		final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
 		int b;
 		int prev = -1;
-		while ((b = in.read()) != -1) {
+		while ((b = readByte()) != -1) {
 			if (prev == '\r' && b == '\n') {
 				final byte[] raw = buffer.toByteArray();
 				return new String(raw, 0, raw.length - 1, StandardCharsets.ISO_8859_1);
@@ -358,6 +436,7 @@ final class HttpTransport implements AutoCloseable {
 		final byte[] buffer = new byte[length];
 		int read = 0;
 		while (read < length) {
+			beforeBlockingRead();
 			final int n = in.read(buffer, read, length - read);
 			if (n < 0) {
 				throw new IOException("Unexpected EOF: got " + read + " of " + length + " body bytes");
@@ -365,6 +444,25 @@ final class HttpTransport implements AutoCloseable {
 			read += n;
 		}
 		return buffer;
+	}
+
+	/** One byte of the response, its blocking wait re-capped by the poll deadline. */
+	private int readByte() throws IOException {
+		beforeBlockingRead();
+		return in.read();
+	}
+
+	/**
+	 * Re-cap the socket timeout by what is left of the poll deadline before a blocking read.
+	 * {@code SO_TIMEOUT} applies to EACH read independently: without this, a peer trickling a
+	 * response one byte at a time would reset its clock with every byte and stretch a
+	 * deadline-bounded poll arbitrarily past the deadline. Costs nothing outside poll mode, and
+	 * skips the syscall while buffered data makes the next read non-blocking.
+	 */
+	private void beforeBlockingRead() throws IOException {
+		if (deadlineEpochMillis != 0 && in.available() == 0) {
+			socket.setSoTimeout(boundedByDeadline(readTimeoutMillis));
+		}
 	}
 
 	private byte[] readChunked() throws IOException {

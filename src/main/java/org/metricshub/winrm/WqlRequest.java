@@ -4,7 +4,7 @@ package org.metricshub.winrm;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2026 MetricsHub
+ * Copyright (C) 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,8 +23,13 @@ package org.metricshub.winrm;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Spliterator;
+import java.util.Spliterators;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 import org.metricshub.winrm.exceptions.WinRMTimeoutException;
 import org.metricshub.winrm.exceptions.WindowsRemoteException;
 import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
@@ -33,7 +38,7 @@ import org.metricshub.winrm.exceptions.WqlSyntaxException;
 /**
  * A WQL query being prepared for execution, created by {@link WinRMClient#wql(String)}.
  * Every option has a sensible default; {@link #execute()} runs the query and returns the
- * complete result.
+ * complete result, {@link #stream()} yields the rows lazily as they arrive.
  */
 public final class WqlRequest {
 
@@ -72,8 +77,10 @@ public final class WqlRequest {
 	}
 
 	/**
-	 * Set the timeout of this query — a wall-clock deadline covering every WSMan round trip and
-	 * result collection. Default: the client's timeout.
+	 * Set the timeout of this query. For {@link #execute()} it is a wall-clock deadline covering
+	 * every WSMan round trip and result collection; for {@link #stream()} it is an
+	 * <i>inactivity</i> timeout — the longest silence tolerated from the server between two
+	 * responses, with no overall deadline. Default: the client's timeout.
 	 *
 	 * @param timeout the timeout (at least one millisecond)
 	 * @return this request
@@ -143,5 +150,80 @@ public final class WqlRequest {
 		} catch (final WindowsRemoteException e) {
 			throw WinRMClient.translate(e);
 		}
+	}
+
+	/**
+	 * Execute the query and stream the rows lazily: each row is yielded as soon as it is parsed,
+	 * and the next WS-Enumeration page is pulled from the server only as the stream advances —
+	 * memory stays bounded by one page ({@link #pageSize(int)}) instead of the whole result set.
+	 *
+	 * <pre>{@code
+	 * try (Stream<WqlRow> rows = client.wql("SELECT * FROM Win32_NTLogEvent").stream()) {
+	 * 	rows.filter(row -> "Error".equals(row.string("Type"))).limit(100).forEach(this::process);
+	 * }
+	 * }</pre>
+	 * <p>
+	 * <b>The stream must be closed</b> (same contract as {@link java.nio.file.Files#lines}) — use
+	 * try-with-resources. It holds the client's serial connection while open: other operations on
+	 * the same client block until it is closed or exhausted. Closing before the last row tells the
+	 * server to release the enumeration immediately (WS-Enumeration {@code Release}).
+	 * <p>
+	 * The timeout acts as an <i>inactivity</i> timeout — the longest silence tolerated from the
+	 * server between two responses — not an overall deadline: consuming a large result can take
+	 * arbitrarily long as long as the server keeps answering. The initial request is sent here;
+	 * later pages are fetched during consumption, so the exceptions below can also be thrown from
+	 * the stream's operations while iterating.
+	 *
+	 * @return a lazy, sequential stream of rows, to use with try-with-resources
+	 * @throws WqlSyntaxException when the WQL query is invalid
+	 * @throws org.metricshub.winrm.exceptions.WinRMTimeoutException when the inactivity timeout
+	 *         elapses
+	 * @throws org.metricshub.winrm.exceptions.WinRMAuthenticationException when the credentials are rejected
+	 * @throws org.metricshub.winrm.exceptions.WinRMFaultException when the remote service answers with a WSMan fault
+	 * @throws org.metricshub.winrm.exceptions.WinRMClientException for any other failure
+	 */
+	public Stream<WqlRow> stream() {
+		final long timeoutMillis = WinRMClient.toMillis(timeout);
+		final long pullTimeoutMillis = pullTimeout != null ? WinRMClient.toMillis(pullTimeout) : 0;
+		final WqlCursor cursor;
+		try {
+			cursor = client.executor().streamWql(namespace, query, timeoutMillis, pageSize, pullTimeoutMillis);
+		} catch (final TimeoutException e) {
+			throw timeoutException(e);
+		} catch (final WqlQuerySyntaxException e) {
+			throw new WqlSyntaxException(e.getMessage(), e);
+		} catch (final WindowsRemoteException e) {
+			throw WinRMClient.translate(e);
+		}
+
+		final Spliterator<WqlRow> spliterator = new Spliterators.AbstractSpliterator<WqlRow>(
+			Long.MAX_VALUE,
+			Spliterator.ORDERED | Spliterator.NONNULL | Spliterator.IMMUTABLE
+		) {
+			@Override
+			public boolean tryAdvance(final Consumer<? super WqlRow> action) {
+				final Map<String, Object> row;
+				try {
+					row = cursor.next();
+				} catch (final TimeoutException e) {
+					throw timeoutException(e);
+				} catch (final WindowsRemoteException e) {
+					throw WinRMClient.translate(e);
+				}
+				if (row == null) {
+					return false;
+				}
+				action.accept(new WqlRow(row));
+				return true;
+			}
+		};
+		return StreamSupport.stream(spliterator, false).onClose(cursor::close);
+	}
+
+	private WinRMTimeoutException timeoutException(final TimeoutException cause) {
+		return new WinRMTimeoutException(
+			String.format("WQL query timed out after %s on %s", timeout, client.hostname()),
+			cause
+		);
 	}
 }

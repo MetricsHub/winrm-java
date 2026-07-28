@@ -4,7 +4,7 @@ package org.metricshub.winrm;
  * ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
  * WinRM Java Client
  * ჻჻჻჻჻჻
- * Copyright 2023 - 2026 MetricsHub
+ * Copyright (C) 2023 - 2026 MetricsHub
  * ჻჻჻჻჻჻
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,8 +60,14 @@ import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
  * }
  * }</pre>
  * <p>
+ * Besides the blocking {@code execute()} terminals, both operations can stream:
+ * {@link WqlRequest#stream()} yields WQL rows lazily page by page, and
+ * {@link CommandRequest#start()} returns a {@link RemoteProcess} whose output is consumed while
+ * the command is still running.
+ * <p>
  * Thread-safety: a client may be shared between threads, but a WinRM connection is a serial
- * channel — concurrent operations are executed one at a time.
+ * channel — concurrent operations are executed one at a time, and an open stream or process
+ * holds the connection until it is closed.
  * <p>
  * Failures are reported through the unchecked
  * {@link org.metricshub.winrm.exceptions.WinRMClientException} hierarchy; the legacy static

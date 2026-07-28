@@ -15,6 +15,11 @@ The **WinRM Java Client** is a small library that talks to the Windows Remote Ma
 * **execute remote commands**, capturing standard output, standard error and the exit code —
   optionally copying local script files to the host first ([Remote Commands](commands.html)).
 
+Both operations can also **stream**: WQL rows are consumed page by page as they arrive
+(`stream()`), and command output is consumed while the command is still running (`start()`,
+returning a `java.lang.Process`-like handle) — memory stays bounded regardless of the result
+size.
+
 It supports **NTLM** over HTTP (with message encryption) and HTTPS, and **Kerberos (SPNEGO)** over
 HTTPS ([Authentication](authentication.html)).
 
@@ -104,6 +109,7 @@ remain available and unchanged, with their checked exceptions.
 * [WQL Queries](wql.html) — query WMI and read the result
 * [Remote Commands](commands.html) — run commands and copy files to the host
 * [File Transfers](file-transfers.html) — how files are copied through the WinRM channel
+* [Command-Line Client](cli.html) — the standalone jar's manual page
 * [Authentication](authentication.html) — NTLM and Kerberos
 * [TLS / HTTPS](tls.html) — certificate validation and trust stores
 * [Timeouts and Errors](timeouts-and-errors.html) — timeout semantics and the exception surface

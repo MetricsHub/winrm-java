@@ -1,5 +1,5 @@
-keywords: timeout, exception, error, winrmclientexception, wsmanfault, exit code
-description: Timeout semantics and the exception surface of the WinRM Java Client, plus the command-line exit codes.
+keywords: timeout, exception, error, winrmclientexception, wsmanfault
+description: Timeout semantics and the exception surface of the WinRM Java Client.
 
 # Timeouts and Errors
 
@@ -32,6 +32,18 @@ no part of it (in particular: the command itself) runs afterward.
 
 The timeout also drives the wire-level behavior: the WSMan `OperationTimeout` header and the
 socket timeouts follow each operation's own deadline.
+
+### Streaming terminals: inactivity timeout
+
+The streaming terminals — `stream()` on a WQL request and `start()` on a command (see
+[WQL Queries](wql.html) and [Remote Commands](commands.html)) — interpret the same `timeout(...)`
+value differently, because an overall deadline would make long-running streams impossible: there
+it is an **inactivity timeout**, the longest silence tolerated from the server between two
+responses. A query result can be consumed, or a command can keep streaming output, for arbitrarily
+long — but as soon as the server stays silent for a whole timeout, the operation fails with
+[`WinRMTimeoutException`](apidocs/org/metricshub/winrm/exceptions/WinRMTimeoutException.html).
+For commands, `RemoteProcess.waitFor(Duration)` provides an overall deadline on top when one is
+needed.
 
 ## The exception surface
 
@@ -80,17 +92,5 @@ unaffected by the unchecked hierarchy above.
 
 ## Command-line exit codes
 
-The standalone jar maps outcomes to stable process exit codes:
-
-| Exit code | Meaning |
-| ---: | --- |
-| `0` | Successful WQL query or remote command. |
-| `0`–`255` | Remote command exit code, when it fits in that range. |
-| `64` | Invalid CLI usage. |
-| `69` | Connection, DNS, socket, or TLS failure. |
-| `70` | WinRM protocol or other remote failure. |
-| `77` | Authentication failure. |
-| `124` | Operation timeout. |
-
-Diagnostics are written only to standard error, so a WQL query's JSON Lines output on standard
-output is never mixed with error messages.
+The standalone jar maps these outcomes to stable process exit codes — see the
+[Command-Line Client](cli.html) manual.
