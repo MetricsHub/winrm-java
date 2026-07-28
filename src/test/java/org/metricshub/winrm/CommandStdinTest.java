@@ -542,6 +542,10 @@ class CommandStdinTest {
 			// execute() cannot take interactive input: the misconfiguration is rejected before any
 			// request leaves the client — a command waiting on a never-fed pipe would hang instead.
 			assertThrows(IllegalStateException.class, () -> client.command("sort").stdin().execute());
+
+			// The last stdin call wins: the no-argument declaration discards previously
+			// pre-supplied input, so this request is interactive too — and rejected the same way.
+			assertThrows(IllegalStateException.class, () -> client.command("sort").stdin("data\n").stdin().execute());
 		}
 		assertEquals(0, server.decryptedRequests().size());
 	}

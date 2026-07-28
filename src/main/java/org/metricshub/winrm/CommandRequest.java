@@ -197,11 +197,13 @@ public final class CommandRequest {
 	 * Only meaningful with {@link #start()} — {@link #execute()} cannot take interactive input and
 	 * rejects a request configured this way. Without any {@code stdin} call, the historical
 	 * console semantics are kept (what a command that never reads input, and the interactive CLI
-	 * shell, want).
+	 * shell, want). Like every {@code stdin} variant, the LAST call wins: any previously
+	 * pre-supplied input is discarded.
 	 *
 	 * @return this request
 	 */
 	public CommandRequest stdin() {
+		this.stdinSource = null;
 		this.pipeStdin = true;
 		return this;
 	}
