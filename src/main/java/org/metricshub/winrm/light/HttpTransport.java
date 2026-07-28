@@ -405,7 +405,7 @@ final class HttpTransport implements AutoCloseable {
 		final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
 		int b;
 		int prev = -1;
-		while ((b = in.read()) != -1) {
+		while ((b = readByte()) != -1) {
 			if (prev == '\r' && b == '\n') {
 				final byte[] raw = buffer.toByteArray();
 				return new String(raw, 0, raw.length - 1, StandardCharsets.ISO_8859_1);
@@ -420,6 +420,7 @@ final class HttpTransport implements AutoCloseable {
 		final byte[] buffer = new byte[length];
 		int read = 0;
 		while (read < length) {
+			beforeBlockingRead();
 			final int n = in.read(buffer, read, length - read);
 			if (n < 0) {
 				throw new IOException("Unexpected EOF: got " + read + " of " + length + " body bytes");
@@ -427,6 +428,25 @@ final class HttpTransport implements AutoCloseable {
 			read += n;
 		}
 		return buffer;
+	}
+
+	/** One byte of the response, its blocking wait re-capped by the poll deadline. */
+	private int readByte() throws IOException {
+		beforeBlockingRead();
+		return in.read();
+	}
+
+	/**
+	 * Re-cap the socket timeout by what is left of the poll deadline before a blocking read.
+	 * {@code SO_TIMEOUT} applies to EACH read independently: without this, a peer trickling a
+	 * response one byte at a time would reset its clock with every byte and stretch a
+	 * deadline-bounded poll arbitrarily past the deadline. Costs nothing outside poll mode, and
+	 * skips the syscall while buffered data makes the next read non-blocking.
+	 */
+	private void beforeBlockingRead() throws IOException {
+		if (deadlineEpochMillis != 0 && in.available() == 0) {
+			socket.setSoTimeout(boundedByDeadline(readTimeoutMillis));
+		}
 	}
 
 	private byte[] readChunked() throws IOException {

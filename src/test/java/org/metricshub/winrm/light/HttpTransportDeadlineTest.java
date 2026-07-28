@@ -74,6 +74,51 @@ class HttpTransportDeadlineTest {
 		} // closing the ServerSocket unblocks the handler thread
 	}
 
+	@Test
+	void aTricklingPeerCannotStretchABoundedPollPastItsDeadline() throws Exception {
+		try (ServerSocket server = new ServerSocket(0)) {
+			final Thread handler = new Thread(
+				() -> {
+					// One connection: read the request head, then trickle the response one byte
+					// every 300 ms. SO_TIMEOUT applies per read, so without the deadline every byte
+					// would reset the clock and the ~40-byte response would take ~12 s.
+					try (Socket socket = server.accept()) {
+						final InputStream in = new BufferedInputStream(socket.getInputStream());
+						final OutputStream out = socket.getOutputStream();
+						if (readRequestHead(in)) {
+							for (final byte b : "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".getBytes(
+								StandardCharsets.ISO_8859_1
+							)) {
+								Thread.sleep(300);
+								out.write(b);
+								out.flush();
+							}
+						}
+					} catch (final IOException | InterruptedException ignored) {
+						// client timed out or test over
+					}
+				},
+				"trickle-http-server"
+			);
+			handler.setDaemon(true);
+			handler.start();
+
+			final HttpTransport transport = new HttpTransport("127.0.0.1", server.getLocalPort(), 60_000);
+			try {
+				transport.pollTimeout(500);
+				final long start = System.nanoTime();
+				assertThrows(SocketTimeoutException.class, () -> transport.post("/wsman", new byte[0], null, null));
+				final long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+				assertTrue(
+					elapsedMillis < 3_000,
+					"each response byte must be capped by the shared deadline; took " + elapsedMillis + " ms"
+				);
+			} finally {
+				transport.close();
+			}
+		}
+	}
+
 	/** Serve every request of every connection with a minimal 200 response, 600 ms late. */
 	private static void serveSlowly(final ServerSocket server) {
 		try {
