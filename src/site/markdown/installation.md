@@ -66,6 +66,7 @@ Subcommands, options, password handling, streaming behavior, and exit codes are 
 
 ## Where to go next
 
+* [Preparing the Windows Host](preparing-the-host.html) — enabling WinRM and the required privileges
 * [WQL Queries](wql.html)
 * [Remote Commands](commands.html)
 * [Command-Line Client](cli.html)

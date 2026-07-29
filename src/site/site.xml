@@ -50,6 +50,7 @@
 		<menu name="Getting Started">
 			<item name="Overview" href="index.html" />
 			<item name="Installation" href="installation.html" />
+			<item name="Preparing the Windows Host" href="preparing-the-host.html" />
 		</menu>
 
 		<menu name="Usage">

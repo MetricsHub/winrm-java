@@ -28,6 +28,30 @@ The Windows Remote Management (WinRM) Java Client is a library that enables to:
 >   (and `WinRMWqlExecutor` copies the lists passed to its constructor): callers that mutated
 >   the returned collections must now copy them first.
 
+## Prerequisites on the target host
+
+WinRM must be enabled on the targeted Windows host, and the account must have sufficient privileges:
+
+* **Windows Server 2012 and later** have WinRM enabled by default — service running, HTTP listener
+  on port **5985**, firewall open, `Negotiate` and `Kerberos` authentication enabled. An
+  administrator account works with no host-side configuration.
+* **Windows 10 / 11** (and other client editions) do **not**: run `winrm quickconfig` or
+  `Enable-PSRemoting -Force` from an elevated prompt. Being domain-joined does not enable WinRM —
+  being a *Server* edition does.
+* **Privileges**: domain administrators, any domain account in the host's local `Administrators`,
+  and the built-in local `Administrator` work as-is. **Other local administrator accounts are
+  denied** by UAC remote token filtering unless `LocalAccountTokenFilterPolicy` is set to 1.
+  Non-administrator accounts need explicit grants on the WinRM listener (`RootSDDL`) and on WMI
+  (`WinRMRemoteWMIUsers__` plus namespace rights).
+* `AllowUnencrypted`, `Basic`, `CredSSP` and `TrustedHosts` do **not** need to be changed: over
+  plain HTTP the payload is protected by NTLM message encryption, and `TrustedHosts` is a
+  Windows-client setting that a Java client never reads.
+
+The full prerequisites — enabling WinRM over HTTP or HTTPS, Group Policy, firewall rules, the
+privileges each operation requires, configuring a non-administrator account, host quotas, and a
+symptom-to-cause troubleshooting table — are documented on the
+[Preparing the Windows Host](https://metricshub.org/winrm-java/preparing-the-host.html) page.
+
 ## Quick start
 
 The fluent `WinRMClient` is the entry point of the library: one client authenticates once and can

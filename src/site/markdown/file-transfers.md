@@ -170,3 +170,11 @@ Notes:
 * **Integrity**: every path through the transfer ends with a digest verification of the actual
   destination; the digest is a transfer-integrity check (the channel itself is authenticated and,
   over HTTP, encrypted).
+* **Host requirements**: the account must be able to run remote commands and to write to the
+  destination directory, and the host must provide `certutil` (transfer) and `forfiles`
+  (housekeeping). See [Preparing the Windows Host](preparing-the-host.html).
+
+## See also
+
+* [Remote Commands](commands.html) — the command builder that carries the transfer
+* [Preparing the Windows Host](preparing-the-host.html) — the privileges a transfer needs

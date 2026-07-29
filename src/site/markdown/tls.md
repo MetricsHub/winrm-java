@@ -112,4 +112,5 @@ java -jar ${project.artifactId}-${project.version}-standalone.jar \
 ## See also
 
 * [Authentication](authentication.html) — Kerberos requires HTTPS
+* [Preparing the Windows Host](preparing-the-host.html) — creating the HTTPS listener on port 5986
 * [Timeouts and Errors](timeouts-and-errors.html) — a TLS failure surfaces as a connection error
