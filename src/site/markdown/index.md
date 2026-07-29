@@ -60,6 +60,13 @@ command-line jar.
 
 ## A first WQL query
 
+> [!NOTE]
+> **On the target host**, WinRM must be enabled and the account must have sufficient privileges.
+> Windows Server 2012 and later have WinRM enabled by default and an administrator account works
+> with no configuration; Windows 10 / 11, non-administrator accounts, and local (non-domain)
+> administrator accounts all need host-side setup. See
+> [Preparing the Windows Host](preparing-the-host.html).
+
 Everything starts with the fluent
 [`WinRMClient`](apidocs/org/metricshub/winrm/WinRMClient.html) builder — one client authenticates
 once and can run any number of queries and commands over the same connection:
@@ -106,6 +113,8 @@ remain available and unchanged, with their checked exceptions.
 ## Where to go next
 
 * [Installation](installation.html) — coordinates, supported JDKs, and the standalone CLI jar
+* [Preparing the Windows Host](preparing-the-host.html) — prerequisites on the target: enabling WinRM
+  and the privileges the account needs
 * [WQL Queries](wql.html) — query WMI and read the result
 * [Remote Commands](commands.html) — run commands and copy files to the host
 * [File Transfers](file-transfers.html) — how files are copied through the WinRM channel

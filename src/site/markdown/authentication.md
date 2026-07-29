@@ -127,5 +127,7 @@ or when the KDC is not a fully qualified DNS name.
 
 ## See also
 
+* [Preparing the Windows Host](preparing-the-host.html) — the privileges the account needs, and why
+  local administrator accounts are often denied
 * [TLS / HTTPS](tls.html) — required for Kerberos and recommended for NTLM
 * [Timeouts and Errors](timeouts-and-errors.html) — how authentication failures surface

@@ -94,3 +94,9 @@ unaffected by the unchecked hierarchy above.
 
 The standalone jar maps these outcomes to stable process exit codes — see the
 [Command-Line Client](cli.html) manual.
+
+## See also
+
+* [Preparing the Windows Host](preparing-the-host.html) — a symptom-to-cause table for host-side
+  causes: WinRM disabled, a closed firewall, UAC token filtering, and missing WMI rights
+* [Authentication](authentication.html) — how authentication failures are reported
