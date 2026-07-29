@@ -93,6 +93,15 @@ class InteractiveShellTest {
 		server.enqueue(200, envelope(resourceCreated(SHELL_ID))).enqueue(200, envelope(commandResponse(COMMAND_ID)));
 	}
 
+	/**
+	 * The exact remote process the production shell subcommand starts: {@code cmd.exe /Q} over
+	 * pipe-mode stdin — the pump tests must exercise the production configuration (the ctrl_c
+	 * Signal under pipe-mode stdin is live-verified against a real Windows host).
+	 */
+	private static RemoteProcess shellProcess(final WinRMClient client) {
+		return client.command(WinRmCli.FluentRemoteOperations.SHELL_COMMAND).stdin().start();
+	}
+
 	/** An input source whose {@code nextPiece()} answers are fully scripted, including "not yet". */
 	private static final class ScriptedPieces implements InteractiveShell.InputSource {
 
@@ -149,7 +158,7 @@ class InteractiveShellTest {
 		final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
 		final int exitCode;
 		try (WinRMClient client = client()) {
-			try (RemoteProcess process = client.command("cmd.exe").start()) {
+			try (RemoteProcess process = shellProcess(client)) {
 				exitCode = InteractiveShell.bridge(
 					process,
 					ScriptedPieces.endingAfter("MODE PREPARE\r\n"),
@@ -191,7 +200,7 @@ class InteractiveShellTest {
 		final AtomicBoolean interruptRequested = new AtomicBoolean(true);
 		final int exitCode;
 		try (WinRMClient client = client()) {
-			try (RemoteProcess process = client.command("cmd.exe").start()) {
+			try (RemoteProcess process = shellProcess(client)) {
 				exitCode = InteractiveShell.bridge(
 					process,
 					ScriptedPieces.silent(),
@@ -238,7 +247,7 @@ class InteractiveShellTest {
 		final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
 		final int exitCode;
 		try (WinRMClient client = client()) {
-			try (RemoteProcess process = client.command("cmd.exe").start()) {
+			try (RemoteProcess process = shellProcess(client)) {
 				final PrintStream out = new PrintStream(stdout, true, "UTF-8");
 				exitCode = InteractiveShell.bridge(
 					process,
@@ -307,7 +316,7 @@ class InteractiveShellTest {
 		};
 		final int exitCode;
 		try (WinRMClient client = client()) {
-			try (RemoteProcess process = client.command("cmd.exe").start()) {
+			try (RemoteProcess process = shellProcess(client)) {
 				exitCode = InteractiveShell.bridge(
 					process,
 					latePiece,
@@ -347,7 +356,7 @@ class InteractiveShellTest {
 
 		final int exitCode;
 		try (WinRMClient client = client()) {
-			try (RemoteProcess process = client.command("cmd.exe").start()) {
+			try (RemoteProcess process = shellProcess(client)) {
 				exitCode = InteractiveShell.bridge(
 					process,
 					ScriptedPieces.endingAfter(hugeLine + "\r\n", "exit\r\n"),
