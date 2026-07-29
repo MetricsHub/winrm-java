@@ -155,6 +155,46 @@ public interface WindowsRemoteExecutor extends AutoCloseable {
 	}
 
 	/**
+	 * <p>
+	 * Variant of {@link #startCommand(String, String, long)} making the {@code WINRS_CONSOLEMODE_STDIN}
+	 * option explicit. The three-argument variant keeps the historical console semantics
+	 * ({@code TRUE}); pass {@code false} when the command will be fed standard input through
+	 * {@link CommandCursor#send(byte[], boolean)} and must see it as an ordinary pipe — a
+	 * console-mode stdin never reaches EOF for tools like {@code sort} or {@code more}.
+	 * </p>
+	 * <p>
+	 * The default implementation delegates console-mode requests to
+	 * {@link #startCommand(String, String, long)} — an executor that overrides only the historical
+	 * three-argument variant keeps working for ordinary commands — and throws
+	 * {@link UnsupportedOperationException} for pipe mode: only executors that support command
+	 * input (such as the built-in lightweight backend) implement it.
+	 * </p>
+	 *
+	 * @param command The command to execute
+	 * @param workingDirectory Path of the directory for the spawned process on the remote system (can be null)
+	 * @param timeout timeout in milliseconds of each WSMan round trip — the inactivity timeout of
+	 *        the stream, not an overall deadline (throws an IllegalArgumentException if negative
+	 *        or zero)
+	 * @param consoleModeStdin the value of the {@code WINRS_CONSOLEMODE_STDIN} option: {@code true}
+	 *        for console semantics (the historical default), {@code false} for pipe semantics
+	 * @return a cursor over the command output, owning the executor's connection until the command
+	 *         completes or the cursor is closed — always close it (try-with-resources)
+	 * @throws TimeoutException when the server does not answer the command startup in time
+	 * @throws WindowsRemoteException For any problem encountered
+	 */
+	default CommandCursor startCommand(
+		final String command,
+		final String workingDirectory,
+		final long timeout,
+		final boolean consoleModeStdin
+	) throws TimeoutException, WindowsRemoteException {
+		if (consoleModeStdin) {
+			return startCommand(command, workingDirectory, timeout);
+		}
+		throw new UnsupportedOperationException(getClass().getName() + " does not support pipe-mode standard input.");
+	}
+
+	/**
 	 * Execute the command on the remote
 	 *
 	 * @param command The command to execute

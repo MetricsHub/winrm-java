@@ -217,7 +217,7 @@ class CliArgumentsTest {
 				},
 				{ "-P must be between 1 and 65535", concat(base, "-P", "65536", "command", "whoami") },
 				{ "-t must be greater than zero", concat(base, "-t", "0", "command", "whoami") },
-				{ "missing subcommand (wql or command)", base },
+				{ "missing subcommand (wql, command, or shell)", base },
 				{ "wql requires a query", concat(base, "wql", "") },
 				{
 						"missing required option --hostname",

@@ -186,6 +186,57 @@ public final class FakeWsmanServer implements AutoCloseable {
 		return new ArrayList<>(decryptedRequests);
 	}
 
+	/** One stdin chunk carried by a WSMan Send request: its decoded bytes and its End flag. */
+	public static final class StdinChunk {
+
+		private final byte[] data;
+		private final boolean end;
+
+		private StdinChunk(final byte[] data, final boolean end) {
+			this.data = data;
+			this.end = end;
+		}
+
+		/**
+		 * @return the decoded stdin bytes of this chunk
+		 */
+		public byte[] data() {
+			return data.clone();
+		}
+
+		/**
+		 * @return whether the chunk was flagged as the end of input
+		 */
+		public boolean end() {
+			return end;
+		}
+	}
+
+	/**
+	 * The stdin chunks received so far through WSMan Send requests, in order: base64-decoded
+	 * content and End flag, extracted from the decrypted request bodies.
+	 *
+	 * @return the stdin chunks, in the order they were received
+	 */
+	public List<StdinChunk> stdinChunks() {
+		final List<StdinChunk> chunks = new ArrayList<>();
+		final java.util.regex.Pattern stream = java.util.regex.Pattern.compile(
+			"<rsp:Send><rsp:Stream Name=\"stdin\"([^>]*)>([^<]*)</rsp:Stream></rsp:Send>"
+		);
+		for (final String request : decryptedRequests) {
+			final java.util.regex.Matcher matcher = stream.matcher(request);
+			while (matcher.find()) {
+				chunks.add(
+					new StdinChunk(
+						Base64.getDecoder().decode(matcher.group(2)),
+						matcher.group(1).contains("End=\"true\"")
+					)
+				);
+			}
+		}
+		return chunks;
+	}
+
 	@Override
 	public void close() {
 		closed = true;

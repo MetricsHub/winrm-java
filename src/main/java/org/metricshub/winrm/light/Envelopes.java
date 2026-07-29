@@ -29,7 +29,7 @@ import java.util.UUID;
 /**
  * WS-Management SOAP envelope templates — the only "WSDL" the light client needs.
  * Covers Identify, WQL enumeration (Enumerate / Pull / Release), and the command shell lifecycle
- * (Create / Command / Receive / Signal / Delete).
+ * (Create / Command / Send / Receive / Signal / Delete).
  */
 final class Envelopes {
 
@@ -48,12 +48,28 @@ final class Envelopes {
 	private static final String ACTION_COMMAND = RSP + "/Command";
 	private static final String ACTION_RECEIVE = RSP + "/Receive";
 	private static final String ACTION_SIGNAL = RSP + "/Signal";
+	private static final String ACTION_SEND = RSP + "/Send";
 
 	static final String SHELL_RESOURCE_URI = RSP + "/cmd";
 	static final String TERMINATE_CODE = RSP + "/signal/terminate";
+
+	/**
+	 * The WSMan equivalent of a console Ctrl+C: it interrupts the command's child process without
+	 * terminating the command (and its shell) the way {@link #TERMINATE_CODE} does.
+	 */
+	static final String CTRL_C_CODE = RSP + "/signal/ctrl_c";
+
 	static final String COMMAND_STATE_DONE = RSP + "/CommandState/Done";
 
-	private static final int MAX_ENVELOPE_SIZE = 153600;
+	static final int MAX_ENVELOPE_SIZE = 153600;
+
+	/**
+	 * Largest stdin payload carried by a single Send, in raw bytes before base64. The whole envelope
+	 * must stay under {@link #MAX_ENVELOPE_SIZE}: base64 inflates by 4/3, and the SOAP header,
+	 * selectors and element markup around the payload need a few hundred bytes — 96 KiB of raw input
+	 * becomes 128 KiB of base64, leaving comfortable room inside the 150 KiB limit.
+	 */
+	static final int MAX_STDIN_CHUNK = 96 * 1024;
 
 	/**
 	 * Console code page of the remote shell: UTF-8. The shell's output charset must be one the
@@ -125,10 +141,22 @@ final class Envelopes {
 
 	// --- Command shell -----------------------------------------------------
 
-	static String createShell(final String url, final String workingDirectory, final long timeoutMs) {
+	/**
+	 * Create a command shell.
+	 *
+	 * @param codePage the console code page of the shell ({@code WINRS_CODEPAGE}); 0 uses
+	 *        {@link #CODEPAGE_UTF8}, the default that makes every command's output UTF-8
+	 */
+	static String createShell(
+		final String url,
+		final String workingDirectory,
+		final long timeoutMs,
+		final int codePage
+	) {
 		final String optionSet = "<wsman:OptionSet>" +
 			"<wsman:Option Name=\"WINRS_NOPROFILE\">TRUE</wsman:Option>" +
-			"<wsman:Option Name=\"WINRS_CODEPAGE\">" + CODEPAGE_UTF8 + "</wsman:Option>" +
+			"<wsman:Option Name=\"WINRS_CODEPAGE\">" + (codePage > 0 ? String.valueOf(codePage) : CODEPAGE_UTF8)
+			+ "</wsman:Option>" +
 			"</wsman:OptionSet>";
 		final String workingDir = (workingDirectory == null || workingDirectory.trim().isEmpty())
 			? ""
@@ -142,9 +170,25 @@ final class Envelopes {
 			"</rsp:Shell></s:Body></s:Envelope>";
 	}
 
-	static String command(final String url, final String shellId, final String commandLine, final long timeoutMs) {
+	/**
+	 * Start a command in an existing shell.
+	 *
+	 * @param consoleModeStdin value of the {@code WINRS_CONSOLEMODE_STDIN} option: {@code TRUE} makes
+	 *        the remote stdin behave like a console (what an interactive session and a command that
+	 *        never reads input want), {@code FALSE} makes it an ordinary pipe, which is what a
+	 *        command fed programmatic input needs — a console-mode stdin never reaches EOF for tools
+	 *        like {@code sort} or {@code findstr}
+	 */
+	static String command(
+		final String url,
+		final String shellId,
+		final String commandLine,
+		final long timeoutMs,
+		final boolean consoleModeStdin
+	) {
 		final String optionSet = "<wsman:OptionSet>" +
-			"<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">TRUE</wsman:Option>" +
+			"<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">" + (consoleModeStdin ? "TRUE" : "FALSE")
+			+ "</wsman:Option>" +
 			"<wsman:Option Name=\"WINRS_SKIP_CMD_SHELL\">FALSE</wsman:Option>" +
 			"</wsman:OptionSet>";
 		return envelopeOpen(true) +
@@ -152,6 +196,31 @@ final class Envelopes {
 			"<s:Body><rsp:CommandLine><rsp:Command>" +
 			escape(commandLine) +
 			"</rsp:Command></rsp:CommandLine></s:Body></s:Envelope>";
+	}
+
+	/**
+	 * Feed one chunk of standard input to a running command.
+	 *
+	 * @param base64Data the chunk's bytes, base64-encoded (may be empty on a pure end-of-input Send)
+	 * @param end {@code true} to mark this chunk as the last one — the remote stdin then reaches EOF
+	 */
+	static String send(
+		final String url,
+		final String shellId,
+		final String commandId,
+		final String base64Data,
+		final boolean end,
+		final long timeoutMs
+	) {
+		return envelopeOpen(true) +
+			header(url, SHELL_RESOURCE_URI, ACTION_SEND, timeoutMs, shellSelector(shellId), null) +
+			"<s:Body><rsp:Send><rsp:Stream Name=\"stdin\" CommandId=\"" +
+			escape(commandId) +
+			"\"" +
+			(end ? " End=\"true\"" : "") +
+			">" +
+			base64Data +
+			"</rsp:Stream></rsp:Send></s:Body></s:Envelope>";
 	}
 
 	static String receive(final String url, final String shellId, final String commandId, final long timeoutMs) {
@@ -162,13 +231,25 @@ final class Envelopes {
 			"\">stdout stderr</rsp:DesiredStream></rsp:Receive></s:Body></s:Envelope>";
 	}
 
-	static String signal(final String url, final String shellId, final String commandId, final long timeoutMs) {
+	/**
+	 * Signal a running command.
+	 *
+	 * @param code the signal code — {@link #TERMINATE_CODE} to stop the command, {@link #CTRL_C_CODE}
+	 *        to interrupt its child process the way a console Ctrl+C would
+	 */
+	static String signal(
+		final String url,
+		final String shellId,
+		final String commandId,
+		final String code,
+		final long timeoutMs
+	) {
 		return envelopeOpen(true) +
 			header(url, SHELL_RESOURCE_URI, ACTION_SIGNAL, timeoutMs, shellSelector(shellId), null) +
 			"<s:Body><rsp:Signal CommandId=\"" +
 			escape(commandId) +
 			"\"><rsp:Code>" +
-			TERMINATE_CODE +
+			code +
 			"</rsp:Code></rsp:Signal></s:Body></s:Envelope>";
 	}
 

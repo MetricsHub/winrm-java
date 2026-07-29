@@ -78,13 +78,42 @@ public final class WinRMExecutorFactory {
 		final SSLContext sslContext,
 		final boolean trustAllCertificates
 	) throws WinRMException {
+		return createInstance(winRMEndpoint, timeout, ticketCache, authentications, sslContext, trustAllCertificates, 0);
+	}
+
+	/**
+	 * Create a {@link WindowsRemoteExecutor} with an explicit console code page for the command
+	 * shell.
+	 *
+	 * @param winRMEndpoint endpoint with credentials (mandatory)
+	 * @param timeout timeout in milliseconds (must be &gt; 0)
+	 * @param ticketCache Kerberos ticket cache path (may be {@code null})
+	 * @param authentications requested authentication schemes (may be {@code null})
+	 * @param sslContext the {@link SSLContext} providing the HTTPS socket factory (hostname
+	 *        verification stays on); {@code null} uses the default configuration
+	 * @param trustAllCertificates when {@code true} (and no {@code sslContext} is given), trust every
+	 *        server certificate and skip hostname verification — insecure, testing only
+	 * @param consoleCodePage the console code page of the command shell; 0 keeps the default 65001
+	 * @return an executor backed by {@link LightWinRMService}
+	 * @throws WinRMException for any problem creating the executor
+	 */
+	public static WindowsRemoteExecutor createInstance(
+		final WinRMEndpoint winRMEndpoint,
+		final long timeout,
+		final Path ticketCache,
+		final List<AuthenticationEnum> authentications,
+		final SSLContext sslContext,
+		final boolean trustAllCertificates,
+		final int consoleCodePage
+	) throws WinRMException {
 		return LightWinRMService.createInstance(
 			winRMEndpoint,
 			timeout,
 			ticketCache,
 			authentications,
 			sslContext,
-			trustAllCertificates
+			trustAllCertificates,
+			consoleCodePage
 		);
 	}
 }

@@ -1,5 +1,5 @@
-keywords: command, execute, cmd, stdout, stderr, exit code, file copy, script
-description: Execute remote commands with the fluent WinRMClient API, capture output and exit codes, and copy local files to the host.
+keywords: command, execute, cmd, stdout, stderr, stdin, exit code, file copy, script
+description: Execute remote commands with the fluent WinRMClient API, capture output and exit codes, feed standard input, and copy local files to the host.
 
 # Remote Commands
 
@@ -47,6 +47,9 @@ Everything between `command(...)` and `execute()` is optional:
 | `charset(Charset)` | `UTF-8` | The charset used to decode the command output (see below). |
 | `workingDirectory(String)` | remote default | Working directory of the remote process. The remote shell is created by the client's **first** command and reused afterward, so this only takes effect on that first command. |
 | `upload(Path...)` | none | Local files to copy to the host before running (see below). |
+| `stdin(String)` / `stdin(Path)` / `stdin(InputStream)` | none | Standard input fed to the command — the remote equivalent of a `< file` redirection (see below). |
+| `stdin()` | console semantics | Declare interactive input through `RemoteProcess.stdin()` (with `start()`): pipe semantics without pre-supplied content (see below). |
+| `stdinCharset(Charset)` | the output charset | The charset used to *encode* standard input, when it differs from the output charset (see below). |
 | `onStdout(Consumer<String>)` / `onStderr(Consumer<String>)` | none | Callbacks receiving each chunk of output live while `execute()` runs (see below). |
 
 ## The result
@@ -92,6 +95,91 @@ Points to know:
   an overall deadline: a command may run (and stream) far longer than the timeout as long as it
   keeps producing output. Use `waitFor(Duration)` when you need a hard deadline. See
   [Timeouts and Errors](timeouts-and-errors.html).
+
+## Standard input
+
+Commands that read their standard input can be fed in two ways.
+
+### Pre-supplied input
+
+`stdin(...)` on the request delivers the whole input right after the command starts, ending with
+the protocol's end-of-input mark so the remote stdin reaches EOF — the remote equivalent of a
+local `< file` redirection. It works with both `execute()` and `start()`:
+
+```java
+CommandResult result = client.command("sort")
+    .stdin(Path.of("data.txt"))     // also stdin(InputStream) and stdin(String)
+    .execute();
+```
+
+`stdin(String)` is encoded with the request's charset (see `charset(...)`); the `Path` and
+`InputStream` variants send the bytes exactly as stored. Large input is split into
+protocol-sized chunks automatically.
+
+Supplying input switches the remote stdin to **pipe semantics**
+(`WINRS_CONSOLEMODE_STDIN=FALSE`): filters like `sort`, `findstr`, or `more` consume it and
+terminate on EOF, exactly as with a local redirection. Without it, the historical console
+semantics are kept.
+
+### Interactive input
+
+For a request started with `start()`, `RemoteProcess.stdin()` completes the `java.lang.Process`
+shape: written text is buffered locally, `flush()` carries it to the host (one WSMan `Send`),
+and `close()` marks the end of input. Declare the interactive input with the no-argument
+`stdin()` on the request — it switches the remote stdin to pipe semantics, so closing the writer
+actually delivers EOF:
+
+```java
+try (RemoteProcess p = client.command("some-repl.exe").stdin().start()) {
+    try (BufferedWriter in = p.stdin()) {
+        in.write("first request\n");
+        in.flush();                              // delivers the buffered text
+        System.out.println(p.stdout().readLine());
+    }                                            // close() = end of input (EOF)
+    p.waitFor();
+}
+```
+
+Without the declaration, the remote stdin keeps the historical console semantics: writes are
+still delivered, but a filter waiting for its input to *end* (`sort`, `findstr`, `more`) never
+sees the EOF. Text is encoded statefully across flushes — a charset mark is emitted once and a
+surrogate pair split by a flush is completed by the next write, exactly as one whole-string
+encode.
+
+Writes and reads alternate on the caller's thread, exactly like `java.lang.Process` pipes —
+including the classic deadlock, which is the caller's to avoid: blocking on a read while the
+remote command itself is blocked waiting for input (or feeding a large input to a command that
+floods its output in the meantime) hangs both sides until the inactivity timeout fires.
+
+`RemoteProcess` also exposes `interrupt()` — the WSMan `ctrl_c` Signal, the remote equivalent of
+a console Ctrl+C: it interrupts the command's child process without terminating the command or
+the process handle.
+
+### Input encoding
+
+Input encoding is not symmetric with output encoding, because Windows treats the two directions
+differently:
+
+* **Pipe semantics** (any `stdin(...)`, including the no-argument form) — the bytes reach the
+  process **unconverted**. They are encoded with the request's charset (UTF-8 by default), which
+  is what a program reading a UTF-8 stream expects, and `stdin(Path)`/`stdin(InputStream)` send
+  the bytes verbatim.
+* **Console semantics** (no `stdin` declaration — a command started with `start()` and written
+  to through `RemoteProcess.stdin()`) — the WinRM service converts the bytes to console input
+  itself, using a code page that depends on the Windows version. Prefer pipe semantics, or set
+  `stdinCharset(...)` to match the session's console code page.
+
+Output is unaffected either way: it follows the shell's console code page, which this client
+pins to UTF-8.
+
+> A remote `cmd.exe` reading its **command lines** from standard input cannot handle non-ASCII
+> at all under console code page 65001 — Windows decodes that input one byte at a time, turning
+> every non-ASCII byte into `U+FFFD`, whatever the encoding used to send it. An interactive
+> session must therefore run under a single-byte console code page: build the client with
+> `consoleCodePage(...)` (the remote machine's ANSI page) and use the matching charset in both
+> directions, as the CLI's `shell` subcommand does. Data piped to an ordinary program (`sort`,
+> `findstr`, your own executable) is not affected: it never goes through cmd's parser, so the
+> default code page 65001 and UTF-8 are right for it.
 
 ### Tailing the output of a blocking execution
 

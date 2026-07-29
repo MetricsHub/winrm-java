@@ -20,8 +20,13 @@ package org.metricshub.winrm;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.IOException;
 import java.io.Reader;
+import java.io.UncheckedIOException;
+import java.io.Writer;
 import java.nio.charset.Charset;
 import java.time.Duration;
 import java.util.concurrent.TimeoutException;
@@ -61,7 +66,15 @@ import org.metricshub.winrm.exceptions.WindowsRemoteException;
  * throw {@link WinRMTimeoutException} when the command stays silent for a whole timeout; use
  * {@link #waitFor(Duration)} for an overall deadline.
  * <p>
- * <b>Threading.</b> A process is not thread-safe: read, wait and close from one thread at a time.
+ * <b>Writing.</b> {@link #stdin()} feeds the command's standard input: {@code flush()} carries the
+ * written text to the host as a WSMan Send, {@code close()} marks the end of input (the remote
+ * stdin then reaches EOF). Writes and reads alternate on the caller's thread, exactly like
+ * {@link java.lang.Process} pipes — including the classic deadlock, which is the caller's to
+ * avoid: blocking on a read while the remote command itself is blocked waiting for input (or the
+ * reverse) hangs both sides until the inactivity timeout fires.
+ * <p>
+ * <b>Threading.</b> A process is not thread-safe: read, write, wait and close from one thread at a
+ * time.
  * <p>
  * Failures during consumption are reported through the unchecked
  * {@link org.metricshub.winrm.exceptions.WinRMClientException} hierarchy, including from the
@@ -72,30 +85,63 @@ public final class RemoteProcess implements AutoCloseable {
 	private final CommandCursor cursor;
 	private final String hostname;
 	private final Duration timeout;
+	private final Charset stdinCharset;
 
 	private final ChunkDecoder stdoutDecoder;
 	private final ChunkDecoder stderrDecoder;
+
+	// Created on first use (see sendStdin): a legal decode-only charset (e.g. x-JISAutoDetect)
+	// has no encoder, and must not fail a process that only ever READS output.
+	private ChunkEncoder stdinEncoder;
 
 	// Decoded output that has arrived but has not been read yet, per channel.
 	private final StringBuilder stdoutPending = new StringBuilder();
 	private final StringBuilder stderrPending = new StringBuilder();
 
+	// Written input that has not been flushed to the host yet.
+	private final StringBuilder stdinPending = new StringBuilder();
+
 	private final BufferedReader stdout;
 	private final BufferedReader stderr;
+	private final BufferedWriter stdin;
 
 	// finished = no more protocol fetches may happen: the command completed OR the process was
 	// closed early. exitCode is non-null only when completion was actually observed.
 	private boolean finished;
 	private Integer exitCode;
 
-	RemoteProcess(final CommandCursor cursor, final Charset charset, final String hostname, final Duration timeout) {
+	// The end-of-input Send was already emitted (or the input was pre-supplied by the request):
+	// no further input may be sent.
+	private boolean stdinClosed;
+
+	RemoteProcess(
+		final CommandCursor cursor,
+		final Charset charset,
+		final Charset stdinCharset,
+		final String hostname,
+		final Duration timeout,
+		final boolean stdinAlreadySupplied
+	) {
 		this.cursor = cursor;
 		this.hostname = hostname;
 		this.timeout = timeout;
+		this.stdinCharset = stdinCharset;
 		this.stdoutDecoder = new ChunkDecoder(charset);
 		this.stderrDecoder = new ChunkDecoder(charset);
 		this.stdout = new BufferedReader(new ChannelReader(stdoutPending));
 		this.stderr = new BufferedReader(new ChannelReader(stderrPending));
+		this.stdin = new BufferedWriter(new StdinWriter());
+		this.stdinClosed = stdinAlreadySupplied;
+		if (stdinAlreadySupplied) {
+			// The writer itself must reject writes immediately, not buffer them into the void:
+			// close it for real. No request leaves here — ending an already-ended input is a no-op.
+			try {
+				stdin.close();
+			} catch (final IOException e) {
+				// Unreachable: closing the empty writer performs no I/O (see sendStdin).
+				throw new UncheckedIOException(e);
+			}
+		}
 	}
 
 	/**
@@ -121,6 +167,60 @@ public final class RemoteProcess implements AutoCloseable {
 	}
 
 	/**
+	 * Get the standard input of the remote command. Written text is buffered locally until
+	 * {@code flush()}, which carries it to the host as one WSMan Send (encoded with the request's
+	 * charset); {@code close()} sends the final chunk flagged as the end of input, after which the
+	 * remote stdin reaches EOF. Always the same writer instance; closing it does not close the
+	 * process — but unlike the readers it does talk to the host, so close it before (or via) the
+	 * process itself, not after.
+	 * <p>
+	 * When the request pre-supplied the input ({@code stdin(...)} on the builder), that input was
+	 * already delivered in full: this writer is then closed from the start.
+	 * <p>
+	 * A command that must <i>observe</i> the EOF — a filter like {@code sort} that only acts once
+	 * its input ends — needs pipe semantics: declare the interactive input with the no-argument
+	 * {@link CommandRequest#stdin()} on the builder. Without it the remote stdin keeps the
+	 * historical console semantics, where writes are delivered but the end of input is not.
+	 * <p>
+	 * Failures while sending are reported through the unchecked
+	 * {@link org.metricshub.winrm.exceptions.WinRMClientException} hierarchy; writing after the end
+	 * of input or after the command completed throws {@link IllegalStateException}.
+	 *
+	 * @return the standard input writer
+	 */
+	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = "The writer IS the API: it feeds the process's standard input, exactly like "
+		+
+		"Process.getOutputStream()")
+	public BufferedWriter stdin() {
+		return stdin;
+	}
+
+	/**
+	 * Interrupt the command the way a console Ctrl+C would — the WSMan {@code ctrl_c} Signal. It
+	 * interrupts the command's child process without terminating the command or this process
+	 * handle: the process stays fully usable, which is what an interactive session needs. A no-op
+	 * once the command has completed or the process is closed.
+	 *
+	 * @throws WinRMTimeoutException when the server does not answer the Signal in time
+	 * @throws org.metricshub.winrm.exceptions.WinRMClientException for any other failure
+	 */
+	public synchronized void interrupt() {
+		if (finished) {
+			return;
+		}
+		try {
+			cursor.interrupt();
+		} catch (final TimeoutException e) {
+			throw new WinRMTimeoutException(
+				String.format("The interrupt Signal was not answered within %s on %s", timeout, hostname),
+				e
+			);
+		} catch (final WindowsRemoteException e) {
+			throw WinRMClient.translate(e);
+		}
+	}
+
+	/**
 	 * Wait for the command to complete, buffering any unread output in the meantime (read it
 	 * afterward from {@link #stdout()}/{@link #stderr()}).
 	 *
@@ -133,6 +233,52 @@ public final class RemoteProcess implements AutoCloseable {
 			fetchOnce();
 		}
 		return exitCodeValue();
+	}
+
+	/**
+	 * Advance the stream by <b>at most one</b> bounded protocol round trip: ask the server to
+	 * answer within the given wait — with output when it has any, with the protocol's "nothing
+	 * yet" otherwise — buffer whatever arrives for the readers, and report whether the command
+	 * has completed. An empty answer is not a failure: the process stays fully usable, so a
+	 * polling consumer (e.g. an interactive session pump) never trips the inactivity timeout
+	 * while idle. Unlike {@link #waitFor(Duration)}, which keeps polling until its deadline, this
+	 * returns as soon as the server answers: output that is ready arrives (and can be read)
+	 * immediately.
+	 * <p>
+	 * The wait is the polling <i>cadence</i>, not a hard bound on the round trip: how long the
+	 * answer itself may take to arrive is governed by the request timeout (the inactivity
+	 * timeout), so one slow answer from a loaded server does not fail the stream — use
+	 * {@link #waitFor(Duration)} when a hard deadline is needed. The request timeout also
+	 * <i>caps</i> the cadence, and a resulting budget too short for a network round trip — the
+	 * WSMan service holds a bounded Receive for at least 500 ms before answering "nothing yet" —
+	 * is waited out locally without touching the wire: the stream then does not advance. So poll
+	 * with waits of about a second or more, on a request whose timeout is at least as long;
+	 * a shorter request timeout leaves {@link #waitFor()} and the readers as the ways to advance.
+	 *
+	 * @param maxWait when the server should answer at the latest (at least one millisecond)
+	 * @return {@code true} when the command has completed — the exit code is then available from
+	 *         {@link #exitCode()} — {@code false} when it is still running
+	 * @throws WinRMTimeoutException when the server stays silent for a whole inactivity timeout
+	 * @throws org.metricshub.winrm.exceptions.WinRMClientException for any other failure
+	 */
+	public synchronized boolean poll(final Duration maxWait) {
+		WinRMClient.checkPositive(maxWait, "maxWait");
+		if (!finished) {
+			final long ask = WinRMClient.toMillis(maxWait);
+			final CommandCursor.Chunk chunk;
+			try {
+				chunk = cursor.poll(ask, Math.max(ask, WinRMClient.toMillis(timeout)));
+			} catch (final TimeoutException e) {
+				throw new WinRMTimeoutException(
+					String.format("Command produced no output within %s on %s", timeout, hostname),
+					e
+				);
+			} catch (final WindowsRemoteException e) {
+				throw WinRMClient.translate(e);
+			}
+			absorb(chunk);
+		}
+		return finished;
 	}
 
 	/**
@@ -263,6 +409,78 @@ public final class RemoteProcess implements AutoCloseable {
 		}
 	}
 
+	/**
+	 * Flush the buffered input to the host — one WSMan Send, flagged as the end of input when
+	 * {@code end} is set. Holds the monitor. Ending the input is idempotent; a plain flush with
+	 * nothing buffered is a no-op. Once the command completed (or the process was closed), ending
+	 * the input touches nothing — the cursor already released the connection, and closing a
+	 * writer must never turn into a stray request or a failure hiding a known exit code (input it
+	 * still held is discarded, like a {@link java.lang.Process} pipe's) — while flushing actual
+	 * input is refused: it can no longer be delivered.
+	 */
+	private synchronized void sendStdin(final boolean end) {
+		if (stdinClosed) {
+			if (end) {
+				return;
+			}
+			throw new IllegalStateException("The command's standard input has already been closed.");
+		}
+		// Stateful encoding: a charset mark is emitted once (not per flush) and a surrogate pair
+		// split across two flushes is withheld until complete, exactly as one whole-string encode.
+		// The encoder is created on first actual input: a decode-only charset throws on
+		// newEncoder(), which must only ever hit a caller actually writing input — never a process
+		// that only reads output, and never a bare close of the untouched writer.
+		final byte[] bytes;
+		if (stdinEncoder == null && stdinPending.length() == 0) {
+			bytes = new byte[0];
+		} else {
+			if (stdinEncoder == null) {
+				stdinEncoder = new ChunkEncoder(stdinCharset);
+			}
+			bytes = stdinEncoder.encode(stdinPending.toString(), end);
+			stdinPending.setLength(0);
+		}
+		if (finished) {
+			if (end) {
+				stdinClosed = true;
+				return;
+			}
+			if (bytes.length == 0) {
+				return;
+			}
+			throw new IllegalStateException("The command has completed: its standard input is closed.");
+		}
+		if (bytes.length == 0 && !end) {
+			return;
+		}
+		if (end) {
+			stdinClosed = true;
+		}
+		try {
+			cursor.send(bytes, end);
+		} catch (final TimeoutException e) {
+			throw new WinRMTimeoutException(
+				String.format("The command input was not accepted within %s on %s", timeout, hostname),
+				e
+			);
+		} catch (final WindowsRemoteException e) {
+			throw WinRMClient.translate(e);
+		}
+	}
+
+	/** Buffer written input until the next flush. Holds the monitor. */
+	private synchronized void bufferStdin(final char[] cbuf, final int off, final int len) {
+		if (stdinClosed) {
+			throw new IllegalStateException("The command's standard input has already been closed.");
+		}
+		stdinPending.append(cbuf, off, len);
+	}
+
+	/** Whether the channel's buffer holds decoded output ready to be read without a round trip. */
+	private synchronized boolean hasPending(final StringBuilder pending) {
+		return pending.length() > 0;
+	}
+
 	/** Serve a read from the channel's buffer, advancing the Receive loop while it is empty. */
 	private synchronized int read(final StringBuilder pending, final char[] cbuf, final int off, final int len) {
 		while (pending.length() == 0 && !finished) {
@@ -298,9 +516,39 @@ public final class RemoteProcess implements AutoCloseable {
 		}
 
 		@Override
+		public boolean ready() {
+			// Buffered output can be read without a protocol round trip. This is what lets a polling
+			// consumer (e.g. the CLI's interactive shell pump) drain everything a bounded wait
+			// absorbed without ever blocking on the wire.
+			return RemoteProcess.this.hasPending(pending);
+		}
+
+		@Override
 		public void close() {
 			// Closing a reader does not close the process: the RemoteProcess owns the lifecycle, so
 			// each reader can sit in its own try-with-resources while the process lives on.
+		}
+	}
+
+	/**
+	 * The command's standard input as a {@link Writer}: writes buffer locally, {@code flush()}
+	 * emits one WSMan Send, {@code close()} emits the final Send flagged as the end of input.
+	 */
+	private final class StdinWriter extends Writer {
+
+		@Override
+		public void write(final char[] cbuf, final int off, final int len) {
+			bufferStdin(cbuf, off, len);
+		}
+
+		@Override
+		public void flush() {
+			sendStdin(false);
+		}
+
+		@Override
+		public void close() {
+			sendStdin(true);
 		}
 	}
 }

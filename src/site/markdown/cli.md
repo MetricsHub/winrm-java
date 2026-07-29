@@ -1,5 +1,5 @@
-keywords: cli, command line, standalone, jar, wql, exec, exit codes, manual
-description: Manual page of the winrm-java standalone command-line client - subcommands, options, passwords, Kerberos, streaming output, and exit codes.
+keywords: cli, command line, standalone, jar, wql, exec, shell, interactive, stdin, exit codes, manual
+description: Manual page of the winrm-java standalone command-line client - subcommands, options, passwords, Kerberos, streaming output, the interactive shell, and exit codes.
 
 # Command-Line Client
 
@@ -15,6 +15,7 @@ This page is its manual.
 ```text
 java -jar winrm-java-standalone.jar [options] wql <query>
 java -jar winrm-java-standalone.jar [options] command|cmd|exec|run <command line...>
+java -jar winrm-java-standalone.jar [options] shell
 java -jar winrm-java-standalone.jar --help | --version
 ```
 
@@ -24,9 +25,11 @@ java -jar winrm-java-standalone.jar --help | --version
 | --- | --- |
 | `wql <query>` | Run a WQL query and print the rows to stdout as UTF-8 [JSON Lines](https://jsonlines.org/). |
 | `command <command line...>` | Run a command on the remote host, forwarding its output. `cmd`, `exec`, and `run` are aliases. |
+| `shell` | Open an interactive `cmd.exe` session on the remote host (see [Interactive shell](#Interactive_shell)). |
 
 Everything after the subcommand is the query or the command line; quoting follows your local
-shell's rules, and multi-word command lines are reassembled for the remote `cmd.exe`.
+shell's rules, and multi-word command lines are reassembled for the remote `cmd.exe`. `shell`
+takes no argument.
 
 ## Options
 
@@ -38,6 +41,7 @@ shell's rules, and multi-word command lines are reassembled for the remote `cmd.
 | `-pf, --password-file <file>` | Read the password from a UTF-8 file (preferred for automation, see below). |
 | `-P, --port <port>` | Target port. Default: 5985 for HTTP, 5986 for HTTPS. |
 | `-t, --timeout <ms>` | Operation timeout in milliseconds. Default: 60000. See [Timeout semantics](#Timeout_semantics). |
+| `-i, --stdin` | Forward the local standard input to the remote command (only with `command`); see below. |
 | `--https` | Connect over HTTPS. |
 | `--https-permissive` | Trust any HTTPS certificate and hostname. Intentionally insecure: testing and isolated hosts only. Requires `--https`. |
 | `--ntlm` | Authenticate with NTLM (the default). |
@@ -93,6 +97,61 @@ real time. The output is decoded as UTF-8: the remote shell is created with cons
 locale. See [Character encoding](commands.html#character-encoding) for the two legacy tools that
 ignore the console code page.
 
+When the local standard input is piped or redirected, it is forwarded as the remote command's
+standard input, with pipe semantics, so filters just work:
+
+```bash
+java -jar winrm-java-standalone.jar -h server -u 'DOMAIN\user' -pf pw.txt command sort < data.txt
+```
+
+Forwarding engages automatically when the standard input is detectably redirected: it is a
+seekable file (any `< file` redirection, including an empty file or the null device), or bytes
+are already waiting on it at startup (a normal pipe). An interactive terminal is never consumed,
+even when only the *output* is redirected (`... command hostname > result.txt`). The one
+undetectable case is a pipe whose producer has written nothing by the time the CLI starts: pass
+`-i`/`--stdin` to force forwarding there. The input is delivered in full before the output is
+read: piping a large input into a command that floods its output at the same time can deadlock
+both sides (the classic pipe deadlock), exactly as with `java.lang.Process`.
+
+## Interactive shell
+
+```bash
+java -jar winrm-java-standalone.jar -h server.example.net -u 'DOMAIN\user' -pf pw.txt shell
+```
+
+`shell` starts `cmd.exe` on the remote host and bridges it to the local terminal until the remote
+shell exits (type `exit`, or send end-of-input — Ctrl+Z then Enter on Windows, Ctrl+D elsewhere —
+which the session turns into an `exit`). The remote exit code is propagated through the usual
+[exit-code contract](#Exit_codes).
+
+* **Echo is off** — the remote shell runs `cmd.exe /Q`, so the input you forward is never
+  repeated back: your terminal already shows what you type, and the output stream carries the
+  prompts and the command output only.
+* **The session runs under a single-byte code page**, the remote machine's ANSI one (queried
+  once per session from `Win32_OperatingSystem.CodeSet`, falling back to 1252 when the host
+  cannot answer); both what you type and what you see use it. This is deliberate: a remote
+  `cmd.exe` decodes the command lines it reads from its standard input **one byte at a time**
+  under code page 65001, so every non-ASCII character would be lost. `winrs` has the same
+  constraint. The practical limit is that characters outside the host's ANSI code page cannot be
+  typed or displayed in an interactive session — `é` on a Western-European host is fine.
+  The other subcommands are unaffected: `wql` and `command` keep code page 65001 and full UTF-8
+  output, and piped input to `command` transfers bytes unconverted.
+* **Line-oriented, like `winrs`** — input is line-buffered by the local terminal and forwarded
+  when you press Enter. There is no raw-terminal/PTY mode (with zero dependencies there is none in
+  pure Java): full-screen programs, cmd.exe line editing, tab completion, and ANSI cursor control
+  are not supported. Command output echoes back with sub-second latency; a line typed while the
+  session is idle can wait up to the poll cadence (about one second — the WSMan protocol's floor
+  for a bounded poll) before it is forwarded.
+* **Ctrl+C interrupts the remote command, not the session** — it is forwarded as the WSMan
+  `ctrl_c` signal, which stops the running remote child (like a console Ctrl+C) and returns to the
+  remote prompt. On a Java runtime without `sun.misc.Signal`, Ctrl+C keeps its default behavior
+  and ends the CLI (terminating the remote shell with it).
+* **An idle session does not time out** — `-t`/`--timeout` bounds each protocol round trip, and
+  every round trip of an idle session completes with the protocol's "nothing yet" answer. Only a
+  server that stops answering altogether trips the timeout. A `--timeout` below 1000 ms is
+  rejected for `shell`: one poll round trip cannot complete faster (the WSMan service holds a
+  bounded request for at least 500 ms before answering "nothing yet").
+
 ## Timeout semantics
 
 `-t`/`--timeout` follows the operation:
@@ -102,6 +161,8 @@ ignore the console code page.
   the server keeps answering.
 * For `command`, it is the **overall deadline** covering the command itself and any file
   uploads.
+* For `shell`, it bounds **each protocol round trip**; an idle interactive session never trips it
+  (see [Interactive shell](#Interactive_shell)).
 
 See [Timeouts and Errors](timeouts-and-errors.html) for the underlying semantics.
 

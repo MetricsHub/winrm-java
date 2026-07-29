@@ -126,6 +126,20 @@ try (RemoteProcess p = client.command("wevtutil qe System /f:text").start()) {
     int exitCode = p.waitFor();               // or waitFor(Duration) for a deadline
 }
 
+// Commands can be fed standard input — pre-supplied (stdin(String|Path|InputStream),
+// the remote equivalent of a `< file` redirection)...
+CommandResult sorted = client.command("sort").stdin(Path.of("data.txt")).execute();
+
+// ...or written interactively through the process handle (flush() delivers, close() is EOF):
+try (RemoteProcess p = client.command("some-repl.exe").stdin().start()) {
+    try (BufferedWriter in = p.stdin()) {
+        in.write("first request\n");
+        in.flush();
+        System.out.println(p.stdout().readLine());
+    }
+    p.waitFor();
+}
+
 // Middle ground: tail the output live, keep the blocking terminal and its full result.
 client.command("longRunningThing.exe")
     .onStdout(chunk -> log.info(chunk))
@@ -197,11 +211,19 @@ java -jar target/winrm-java-<version>-standalone.jar \
   exec ipconfig /all
 ```
 
+Open an interactive session on the remote host (`winrs`-style, line-oriented):
+
+```bash
+java -jar target/winrm-java-<version>-standalone.jar \
+  -h server.example.net -u 'DOMAIN\user' -pf password.txt shell
+```
+
 Use `--help` for the option list and `--version` for the build version. The CLI is built on the
 streaming API: WQL rows are written to stdout as UTF-8 [JSON Lines](https://jsonlines.org/) **as
 the enumeration pages arrive**, and remote command stdout and stderr are forwarded **live** to the
-corresponding local streams while the command runs. Diagnostics go only to stderr, and the exit
-codes are stable for scripting.
+corresponding local streams while the command runs — with local stdin forwarded to the remote
+command when it is piped or redirected (`... command sort < data.txt`). Diagnostics go only to
+stderr, and the exit codes are stable for scripting.
 
 The full manual — options, password handling, Kerberos configuration, streaming and timeout
 semantics, exit codes — is the

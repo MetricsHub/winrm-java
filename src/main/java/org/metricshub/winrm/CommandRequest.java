@@ -20,8 +20,11 @@ package org.metricshub.winrm;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -42,14 +45,26 @@ import org.metricshub.winrm.exceptions.WindowsRemoteException;
  */
 public final class CommandRequest {
 
+	/** How many bytes of pre-supplied input are read and sent at a time. */
+	private static final int STDIN_BUFFER_SIZE = 64 * 1024;
+
 	private final WinRMClient client;
 	private final String commandLine;
 	private String workingDirectory;
 	private Duration timeout;
 	private Charset charset;
+	private Charset stdinCharset;
 	private final List<Path> uploads = new ArrayList<>();
 	private Consumer<String> stdoutConsumer;
 	private Consumer<String> stderrConsumer;
+	private StdinSource stdinSource;
+	private boolean pipeStdin;
+
+	/** A deferred source of pre-supplied standard input, opened when the command starts. */
+	@FunctionalInterface
+	private interface StdinSource {
+		InputStream open(Charset charset) throws IOException;
+	}
 
 	/**
 	 * Create the request.
@@ -109,6 +124,27 @@ public final class CommandRequest {
 	}
 
 	/**
+	 * Set the charset used to <b>encode</b> the command's standard input, when it differs from the
+	 * output charset. Default: the output charset (see {@link #charset(Charset)}).
+	 * <p>
+	 * The two directions are not symmetric on Windows. Output follows the shell's console code
+	 * page, which this client pins to UTF-8. Input written to a command created with
+	 * <i>console-mode</i> stdin is converted by the WinRM service with the remote machine's
+	 * <b>ANSI</b> code page instead — so an interactive session (the CLI's {@code shell}
+	 * subcommand) must encode what it sends with that code page, whatever the console code page
+	 * is. Input handed to a command created with pipe semantics (any {@code stdin(...)} on this
+	 * request) reaches the process unconverted and needs no override.
+	 *
+	 * @param charset the input charset
+	 * @return this request
+	 */
+	public CommandRequest stdinCharset(final Charset charset) {
+		Utils.checkNonNull(charset, "charset");
+		this.stdinCharset = charset;
+		return this;
+	}
+
+	/**
 	 * Copy local files to the remote host (through the WinRM connection itself) before running
 	 * the command. Each reference to a local file path inside the command line is rewritten to
 	 * the remote copy, exactly like the legacy
@@ -131,6 +167,97 @@ public final class CommandRequest {
 			Utils.checkNonNull(file, "files");
 			uploads.add(file);
 		}
+		return this;
+	}
+
+	/**
+	 * Feed the given text to the command's standard input. The text is encoded with the same
+	 * charset used to decode the output (see {@link #charset(Charset)}) and delivered in full —
+	 * split into protocol-sized chunks when large — right after the command starts, ending with
+	 * the end-of-input mark so the remote stdin reaches EOF.
+	 * <p>
+	 * Supplying input switches the remote stdin to <b>pipe semantics</b>
+	 * ({@code WINRS_CONSOLEMODE_STDIN=FALSE}): tools like {@code sort} or {@code findstr} consume
+	 * it and terminate on EOF, exactly as with a local {@code <} redirection.
+	 *
+	 * <pre>{@code
+	 * CommandResult result = client.command("sort").stdin("beta\nalpha\n").execute();
+	 * }</pre>
+	 *
+	 * Works with both {@link #execute()} and {@link #start()}; with {@code start()}, the
+	 * {@link RemoteProcess#stdin()} writer is closed from the start — pre-supplied and interactive
+	 * input are mutually exclusive. The input is delivered before any output is read: feeding a
+	 * large input to a command that floods its output in the meantime can deadlock both sides,
+	 * exactly like the {@link java.lang.Process} pipes — the caller's to avoid.
+	 *
+	 * @param text the input text
+	 * @return this request
+	 */
+	public CommandRequest stdin(final String text) {
+		Utils.checkNonNull(text, "text");
+		this.stdinSource = charset -> new ByteArrayInputStream(text.getBytes(charset));
+		this.pipeStdin = true;
+		return this;
+	}
+
+	/**
+	 * Declare that the command will be fed standard input <b>interactively</b>, through
+	 * {@link RemoteProcess#stdin()}, without pre-supplying it: the remote stdin switches to
+	 * <b>pipe semantics</b> ({@code WINRS_CONSOLEMODE_STDIN=FALSE}), so closing the writer
+	 * actually delivers EOF — a console-mode stdin never reaches EOF for tools like {@code sort}
+	 * or {@code findstr}.
+	 *
+	 * <pre>{@code
+	 * try (RemoteProcess p = client.command("sort").stdin().start()) {
+	 * 	try (BufferedWriter in = p.stdin()) {
+	 * 		in.write("beta\nalpha\n");
+	 * 	} // EOF: sort now sorts and exits
+	 * 	p.waitFor();
+	 * }
+	 * }</pre>
+	 *
+	 * Only meaningful with {@link #start()} — {@link #execute()} cannot take interactive input and
+	 * rejects a request configured this way. Without any {@code stdin} call, the historical
+	 * console semantics are kept (what a command that never reads input, and the interactive CLI
+	 * shell, want). Like every {@code stdin} variant, the LAST call wins: any previously
+	 * pre-supplied input is discarded.
+	 *
+	 * @return this request
+	 */
+	public CommandRequest stdin() {
+		this.stdinSource = null;
+		this.pipeStdin = true;
+		return this;
+	}
+
+	/**
+	 * Feed the content of the given local file to the command's standard input — the equivalent of
+	 * a local {@code < file} redirection. Same contract as {@link #stdin(String)}, except the bytes
+	 * are sent exactly as stored (no re-encoding).
+	 *
+	 * @param file the local file to read
+	 * @return this request
+	 */
+	public CommandRequest stdin(final Path file) {
+		Utils.checkNonNull(file, "file");
+		this.stdinSource = charset -> Files.newInputStream(file);
+		this.pipeStdin = true;
+		return this;
+	}
+
+	/**
+	 * Feed the given stream to the command's standard input, reading it to its end. Same contract
+	 * as {@link #stdin(String)}, except the bytes are sent exactly as read (no re-encoding). The
+	 * stream is consumed when the command starts and closed afterward; it is read on the thread
+	 * driving the execution, so a stream that blocks forever stalls the command.
+	 *
+	 * @param stream the input stream to consume
+	 * @return this request
+	 */
+	public CommandRequest stdin(final InputStream stream) {
+		Utils.checkNonNull(stream, "stream");
+		this.stdinSource = charset -> stream;
+		this.pipeStdin = true;
 		return this;
 	}
 
@@ -185,6 +312,13 @@ public final class CommandRequest {
 	 * @throws org.metricshub.winrm.exceptions.WinRMClientException for any other failure
 	 */
 	public CommandResult execute() {
+		if (pipeStdin && stdinSource == null) {
+			// stdin() without content promises interactive input, which only start() can take: a
+			// command waiting on its never-fed pipe would hang for a whole timeout.
+			throw new IllegalStateException(
+				"stdin() without content declares interactive input: use start(), or supply the input to stdin(...)."
+			);
+		}
 		final long start = Utils.getCurrentTimeMillis();
 		final long timeoutMillis = WinRMClient.toMillis(timeout);
 		try {
@@ -195,7 +329,7 @@ public final class CommandRequest {
 				"No time left to execute the command"
 			);
 
-			if (stdoutConsumer == null && stderrConsumer == null) {
+			if (stdoutConsumer == null && stderrConsumer == null && stdinSource == null) {
 				final WindowsRemoteCommandResult result = client
 					.executor()
 					.executeCommand(prepared.command, prepared.workingDirectory, prepared.charset, remaining);
@@ -208,9 +342,10 @@ public final class CommandRequest {
 				);
 			}
 
-			// Callback variant: drain the streaming cursor, delivering each chunk as it arrives.
-			// The same wall-clock deadline governs, enforced the way the blocking path enforces
-			// it — a worker runs the exchange and is cancelled when the deadline fires.
+			// Callback/stdin variant: drain the streaming cursor, delivering each chunk as it
+			// arrives (input, when supplied, is fed right after startup). The same wall-clock
+			// deadline governs, enforced the way the blocking path enforces it — a worker runs the
+			// exchange and is cancelled when the deadline fires.
 			return Utils.execute(() -> drainWithCallbacks(prepared, remaining, start), remaining);
 		} catch (final TimeoutException e) {
 			throw timeoutException(e);
@@ -261,8 +396,30 @@ public final class CommandRequest {
 			// round trip (inactivity), not the overall exchange the preparation steps count against.
 			final CommandCursor cursor = client
 				.executor()
-				.startCommand(prepared.command, prepared.workingDirectory, timeoutMillis);
-			return new RemoteProcess(cursor, prepared.charset, client.hostname(), timeout);
+				.startCommand(prepared.command, prepared.workingDirectory, timeoutMillis, !pipeStdin);
+			if (stdinSource != null) {
+				try {
+					feedStdin(cursor, prepared.stdinCharset);
+				} catch (final Exception e) {
+					// The input could not be delivered: terminate the command and release the client's
+					// connection before reporting — a failed start must not leave an open handle
+					// behind, and a cleanup failure must not replace the actual one.
+					try {
+						cursor.close();
+					} catch (final RuntimeException cleanup) {
+						e.addSuppressed(cleanup);
+					}
+					throw e;
+				}
+			}
+			return new RemoteProcess(
+				cursor,
+				prepared.charset,
+				prepared.stdinCharset,
+				client.hostname(),
+				timeout,
+				stdinSource != null
+			);
 		} catch (final TimeoutException e) {
 			throw timeoutException(e);
 		} catch (final IOException e) {
@@ -278,11 +435,13 @@ public final class CommandRequest {
 		final String command;
 		final String workingDirectory;
 		final Charset charset;
+		final Charset stdinCharset;
 
-		Prepared(final String command, final String workingDirectory, final Charset charset) {
+		Prepared(final String command, final String workingDirectory, final Charset charset, final Charset stdinCharset) {
 			this.command = command;
 			this.workingDirectory = workingDirectory;
 			this.charset = charset;
+			this.stdinCharset = stdinCharset;
 		}
 	}
 
@@ -312,7 +471,8 @@ public final class CommandRequest {
 		}
 
 		final Charset actualCharset = charset != null ? charset : WindowsRemoteExecutor.SHELL_OUTPUT_CHARSET;
-		return new Prepared(actualCommand, actualWorkingDirectory, actualCharset);
+		final Charset actualStdinCharset = stdinCharset != null ? stdinCharset : actualCharset;
+		return new Prepared(actualCommand, actualWorkingDirectory, actualCharset, actualStdinCharset);
 	}
 
 	/**
@@ -329,7 +489,10 @@ public final class CommandRequest {
 		final StringBuilder stderr = new StringBuilder();
 		try (
 			CommandCursor cursor = client.executor()
-				.startCommand(prepared.command, prepared.workingDirectory, timeoutMillis)) {
+				.startCommand(prepared.command, prepared.workingDirectory, timeoutMillis, !pipeStdin)) {
+			if (stdinSource != null) {
+				feedStdin(cursor, prepared.stdinCharset);
+			}
 			CommandCursor.Chunk chunk;
 			while ((chunk = cursor.next()) != null) {
 				deliver(stdoutDecoder.decode(chunk.stdout()), stdout, stdoutConsumer);
@@ -343,6 +506,28 @@ public final class CommandRequest {
 				cursor.exitCode(),
 				Duration.ofMillis(Utils.getCurrentTimeMillis() - start)
 			);
+		}
+	}
+
+	/**
+	 * Deliver the pre-supplied input to the started command, buffer by buffer, marking the last
+	 * one as the end of input so the remote stdin reaches EOF. The one-buffer read-ahead makes the
+	 * final Send carry data AND the end mark together (no extra empty round trip), except for an
+	 * empty source, whose single Send only announces the EOF.
+	 */
+	private void feedStdin(final CommandCursor cursor, final Charset charset)
+		throws IOException, TimeoutException, WindowsRemoteException {
+		try (InputStream input = stdinSource.open(charset)) {
+			byte[] current = input.readNBytes(STDIN_BUFFER_SIZE);
+			if (current.length == 0) {
+				cursor.send(current, true);
+				return;
+			}
+			while (current.length > 0) {
+				final byte[] next = input.readNBytes(STDIN_BUFFER_SIZE);
+				cursor.send(current, next.length == 0);
+				current = next;
+			}
 		}
 	}
 

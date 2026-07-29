@@ -200,6 +200,15 @@ public final class FakeWsmanResponses {
 	}
 
 	/**
+	 * The SendResponse body answering a stdin Send.
+	 *
+	 * @return the SendResponse body
+	 */
+	public static String sendResponse() {
+		return "<rsp:SendResponse xmlns:rsp=\"" + RSP + "\"/>";
+	}
+
+	/**
 	 * A complete WSMan fault envelope (not to be wrapped in {@link #envelope(String)}).
 	 *
 	 * @param code the WSManFault code

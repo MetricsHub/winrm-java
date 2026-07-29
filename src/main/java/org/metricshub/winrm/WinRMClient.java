@@ -240,6 +240,7 @@ public final class WinRMClient implements AutoCloseable {
 		private List<AuthScheme> authentication;
 		private Path ticketCache;
 		private boolean trustAllCertificates;
+		private int consoleCodePage;
 		private SSLContext sslContext;
 		private Duration timeout = DEFAULT_TIMEOUT;
 
@@ -397,6 +398,28 @@ public final class WinRMClient implements AutoCloseable {
 		}
 
 		/**
+		 * Set the console code page of the remote command shell. Default: 65001 (UTF-8), which makes
+		 * command output UTF-8 whatever the remote locale — the right choice for reading output and
+		 * for piping data to a program.
+		 * <p>
+		 * An <b>interactive</b> session needs a different setting: under code page 65001 a remote
+		 * {@code cmd.exe} decodes the command lines it reads from its standard input one byte at a
+		 * time, so every non-ASCII character is lost. Pin a single-byte code page (typically the
+		 * remote machine's ANSI one, {@code Win32_OperatingSystem.CodeSet}) and use the matching
+		 * charset for both directions, as the CLI's {@code shell} subcommand does.
+		 *
+		 * @param consoleCodePage the console code page (e.g. 1252), or 0 for the default
+		 * @return this builder
+		 */
+		public Builder consoleCodePage(final int consoleCodePage) {
+			if (consoleCodePage < 0) {
+				throw new IllegalArgumentException("consoleCodePage must not be negative.");
+			}
+			this.consoleCodePage = consoleCodePage;
+			return this;
+		}
+
+		/**
 		 * Build the client. This does not connect yet: the connection is established and
 		 * authenticated by the first operation.
 		 *
@@ -431,7 +454,8 @@ public final class WinRMClient implements AutoCloseable {
 					ticketCache,
 					authentications,
 					sslContext,
-					trustAllCertificates
+					trustAllCertificates,
+					consoleCodePage
 				);
 				return new WinRMClient(executor, endpoint.getHostname(), endpoint.getNamespace(), timeout);
 			} catch (final WinRMException e) {

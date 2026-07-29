@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
+import org.metricshub.winrm.light.FakeWsmanResponses;
 import org.metricshub.winrm.light.FakeWsmanServer;
 
 class WinRmCliTest {
@@ -52,6 +53,7 @@ class WinRmCliTest {
 		final Invocation help = invoke(new String[] { "--help" }, arguments -> failingRemote());
 		assertEquals(0, help.exitCode);
 		assertTrue(help.stdout.contains("command|cmd|exec|run"));
+		assertTrue(help.stdout.contains("[options] shell"));
 		assertTrue(help.stdout.contains("-P, --port"));
 		assertTrue(help.stdout.contains("--kerberos-kdc"));
 		assertTrue(help.stdout.contains("--kerberos-realm"));
@@ -105,6 +107,212 @@ class WinRmCliTest {
 		assertEquals("output", invocation.stdout);
 		assertEquals("warning", invocation.stderr);
 		assertEquals("echo \"hello world\"", remote.command);
+	}
+
+	@Test
+	void shellSubcommandBridgesTheRemoteShellAndPropagatesItsExitCode() throws Exception {
+		final FakeRemote remote = new FakeRemote();
+		remote.stdoutChunks = List.of("Microsoft Windows\r\nC:\\>");
+		remote.commandExitCode = 3;
+
+		final Invocation invocation = invoke(concat(REQUIRED, "shell"), args -> remote);
+
+		assertEquals(3, invocation.exitCode);
+		assertTrue(remote.shellStarted);
+		assertEquals("Microsoft Windows\r\nC:\\>", invocation.stdout);
+		assertTrue(remote.closed);
+	}
+
+	@Test
+	void shellRunsAQuietCmdUnderASingleByteCodePage() throws Exception {
+		// Full stack against the in-process WSMan server, through the CLI's real connect factory.
+		// The shell must be echo-free (cmd.exe /Q) and must NOT run under console code page 65001:
+		// a remote cmd.exe decodes the command lines it reads from stdin one byte at a time under
+		// that page, losing every non-ASCII character. The ANSI code page probe precedes the shell
+		// and its answer becomes the shell's console code page.
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			server.enqueue(
+				200,
+				FakeWsmanResponses.envelope(
+					FakeWsmanResponses.enumerationDone(FakeWsmanResponses.instance("Win32_OperatingSystem", "CodeSet", "1252"))
+				)
+			);
+			enqueueShellCreation(server);
+			server
+				.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.commandResponse("CMD-1")))
+				.enqueue(
+					200,
+					FakeWsmanResponses.envelope(FakeWsmanResponses.receiveResponse("", FakeWsmanResponses.done("CMD-1", 0)))
+				)
+				.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.signalResponse()));
+			enqueueShellDeletion(server);
+
+			// A local input that never delivers anything: the pump only ever polls, keeping the
+			// scripted exchange deterministic (the daemon reader thread blocks forever).
+			final java.io.InputStream never = new java.io.InputStream() {
+				@Override
+				public int read() {
+					try {
+						new java.util.concurrent.CountDownLatch(1).await();
+					} catch (final InterruptedException e) {
+						Thread.currentThread().interrupt();
+					}
+					return -1;
+				}
+			};
+
+			final Invocation invocation = invoke(
+				new String[]
+				{
+						"-h",
+						"127.0.0.1",
+						"-P",
+						String.valueOf(server.port()),
+						"-u",
+						"FAKE\\user",
+						"-p",
+						"secret",
+						"-t",
+						"10000",
+						"shell"
+				},
+				WinRmCli::connect,
+				new WinRmCli.LocalInput(true, never)
+			);
+
+			assertEquals(0, invocation.exitCode);
+			final List<String> requests = server.decryptedRequests();
+			assertTrue(requests.get(0).contains("Win32_OperatingSystem"), requests.get(0));
+			final String create = requests.get(1);
+			assertTrue(create.contains("<wsman:Option Name=\"WINRS_CODEPAGE\">1252</wsman:Option>"), create);
+			final String command = requests.get(2);
+			assertTrue(command.contains("<rsp:Command>cmd.exe /Q</rsp:Command>"), command);
+			assertTrue(command.contains("<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">FALSE</wsman:Option>"), command);
+		}
+	}
+
+	@Test
+	void theShellCodePageAndCharsetAreAlwaysResolvedTogether() {
+		// A page this JVM has a charset for is used as reported...
+		assertEquals(1252, WinRmCli.FluentRemoteOperations.sessionEncoding(1252).codePage());
+		assertEquals(
+			java.nio.charset.Charset.forName("windows-1252"),
+			WinRmCli.FluentRemoteOperations.sessionEncoding(1252).charset()
+		);
+		assertEquals(850, WinRmCli.FluentRemoteOperations.sessionEncoding(850).codePage());
+		assertEquals(
+			java.nio.charset.Charset.forName("IBM850"),
+			WinRmCli.FluentRemoteOperations.sessionEncoding(850).charset()
+		);
+
+		// ...but 65001 — what a host configured for UTF-8 reports as its ANSI page — is precisely
+		// the page an interactive cmd.exe cannot read command lines under, so BOTH the page and
+		// the charset fall back rather than pinning the shell to a page the session cannot use.
+		assertEquals(1252, WinRmCli.FluentRemoteOperations.sessionEncoding(65001).codePage());
+		assertEquals(
+			java.nio.charset.Charset.forName("windows-1252"),
+			WinRmCli.FluentRemoteOperations.sessionEncoding(65001).charset()
+		);
+
+		// An unknown page falls back on both counts too: a charset that does not match the shell's
+		// code page would corrupt the session in both directions.
+		assertEquals(1252, WinRmCli.FluentRemoteOperations.sessionEncoding(999_999).codePage());
+		assertEquals(
+			java.nio.charset.Charset.forName("windows-1252"),
+			WinRmCli.FluentRemoteOperations.sessionEncoding(999_999).charset()
+		);
+	}
+
+	@Test
+	void shellTakesNoArgument() throws Exception {
+		final Invocation invocation = invoke(concat(REQUIRED, "shell", "cmd.exe"), args -> failingRemote());
+		assertEquals(WinRmCli.EXIT_USAGE, invocation.exitCode);
+		assertTrue(invocation.stderr.contains("shell takes no argument"));
+	}
+
+	@Test
+	void shellRejectsATimeoutBelowThePollFloor() throws Exception {
+		// A --timeout below one poll round trip would make the session pump spin locally without
+		// ever fetching output: the WSMan service holds a bounded Receive for at least 500 ms.
+		final Invocation invocation = invoke(concat(REQUIRED, "-t", "500", "shell"), args -> failingRemote());
+		assertEquals(WinRmCli.EXIT_USAGE, invocation.exitCode);
+		assertTrue(invocation.stderr.contains("shell requires --timeout of at least 1000 milliseconds"));
+
+		// The same timeout stays perfectly valid for the other subcommands.
+		final FakeRemote remote = new FakeRemote();
+		assertEquals(0, invoke(concat(REQUIRED, "-t", "500", "command", "whoami"), args -> remote).exitCode);
+	}
+
+	@Test
+	void pipedLocalStandardInputIsForwardedToTheCommandButAConsoleIsNot() throws Exception {
+		final java.io.ByteArrayInputStream piped = new java.io.ByteArrayInputStream(
+			"beta\nalpha\n".getBytes(StandardCharsets.UTF_8)
+		);
+		final FakeRemote remote = new FakeRemote();
+		Invocation invocation = invoke(
+			concat(REQUIRED, "command", "sort"),
+			args -> remote,
+			new WinRmCli.LocalInput(false, piped)
+		);
+		assertEquals(0, invocation.exitCode);
+		assertEquals(piped, remote.forwardedStdin);
+
+		// From an interactive console, nothing is forwarded implicitly.
+		final FakeRemote interactive = new FakeRemote();
+		invocation = invoke(
+			concat(REQUIRED, "command", "sort"),
+			args -> interactive,
+			new WinRmCli.LocalInput(true, piped)
+		);
+		assertEquals(0, invocation.exitCode);
+		org.junit.jupiter.api.Assertions.assertNull(interactive.forwardedStdin);
+	}
+
+	@Test
+	void detectsRedirectedStdinByProbingTheInputItself() {
+		// Bytes already waiting on a non-console stdin: a pipe or a redirected file.
+		assertTrue(WinRmCli.stdinHasAvailableInput(new java.io.ByteArrayInputStream(new byte[] { 1 })));
+
+		// Nothing waiting: typically an interactive terminal whose OUTPUT is redirected
+		// (System.console() is null then too) — consuming it would hang the CLI.
+		assertFalse(WinRmCli.stdinHasAvailableInput(new java.io.ByteArrayInputStream(new byte[0])));
+
+		// A probe failure counts as not redirected: never risk blocking on a terminal.
+		assertFalse(
+			WinRmCli.stdinHasAvailableInput(
+				new java.io.InputStream() {
+					@Override
+					public int read() {
+						return -1;
+					}
+
+					@Override
+					public int available() throws java.io.IOException {
+						throw new java.io.IOException("probe failure");
+					}
+				}
+			)
+		);
+	}
+
+	@Test
+	void explicitStdinOptionForcesForwardingAndRequiresTheCommandSubcommand() throws Exception {
+		// --stdin forwards even when the local input looks interactive (the undetectable cases:
+		// an empty redirection, a pipe whose producer starts slowly).
+		final java.io.ByteArrayInputStream local = new java.io.ByteArrayInputStream(new byte[0]);
+		final FakeRemote remote = new FakeRemote();
+		final Invocation invocation = invoke(
+			concat(REQUIRED, "--stdin", "command", "sort"),
+			args -> remote,
+			new WinRmCli.LocalInput(true, local)
+		);
+		assertEquals(0, invocation.exitCode);
+		assertEquals(local, remote.forwardedStdin);
+
+		// The option is meaningless outside the command subcommand.
+		final Invocation rejected = invoke(concat(REQUIRED, "--stdin", "wql", "SELECT 1"), args -> failingRemote());
+		assertEquals(WinRmCli.EXIT_USAGE, rejected.exitCode);
+		assertTrue(rejected.stderr.contains("--stdin requires the command subcommand"));
 	}
 
 	@Test
@@ -333,6 +541,34 @@ class WinRmCliTest {
 		}
 	}
 
+	private static Invocation invoke(
+		final String[] arguments,
+		final WinRmCli.RemoteFactory factory,
+		final WinRmCli.LocalInput localInput
+	) throws Exception {
+		final ByteArrayOutputStream stdoutBytes = new ByteArrayOutputStream();
+		final ByteArrayOutputStream stderrBytes = new ByteArrayOutputStream();
+		try (
+			PrintStream stdout = new PrintStream(stdoutBytes, true, StandardCharsets.UTF_8.name());
+			PrintStream stderr = new PrintStream(stderrBytes, true, StandardCharsets.UTF_8.name())) {
+			final int exitCode = WinRmCli.run(
+				arguments,
+				stdout,
+				stderr,
+				factory,
+				() -> {
+					throw new AssertionError("No password prompt expected");
+				},
+				localInput
+			);
+			return new Invocation(
+				exitCode,
+				stdoutBytes.toString(StandardCharsets.UTF_8.name()),
+				stderrBytes.toString(StandardCharsets.UTF_8.name())
+			);
+		}
+	}
+
 	private static String[] concat(final String[] prefix, final String... suffix) {
 		final String[] result = new String[prefix.length + suffix.length];
 		System.arraycopy(prefix, 0, result, 0, prefix.length);
@@ -369,6 +605,8 @@ class WinRmCliTest {
 		private int commandExitCode;
 		private Exception failure;
 		private String command;
+		private java.io.InputStream forwardedStdin;
+		private boolean shellStarted;
 		private boolean closed;
 
 		@Override
@@ -382,13 +620,32 @@ class WinRmCliTest {
 		public int executeCommand(
 			final String command,
 			final long timeout,
+			final java.io.InputStream stdin,
 			final Consumer<String> stdoutConsumer,
 			final Consumer<String> stderrConsumer
 		) throws Exception {
 			this.command = command;
+			this.forwardedStdin = stdin;
 			failIfConfigured();
 			stdoutChunks.forEach(stdoutConsumer);
 			stderrChunks.forEach(stderrConsumer);
+			return commandExitCode;
+		}
+
+		@Override
+		public int shell(
+			final long timeout,
+			final java.io.InputStream localInput,
+			final java.io.PrintStream out,
+			final java.io.PrintStream err,
+			final java.util.concurrent.atomic.AtomicBoolean interruptRequested
+		) throws Exception {
+			shellStarted = true;
+			failIfConfigured();
+			stdoutChunks.forEach(chunk -> {
+				out.print(chunk);
+				out.flush();
+			});
 			return commandExitCode;
 		}
 

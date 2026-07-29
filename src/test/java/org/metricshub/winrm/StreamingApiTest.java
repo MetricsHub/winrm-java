@@ -519,14 +519,15 @@ class StreamingApiTest {
 		try (WinRMClient client = builder().build()) {
 			try (RemoteProcess process = client.command("dead.exe").charset(StandardCharsets.UTF_8).start()) {
 				final long start = System.nanoTime();
-				assertThrows(WinRMTimeoutException.class, () -> process.waitFor(Duration.ofMillis(200)));
+				assertThrows(WinRMTimeoutException.class, () -> process.waitFor(Duration.ofMillis(1_000)));
 				final long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
 				assertTrue(
 					elapsedMillis < 3_000,
 					"a dead peer must be detected at the bounded wait, not " + elapsedMillis + " ms later"
 				);
-				// The server was asked to answer within half the 200 ms budget.
-				assertTrue(server.decryptedRequests().get(2).contains("<wsman:OperationTimeout>PT0.1S<"));
+				// The server was asked to answer at the WSMan floor (the budget minus the transit
+				// slack, never below 500 ms — the service would not answer earlier anyway).
+				assertTrue(server.decryptedRequests().get(2).contains("<wsman:OperationTimeout>PT0.5S<"));
 			}
 			// close() terminated the command over a fresh connection (the abandoned one was dropped).
 			final List<String> requests = server.decryptedRequests();
@@ -561,16 +562,61 @@ class StreamingApiTest {
 	}
 
 	@Test
+	void aPollAnswerSlowerThanTheCadenceDoesNotFailTheStream() throws Exception {
+		enqueueCommandStartup();
+		server
+			// The answer takes clearly longer than the 1 s polling cadence — a loaded server —
+			// but stays well within the configured inactivity timeout: the poll must wait for it
+			// rather than cutting the connection at the cadence.
+			.enqueueDelayed(200, envelope(receiveResponse(stdoutChunk("late but fine\n"), done(COMMAND_ID, 6))), 2_500)
+			.enqueue(200, envelope(signalResponse()));
+
+		try (WinRMClient client = builder().build()) {
+			try (RemoteProcess process = client.command("busy.exe").charset(StandardCharsets.UTF_8).start()) {
+				assertFalse(process.poll(Duration.ofSeconds(1)), "the Done chunk itself is not completion yet");
+				assertTrue(process.poll(Duration.ofSeconds(1)), "completion must be observable");
+				assertEquals(6, process.exitCode());
+				assertEquals("late but fine", process.stdout().readLine());
+			}
+		}
+	}
+
+	@Test
+	void aSubFloorInactivityTimeoutKeepsBoundedPollsLocalAndTheProcessUsable() throws Exception {
+		enqueueCommandStartup();
+		server
+			.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 4))))
+			.enqueue(200, envelope(signalResponse()));
+
+		// The per-round-trip timeout caps a bounded poll STRICTLY: a 500 ms inactivity timeout
+		// bounds the poll to 500 ms however long the caller's wait, and 500 ms is below what a
+		// round trip can honor (the server holds a bounded Receive for at least 500 ms, plus
+		// transit). Such a poll is therefore waited out locally, touching nothing...
+		try (WinRMClient client = builder().timeout(Duration.ofMillis(500)).build()) {
+			try (RemoteProcess process = client.command("run.exe").charset(StandardCharsets.UTF_8).start()) {
+				final int requestsBefore = server.decryptedRequests().size();
+				assertFalse(process.poll(Duration.ofSeconds(5)), "a sub-floor budget cannot observe completion");
+				assertEquals(requestsBefore, server.decryptedRequests().size(), "no request may reach the wire");
+
+				// ...and the process stays fully usable: the unbounded path, whose socket budget is
+				// that same per-round-trip timeout, observes the completion.
+				assertEquals(4, process.waitFor());
+				assertEquals("done", process.stdout().readLine());
+			}
+		}
+	}
+
+	@Test
 	void completionArrivingNearTheDeadlineIsStillReported() throws Exception {
 		enqueueCommandStartup();
 		// The final Done-carrying response lands close to the wait's deadline: too little budget is
 		// left for a wire Signal, but the completion happened WITHIN the wait and must be reported
 		// as such — never as a spurious expiry.
-		server.enqueueDelayed(200, envelope(receiveResponse(stdoutChunk("late\n"), done(COMMAND_ID, 9))), 520);
+		server.enqueueDelayed(200, envelope(receiveResponse(stdoutChunk("late\n"), done(COMMAND_ID, 9))), 800);
 
 		try (WinRMClient client = builder().build()) {
 			try (RemoteProcess process = client.command("barely.exe").charset(StandardCharsets.UTF_8).start()) {
-				assertTrue(process.waitFor(Duration.ofMillis(600)), "completion within the wait must be reported");
+				assertTrue(process.waitFor(Duration.ofMillis(1_000)), "completion within the wait must be reported");
 				assertEquals(9, process.exitCode());
 				assertEquals("late", process.stdout().readLine());
 				// The leftover budget could not fit a Signal round trip: none was sent.
@@ -715,6 +761,36 @@ class StreamingApiTest {
 		final WindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor();
 		assertThrows(UnsupportedOperationException.class, () -> executor.streamWql("ROOT\\CIMV2", "SELECT 1", 1000, 10, 0));
 		assertThrows(UnsupportedOperationException.class, () -> executor.startCommand("dir", null, 1000));
+		assertThrows(UnsupportedOperationException.class, () -> executor.startCommand("dir", null, 1000, true));
+	}
+
+	@Test
+	void executorsOverridingTheHistoricalStartCommandKeepWorkingThroughTheNewOverload() throws Exception {
+		// A pre-existing executor overrides only the three-argument startCommand: the new
+		// console-mode default must delegate to it, and only pipe mode may be unsupported.
+		final CommandCursor canned = new CommandCursor() {
+			@Override
+			public Chunk next() {
+				return null;
+			}
+
+			@Override
+			public int exitCode() {
+				return 0;
+			}
+
+			@Override
+			public void close() {}
+		};
+		final WindowsRemoteExecutor legacy = new ScriptedWindowsRemoteExecutor() {
+			@Override
+			public CommandCursor startCommand(final String command, final String workingDirectory, final long timeout) {
+				return canned;
+			}
+		};
+
+		assertEquals(canned, legacy.startCommand("dir", null, 1000, true));
+		assertThrows(UnsupportedOperationException.class, () -> legacy.startCommand("dir", null, 1000, false));
 	}
 
 	private static byte[] concat(final byte[] a, final byte[] b) {
