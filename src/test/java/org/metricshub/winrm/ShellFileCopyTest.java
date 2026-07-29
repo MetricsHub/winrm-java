@@ -396,7 +396,7 @@ class ShellFileCopyTest {
 
 	@Test
 	void buildUploadCommandsChunksBelowTheCommandLineLimit() {
-		final String base64File = expectedRemoteDirectory() + "\\big.bin.SEN_X_1_2.b64";
+		final String base64File = expectedRemoteDirectory() + "\\big.bin.winrm-X-1-2.b64";
 		final byte[] content = new byte[15000];
 		for (int i = 0; i < content.length; i++) {
 			content[i] = (byte) i;
@@ -450,7 +450,7 @@ class ShellFileCopyTest {
 		// The explicit bound derived from the directory keeps the COMPLETE staging path (with
 		// the ".<unique>.part.b64" suffixes) within the traditional Windows MAX_PATH limit,
 		// even for the longest allowed (64-character) client computer name
-		final String longDirectory = "C:\\Windows\\Temp\\SEN_ShareFor_" + "h".repeat(64) + "$";
+		final String longDirectory = "C:\\Windows\\Temp\\winrm-upload-" + "h".repeat(64);
 		final int budget = ShellFileCopy.maxRemoteNameLength(longDirectory);
 		final String bounded = ShellFileCopy.contentAddressedName("x".repeat(300) + ".vbs", content, budget);
 		assertTrue(
