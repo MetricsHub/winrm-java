@@ -23,7 +23,7 @@ WinRMClient.builder("server.example.com")
 
 When `authentication(...)` is not called, **NTLM** is used.
 
-### Ordered fallback
+## Ordered fallback
 
 Several schemes form an **ordered fallback list**: each is tried in the given order until one
 succeeds. `authentication(KERBEROS, NTLM)` attempts Kerberos first and falls back to NTLM — for
