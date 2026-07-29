@@ -270,20 +270,29 @@ needs to read WMI. It takes explicit grants in two or three places.
 
 **1. Grant remote access to the WinRM listener.** The default listener security descriptor
 (`RootSDDL`) grants full access to `BUILTIN\Administrators` and read access to interactive users
-only — notably, the `Remote Management Users` group is **not** in it by default, so merely adding
-your account to that group is not enough. Edit the descriptor:
+only: `O:NSG:BAD:P(A;;GA;;;BA)(A;;GR;;;IU)S:P(AU;FA;GA;;;WD)(AU;SA;GXGW;;;WD)`. Inspect the value on
+your own host first, since a hardening baseline may have changed it:
+
+```powershell
+(Get-Item WSMan:\localhost\Service\RootSDDL).Value
+```
+
+> [!WARNING]
+> Adding the account to the built-in **`Remote Management Users`** group is **not** enough, despite
+> being the advice you will find most often. That group is granted access to PowerShell's own
+> remoting endpoints, which this client never connects to — it is *not* in the default `RootSDDL`,
+> which is what gates the listener. The same is true of `winrs` and of other third-party WinRM
+> clients.
+
+So the account needs an entry in the descriptor itself:
 
 ```powershell
 winrm configSDDL default
 ```
 
-That opens a permissions dialog: add the account or group and grant **Read** and **Execute**. For an
-unattended setup, set `RootSDDL` directly instead — inspect the current value first, and **add** your
-entry to it rather than replacing the whole descriptor:
-
-```powershell
-(Get-Item WSMan:\localhost\Service\RootSDDL).Value
-```
+That opens a permissions dialog: add the account or group and grant **Read** and **Execute**. Prefer
+this dialog over setting `RootSDDL` as a string — it **adds** your entry to the existing descriptor,
+whereas assigning the value wholesale risks dropping the entries already there.
 
 **2. Grant WMI access — required for WQL queries.** Two steps, both on the target host:
 
@@ -297,8 +306,13 @@ entry to it rather than replacing the whole descriptor:
 * Then grant the account rights on the WMI namespace itself, since group membership alone does not
   confer them. Run `wmimgmt.msc` → **WMI Control** → *Properties* → *Security*, select the
   namespace (`Root\CIMV2` for almost everything), *Security*, add the account, and grant
-  **Enable Account**, **Remote Enable** and **Execute Methods**, with *Applies to* set to
+  **Enable Account** and **Remote Enable**, with *Applies to* set to
   **This namespace and subnamespaces**.
+
+  Those two are all a `SELECT` query needs. In particular **`Execute Methods` is not required** —
+  it authorizes invoking WMI class methods, which this client never does (it only runs `SELECT`
+  queries; anything else is rejected locally as a `WqlSyntaxException`). Many monitoring guides
+  grant it anyway; leave it off unless something else on the account's behalf needs it.
 
   Granting these on `Root` with *This namespace and subnamespaces* covers every namespace at once;
   granting them on `Root\CIMV2` alone is tighter and usually sufficient.
