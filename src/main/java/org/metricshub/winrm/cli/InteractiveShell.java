@@ -22,6 +22,7 @@ package org.metricshub.winrm.cli;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.Console;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -32,6 +33,7 @@ import java.time.Duration;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.UnaryOperator;
 import org.metricshub.winrm.RemoteProcess;
 
 /**
@@ -100,13 +102,57 @@ final class InteractiveShell {
 		/**
 		 * @return the next queued piece of local input — line terminators already normalized to
 		 *         CRLF and included — or {@code null} when nothing is available right now
+		 * @throws IOException when reading the local input failed: the session must fail rather
+		 *         than pass the truncated input off as the complete one
 		 */
-		String nextPiece();
+		String nextPiece() throws IOException;
 
 		/**
 		 * @return whether the local input reached its end and every queued piece was consumed
 		 */
 		boolean endOfInput();
+	}
+
+	/**
+	 * The charset the local standard input is actually encoded with. {@code Charset.defaultCharset()}
+	 * is wrong for a Windows console on modern JDKs: the JVM default is UTF-8 there while the
+	 * console feeds {@code System.in} with its OEM code page. The JDK exposes the real answer
+	 * through {@code stdin.encoding} (recent JDKs), {@code sun.stdin.encoding} (Windows consoles
+	 * on older JDKs), {@code Console.charset()} (Java 17+, reached reflectively — this code
+	 * targets Java 11), and {@code native.encoding} (Java 18+), tried in that order before
+	 * falling back to the process default.
+	 */
+	static Charset localInputCharset(final UnaryOperator<String> systemProperty, final Console console) {
+		for (final String property : new String[] { "stdin.encoding", "sun.stdin.encoding" }) {
+			final Charset charset = charsetOf(systemProperty.apply(property));
+			if (charset != null) {
+				return charset;
+			}
+		}
+		if (console != null) {
+			try {
+				final Object charset = Console.class.getMethod("charset").invoke(console);
+				if (charset instanceof Charset) {
+					return (Charset) charset;
+				}
+			} catch (final ReflectiveOperationException | RuntimeException ignored) {
+				// Java 11-16: no Console.charset() — keep probing.
+			}
+		}
+		final Charset nativeCharset = charsetOf(systemProperty.apply("native.encoding"));
+		return nativeCharset != null ? nativeCharset : Charset.defaultCharset();
+	}
+
+	/** The charset of the given name, or {@code null} when absent, unknown, or unsupported. */
+	private static Charset charsetOf(final String name) {
+		if (name == null) {
+			return null;
+		}
+		try {
+			return Charset.forName(name);
+		} catch (final RuntimeException e) {
+			return null;
+		}
 	}
 
 	/**
@@ -259,24 +305,36 @@ final class InteractiveShell {
 	 */
 	static final class QueuedInputSource implements InputSource {
 
-		/** One queued item: a piece of input, or the end of the local input when {@code null}. */
+		/**
+		 * One queued item: a piece of input, the normal end of the local input ({@code piece} and
+		 * {@code failure} both null), or a local read failure to surface to the pump.
+		 */
 		private static final class Item {
 
 			private final String piece;
+			private final IOException failure;
 
-			private Item(final String piece) {
+			private Item(final String piece, final IOException failure) {
 				this.piece = piece;
+				this.failure = failure;
 			}
 		}
 
 		private final BlockingQueue<Item> queue = new LinkedBlockingQueue<>(INPUT_QUEUE_CAPACITY);
 		private boolean ended;
 
-		/** Feed the queue from the local input, piece by piece, ending with the EOF marker. */
+		/**
+		 * Feed the queue from the local input, piece by piece, ending with the EOF marker — or
+		 * with the read failure itself, so the pump fails the session instead of passing the
+		 * truncated input off as the complete one.
+		 */
 		void readAll(final InputStream localInput) {
-			// The local console charset: what the terminal actually feeds System.in with. The
-			// reader is deliberately never closed — the stream is the caller's (System.in).
-			final Reader reader = new BufferedReader(new InputStreamReader(localInput, Charset.defaultCharset()));
+			// The local input charset: what the terminal (or the redirection) actually feeds
+			// System.in with. The reader is deliberately never closed — the stream is the
+			// caller's (System.in).
+			final Reader reader = new BufferedReader(
+				new InputStreamReader(localInput, localInputCharset(System::getProperty, System.console()))
+			);
 			final StringBuilder piece = new StringBuilder();
 			try {
 				boolean skipLoneLineFeed = false;
@@ -304,17 +362,16 @@ final class InteractiveShell {
 				if (piece.length() > 0) {
 					put(piece);
 				}
-				queue.put(new Item(null));
+				queue.put(new Item(null, null));
 			} catch (final IOException e) {
-				// The local input died: treat it as its end.
-				putSilently(new Item(null));
+				putSilently(new Item(null, e));
 			} catch (final InterruptedException e) {
 				Thread.currentThread().interrupt();
 			}
 		}
 
 		private void put(final StringBuilder piece) throws InterruptedException {
-			queue.put(new Item(piece.toString()));
+			queue.put(new Item(piece.toString(), null));
 			piece.setLength(0);
 		}
 
@@ -327,7 +384,7 @@ final class InteractiveShell {
 		}
 
 		@Override
-		public String nextPiece() {
+		public String nextPiece() throws IOException {
 			if (ended) {
 				return null;
 			}
@@ -337,6 +394,9 @@ final class InteractiveShell {
 			}
 			if (item.piece == null) {
 				ended = true;
+				if (item.failure != null) {
+					throw new IOException("Reading the local standard input failed", item.failure);
+				}
 				return null;
 			}
 			return item.piece;

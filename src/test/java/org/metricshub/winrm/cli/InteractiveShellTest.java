@@ -376,7 +376,7 @@ class InteractiveShellTest {
 	}
 
 	@Test
-	void queuedInputSourceNormalizesLineEndingsAndReportsTheEnd() {
+	void queuedInputSourceNormalizesLineEndingsAndReportsTheEnd() throws Exception {
 		// The production InputSource behind InteractiveShell.run: fed by the helper thread reading
 		// the local standard input. Here the whole stream is read synchronously (readAll returns
 		// once the input ends), making the outcome deterministic. Every line-ending flavor (LF,
@@ -397,7 +397,62 @@ class InteractiveShellTest {
 	}
 
 	@Test
-	void queuedInputSourceSlicesANewlineFreeRecordInsteadOfMaterializingIt() {
+	void aLocalReadFailureFailsTheSourceInsteadOfEndingIt() throws Exception {
+		// A failing local stdin must NOT read as a normal end of input: the remote shell would
+		// execute the truncated input and the CLI would report success despite the local error.
+		final java.io.InputStream failing = new java.io.InputStream() {
+			private int calls;
+
+			@Override
+			public int read() throws java.io.IOException {
+				calls++;
+				if (calls <= 3) {
+					return "ok\n".charAt(calls - 1);
+				}
+				throw new java.io.IOException("disk error");
+			}
+		};
+		final InteractiveShell.QueuedInputSource pieces = new InteractiveShell.QueuedInputSource();
+		pieces.readAll(failing);
+
+		assertEquals("ok\r\n", pieces.nextPiece());
+		final java.io.IOException failure = org.junit.jupiter.api.Assertions.assertThrows(
+			java.io.IOException.class,
+			pieces::nextPiece
+		);
+		assertEquals("disk error", failure.getCause().getMessage());
+		assertTrue(pieces.endOfInput());
+	}
+
+	@Test
+	void localInputCharsetProbesTheJdkSignalsBeforeTheProcessDefault() {
+		// stdin.encoding (recent JDKs) wins over everything.
+		assertEquals(
+			StandardCharsets.ISO_8859_1,
+			InteractiveShell.localInputCharset(name -> "stdin.encoding".equals(name) ? "ISO-8859-1" : null, null)
+		);
+		// sun.stdin.encoding: what a Windows console reports on older JDKs.
+		assertEquals(
+			StandardCharsets.US_ASCII,
+			InteractiveShell.localInputCharset(name -> "sun.stdin.encoding".equals(name) ? "US-ASCII" : null, null)
+		);
+		// An unknown name is skipped and the probing continues down to native.encoding.
+		assertEquals(
+			StandardCharsets.UTF_16BE,
+			InteractiveShell.localInputCharset(
+				name -> "stdin.encoding".equals(name) ? "no-such-charset" : "native.encoding".equals(name) ? "UTF-16BE" : null,
+				null
+			)
+		);
+		// No signal at all: the process default.
+		assertEquals(
+			java.nio.charset.Charset.defaultCharset(),
+			InteractiveShell.localInputCharset(name -> null, null)
+		);
+	}
+
+	@Test
+	void queuedInputSourceSlicesANewlineFreeRecordInsteadOfMaterializingIt() throws Exception {
 		// A giant record without any newline (minified JSON, base64) must be queued in bounded
 		// slices: the memory bound holds by characters, never by lines.
 		final char[] record = new char[InteractiveShell.MAX_QUEUED_PIECE_CHARS + 500];
