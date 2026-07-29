@@ -95,11 +95,18 @@ class InteractiveShellTest {
 
 	/**
 	 * The exact remote process the production shell subcommand starts: {@code cmd.exe /Q} over
-	 * console-mode stdin — the only mode that carries non-ASCII command lines (cmd.exe mangles a
-	 * piped stdin under console code page 65001), live-verified against a real Windows host.
+	 * pipe-mode stdin, with the session's single-byte code page on both directions (cmd.exe
+	 * mangles non-ASCII command lines under console code page 65001 — live-verified on Windows
+	 * Server 2008 R2 and 2022).
 	 */
 	private static RemoteProcess shellProcess(final WinRMClient client) {
-		return client.command(WinRmCli.FluentRemoteOperations.SHELL_COMMAND).start();
+		return client
+			.command(WinRmCli.FluentRemoteOperations.SHELL_COMMAND)
+			.charset(
+				WinRmCli.FluentRemoteOperations.charsetOfCodePage(WinRmCli.FluentRemoteOperations.DEFAULT_SHELL_CODE_PAGE)
+			)
+			.stdin()
+			.start();
 	}
 
 	/** An input source whose {@code nextPiece()} answers are fully scripted, including "not yet". */
@@ -408,6 +415,71 @@ class InteractiveShellTest {
 		assertNull(pieces.nextPiece());
 		assertTrue(pieces.endOfInput());
 		assertNull(pieces.nextPiece());
+	}
+
+	@Test
+	void theSyntheticExitIsNeverGluedOntoAnUnterminatedRecord() throws Exception {
+		enqueueStartup();
+		server
+			// one Send: the unterminated record, its missing line ending, and the exit
+			.enqueue(200, envelope(sendResponse()))
+			.enqueue(200, envelope(receiveResponse("", done(COMMAND_ID, 0))))
+			.enqueue(200, envelope(signalResponse()));
+		enqueueShellDeletion(server);
+
+		final int exitCode;
+		try (WinRMClient client = client()) {
+			try (RemoteProcess process = shellProcess(client)) {
+				// A local input ending mid-line (printf 'echo hi' with no trailing newline, or
+				// Ctrl+D typed mid-line): "echo hiexit" would run instead, and the session would
+				// hang forever — an idle shell deliberately never times out.
+				exitCode = InteractiveShell.bridge(
+					process,
+					ScriptedPieces.endingAfter("echo hi"),
+					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
+					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
+					new AtomicBoolean(),
+					POLL_MILLIS,
+					"exit"
+				);
+			}
+		}
+
+		assertEquals(0, exitCode);
+		final List<FakeWsmanServer.StdinChunk> chunks = server.stdinChunks();
+		assertEquals(1, chunks.size());
+		assertArrayEquals("echo hi\r\nexit\r\n".getBytes(StandardCharsets.UTF_8), chunks.get(0).data());
+		// Console-mode stdin has no end of input: the exit command replaces the End mark.
+		assertFalse(chunks.get(0).end());
+	}
+
+	@Test
+	void theSyntheticExitFollowsAProperlyTerminatedRecordDirectly() throws Exception {
+		enqueueStartup();
+		server
+			.enqueue(200, envelope(sendResponse()))
+			.enqueue(200, envelope(receiveResponse("", done(COMMAND_ID, 0))))
+			.enqueue(200, envelope(signalResponse()));
+		enqueueShellDeletion(server);
+
+		try (WinRMClient client = client()) {
+			try (RemoteProcess process = shellProcess(client)) {
+				InteractiveShell.bridge(
+					process,
+					ScriptedPieces.endingAfter("echo hi\r\n"),
+					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
+					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
+					new AtomicBoolean(),
+					POLL_MILLIS,
+					"exit"
+				);
+			}
+		}
+
+		// No spurious blank line before the exit when the record already ended one.
+		final List<FakeWsmanServer.StdinChunk> chunks = server.stdinChunks();
+		assertEquals(1, chunks.size());
+		assertArrayEquals("echo hi\r\nexit\r\n".getBytes(StandardCharsets.UTF_8), chunks.get(0).data());
 	}
 
 	@Test

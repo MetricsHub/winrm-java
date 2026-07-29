@@ -164,20 +164,22 @@ differently:
   process **unconverted**. They are encoded with the request's charset (UTF-8 by default), which
   is what a program reading a UTF-8 stream expects, and `stdin(Path)`/`stdin(InputStream)` send
   the bytes verbatim.
-* **Console semantics** (no `stdin` declaration — a command started with `start()` and written to
-  through `RemoteProcess.stdin()`) — the WinRM service converts the bytes with the remote
-  machine's **ANSI** code page before handing them to the console. Encode accordingly with
-  `stdinCharset(...)`; the CLI's `shell` subcommand queries `Win32_OperatingSystem.CodeSet` once
-  per session for exactly this.
+* **Console semantics** (no `stdin` declaration — a command started with `start()` and written
+  to through `RemoteProcess.stdin()`) — the WinRM service converts the bytes to console input
+  itself, using a code page that depends on the Windows version. Prefer pipe semantics, or set
+  `stdinCharset(...)` to match the session's console code page.
 
 Output is unaffected either way: it follows the shell's console code page, which this client
 pins to UTF-8.
 
-> A remote `cmd.exe` reading its **command lines** from a *piped* stdin cannot handle non-ASCII
+> A remote `cmd.exe` reading its **command lines** from standard input cannot handle non-ASCII
 > at all under console code page 65001 — Windows decodes that input one byte at a time, turning
-> every non-ASCII byte into `U+FFFD`. That is why an interactive session must use console
-> semantics. Data piped to an ordinary program (`sort`, `findstr`, your own executable) is not
-> affected: it never goes through cmd's parser.
+> every non-ASCII byte into `U+FFFD`, whatever the encoding used to send it. An interactive
+> session must therefore run under a single-byte console code page: build the client with
+> `consoleCodePage(...)` (the remote machine's ANSI page) and use the matching charset in both
+> directions, as the CLI's `shell` subcommand does. Data piped to an ordinary program (`sort`,
+> `findstr`, your own executable) is not affected: it never goes through cmd's parser, so the
+> default code page 65001 and UTF-8 are right for it.
 
 ### Tailing the output of a blocking execution
 

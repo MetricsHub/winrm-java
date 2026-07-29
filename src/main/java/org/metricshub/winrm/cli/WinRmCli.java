@@ -363,6 +363,15 @@ public final class WinRmCli {
 	}
 
 	static RemoteOperations connect(final CliArguments arguments) {
+		return connect(arguments, 0);
+	}
+
+	/**
+	 * Connect, optionally pinning the remote command shell's console code page (0 keeps the
+	 * default 65001). The interactive shell needs a single-byte code page — see
+	 * {@link FluentRemoteOperations#shell}.
+	 */
+	static FluentRemoteOperations connect(final CliArguments arguments, final int consoleCodePage) {
 		final WinRMClient.Builder builder = WinRMClient
 			.builder(arguments.hostname())
 			.port(arguments.port())
@@ -376,6 +385,9 @@ public final class WinRmCli {
 			// property, it does not leak to (or race with) anything else in the JVM.
 			builder.trustAllCertificates();
 		}
+		if (consoleCodePage > 0) {
+			builder.consoleCodePage(consoleCodePage);
+		}
 		final List<AuthenticationEnum> authentications = arguments.authentications();
 		if (authentications != null && !authentications.isEmpty()) {
 			builder.authentication(
@@ -385,7 +397,7 @@ public final class WinRmCli {
 					.toArray(AuthScheme[]::new)
 			);
 		}
-		return new FluentRemoteOperations(builder.build());
+		return new FluentRemoteOperations(builder.build(), codePage -> connect(arguments, codePage).client);
 	}
 
 	private static int remoteExitCode(final int exitCode, final PrintStream standardError) {
@@ -558,21 +570,26 @@ public final class WinRmCli {
 		 */
 		static final String SHELL_COMMAND = "cmd.exe /Q";
 
-		/** What the shell sends when the local input ends: console-mode stdin has no EOF. */
-		static final String SHELL_EXIT_COMMAND = "exit";
-
 		/**
-		 * The code page assumed for the interactive shell's input when the remote machine cannot
-		 * be asked: Windows-1252, the most widespread Windows ANSI code page. ASCII — the whole
-		 * command vocabulary — is identical in every ANSI code page, so only non-ASCII characters
-		 * of an unqueryable host are at risk.
+		 * The code page the interactive shell falls back to when the remote machine cannot be
+		 * asked for its ANSI one: 1252, the most widespread Windows ANSI code page. ASCII — the
+		 * whole command vocabulary — is identical in every ANSI code page, so only the non-ASCII
+		 * characters of an unqueryable host are at risk.
 		 */
-		static final Charset DEFAULT_SHELL_INPUT_CHARSET = Charset.forName("windows-1252");
+		static final int DEFAULT_SHELL_CODE_PAGE = 1252;
 
 		private final WinRMClient client;
+		private final java.util.function.IntFunction<WinRMClient> clientFactory;
 
 		FluentRemoteOperations(final WinRMClient client) {
+			this(client, codePage -> {
+				throw new UnsupportedOperationException("This operations handle cannot open a second connection.");
+			});
+		}
+
+		FluentRemoteOperations(final WinRMClient client, final java.util.function.IntFunction<WinRMClient> clientFactory) {
 			this.client = client;
+			this.clientFactory = clientFactory;
 		}
 
 		@Override
@@ -609,46 +626,62 @@ public final class WinRmCli {
 			final PrintStream err,
 			final AtomicBoolean interruptRequested
 		) throws Exception {
-			// The remote side of the bridge: cmd.exe with its command echo off (/Q) over the
-			// default CONSOLE-mode stdin, which never echoes what it receives either — so the
-			// output stream carries prompts and command output only, and the local terminal alone
-			// shows what the user types.
+			// An interactive shell cannot run under console code page 65001, this client's default:
+			// a remote cmd.exe decodes the command lines it reads from its standard input ONE BYTE
+			// AT A TIME under that page, so every non-ASCII character becomes U+FFFD (measured on
+			// Windows Server 2008 R2 and 2022, in both stdin modes and for every input encoding).
+			// Any single-byte code page works, so the session runs under the remote machine's ANSI
+			// one and both directions use the matching charset.
 			//
-			// Console mode is also the only mode that carries non-ASCII command lines: cmd.exe
-			// parses a PIPED stdin one byte at a time under console code page 65001 (the page this
-			// client pins for correct UTF-8 output), turning every non-ASCII byte into U+FFFD. In
-			// console mode the WinRM service converts the bytes itself, with the remote machine's
-			// ANSI code page — hence the stdinCharset below. It has no end of input, so the local
-			// EOF is translated into an "exit" command by the pump.
-			//
-			// The timeout bounds each protocol round trip; an idle session never trips it, because
-			// every poll completes with output or the protocol's "nothing yet" answer.
-			try (
-				RemoteProcess process = client.command(SHELL_COMMAND)
-					.timeout(Duration.ofMillis(timeout))
-					.stdinCharset(remoteAnsiCharset(timeout))
-					.start()) {
-				return InteractiveShell.run(
-					process,
-					localInput,
-					out,
-					err,
-					interruptRequested,
-					InteractiveShell.DEFAULT_POLL_MILLIS,
-					SHELL_EXIT_COMMAND
-				);
+			// The code page is fixed when the shell is created, so it must be known BEFORE the
+			// first command: the probe runs on this connection (a WQL query creates no shell) and
+			// the session then opens its own connection with the page pinned.
+			final int codePage = remoteAnsiCodePage(timeout);
+			final Charset charset = charsetOfCodePage(codePage);
+			try (WinRMClient shellClient = clientFactory.apply(codePage)) {
+				// cmd.exe /Q: no command echo — the local terminal already shows what the user
+				// types. Pipe-mode stdin (stdin()) makes the local end-of-input a real EOF, which
+				// cmd.exe exits on.
+				try (
+					RemoteProcess process = shellClient
+						.command(SHELL_COMMAND)
+						.timeout(Duration.ofMillis(timeout))
+						.charset(charset)
+						.stdin()
+						.start()) {
+					return InteractiveShell.run(
+						process,
+						localInput,
+						out,
+						err,
+						interruptRequested,
+						InteractiveShell.DEFAULT_POLL_MILLIS,
+						null
+					);
+				}
 			}
 		}
 
+		/** The charset of a Windows code page number, falling back to the default shell page. */
+		static Charset charsetOfCodePage(final int codePage) {
+			for (final String name : new String[] { "windows-" + codePage, "IBM" + codePage, "x-IBM" + codePage }) {
+				try {
+					return Charset.forName(name);
+				} catch (final RuntimeException ignored) {
+					// Try the next naming convention.
+				}
+			}
+			return Charset.forName("windows-" + DEFAULT_SHELL_CODE_PAGE);
+		}
+
 		/**
-		 * The remote machine's ANSI code page, which the WinRM service uses to convert console-mode
-		 * standard input. {@code Win32_OperatingSystem.CodeSet} reports exactly that value (this is
-		 * the ANSI page — the reason it is the wrong answer for decoding OUTPUT, which follows the
-		 * console page instead). A host that cannot answer falls back to
-		 * {@link #DEFAULT_SHELL_INPUT_CHARSET}: an unusable code page must degrade non-ASCII input,
-		 * never prevent the session from opening.
+		 * The remote machine's ANSI code page. {@code Win32_OperatingSystem.CodeSet} reports exactly
+		 * that value (it is the ANSI page — the very reason it is the wrong answer for decoding
+		 * command OUTPUT, which follows the console page instead). A host that cannot answer falls
+		 * back to {@link #DEFAULT_SHELL_CODE_PAGE}: an unusable answer must degrade non-ASCII
+		 * input, never prevent the session from opening.
 		 */
-		private Charset remoteAnsiCharset(final long timeout) {
+		private int remoteAnsiCodePage(final long timeout) {
 			try {
 				final List<WqlRow> rows;
 				try (
@@ -661,13 +694,13 @@ public final class WinRmCli {
 				if (!rows.isEmpty()) {
 					final String codeSet = rows.get(0).string("CodeSet");
 					if (codeSet != null && !codeSet.trim().isEmpty()) {
-						return Charset.forName("windows-" + codeSet.trim());
+						return Integer.parseInt(codeSet.trim());
 					}
 				}
 			} catch (final RuntimeException ignored) {
-				// No WMI access, an exotic code page, an unsupported charset: fall back below.
+				// No WMI access, or an answer that is not a code page number: fall back below.
 			}
-			return DEFAULT_SHELL_INPUT_CHARSET;
+			return DEFAULT_SHELL_CODE_PAGE;
 		}
 
 		@Override

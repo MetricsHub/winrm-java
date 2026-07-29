@@ -141,10 +141,22 @@ final class Envelopes {
 
 	// --- Command shell -----------------------------------------------------
 
-	static String createShell(final String url, final String workingDirectory, final long timeoutMs) {
+	/**
+	 * Create a command shell.
+	 *
+	 * @param codePage the console code page of the shell ({@code WINRS_CODEPAGE}); 0 uses
+	 *        {@link #CODEPAGE_UTF8}, the default that makes every command's output UTF-8
+	 */
+	static String createShell(
+		final String url,
+		final String workingDirectory,
+		final long timeoutMs,
+		final int codePage
+	) {
 		final String optionSet = "<wsman:OptionSet>" +
 			"<wsman:Option Name=\"WINRS_NOPROFILE\">TRUE</wsman:Option>" +
-			"<wsman:Option Name=\"WINRS_CODEPAGE\">" + CODEPAGE_UTF8 + "</wsman:Option>" +
+			"<wsman:Option Name=\"WINRS_CODEPAGE\">" + (codePage > 0 ? String.valueOf(codePage) : CODEPAGE_UTF8)
+			+ "</wsman:Option>" +
 			"</wsman:OptionSet>";
 		final String workingDir = (workingDirectory == null || workingDirectory.trim().isEmpty())
 			? ""

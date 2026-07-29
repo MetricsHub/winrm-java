@@ -127,14 +127,15 @@ which the session turns into an `exit`). The remote exit code is propagated thro
 * **Echo is off** — the remote shell runs `cmd.exe /Q`, so the input you forward is never
   repeated back: your terminal already shows what you type, and the output stream carries the
   prompts and the command output only.
-* **Non-ASCII input is limited to the remote machine's ANSI code page.** Command output is
-  UTF-8 and carries any character (the shell's console code page is 65001), but the *input*
-  direction is asymmetric on Windows: what you type is converted by the WinRM service with the
-  remote machine's **ANSI** code page (queried once per session from
-  `Win32_OperatingSystem.CodeSet`, falling back to Windows-1252 when the host cannot answer). So
-  `é` reaches a Western-European host fine, while a character outside its ANSI code page does
-  not. This is the same limitation `winrs` has, and it applies to typed command lines only —
-  `command` with piped input (see above) transfers bytes unconverted and is unaffected.
+* **The session runs under a single-byte code page**, the remote machine's ANSI one (queried
+  once per session from `Win32_OperatingSystem.CodeSet`, falling back to 1252 when the host
+  cannot answer); both what you type and what you see use it. This is deliberate: a remote
+  `cmd.exe` decodes the command lines it reads from its standard input **one byte at a time**
+  under code page 65001, so every non-ASCII character would be lost. `winrs` has the same
+  constraint. The practical limit is that characters outside the host's ANSI code page cannot be
+  typed or displayed in an interactive session — `é` on a Western-European host is fine.
+  The other subcommands are unaffected: `wql` and `command` keep code page 65001 and full UTF-8
+  output, and piped input to `command` transfers bytes unconverted.
 * **Line-oriented, like `winrs`** — input is line-buffered by the local terminal and forwarded
   when you press Enter. There is no raw-terminal/PTY mode (with zero dependencies there is none in
   pure Java): full-screen programs, cmd.exe line editing, tab completion, and ANSI cursor control

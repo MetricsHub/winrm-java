@@ -78,6 +78,7 @@ final class WsmanClient implements AutoCloseable {
 	private static final String WSMAN_NS = "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd";
 
 	private final long timeoutMs;
+	private final int consoleCodePage;
 	private final String url;
 	private final String rawUsername;
 	private final AuthScheme auth;
@@ -147,9 +148,11 @@ final class WsmanClient implements AutoCloseable {
 		final SSLSocketFactory sslSocketFactory,
 		final boolean verifyHostname,
 		final AuthScheme auth,
-		final String rawUsername
+		final String rawUsername,
+		final int consoleCodePage
 	) {
 		this.timeoutMs = timeoutMs;
+		this.consoleCodePage = consoleCodePage;
 		// A non-null socket factory selects HTTPS: TLS wraps the transport and the SOAP travels plaintext.
 		this.url = (sslSocketFactory != null ? "https" : "http") + "://" + host + ":" + port + "/wsman";
 		this.rawUsername = rawUsername;
@@ -877,7 +880,7 @@ final class WsmanClient implements AutoCloseable {
 	private void createShell(final String workingDirectory, final long timeoutMs, final boolean failOnQuietTimeout)
 		throws Exception {
 		final Document doc = exchange(
-			Envelopes.createShell(url, workingDirectory, timeoutMs),
+			Envelopes.createShell(url, workingDirectory, timeoutMs, consoleCodePage),
 			"Create shell",
 			timeoutMs,
 			failOnQuietTimeout

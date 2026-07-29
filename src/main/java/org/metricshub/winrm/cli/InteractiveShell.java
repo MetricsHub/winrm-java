@@ -214,9 +214,9 @@ final class InteractiveShell {
 		final long pollMillis,
 		final String endOfInputCommand
 	) throws IOException {
-		// The tail of a piece the current round could not fit entirely: forwarded first on the
-		// next rounds, before any new piece is pulled.
-		final StringBuilder pendingInput = new StringBuilder();
+		// What is still owed to the remote stdin, and whether the last character forwarded ended
+		// a line — the synthetic exit below must never be glued onto an unterminated record.
+		final OutgoingInput outgoing = new OutgoingInput();
 		boolean eofForwarded = false;
 		boolean completed = false;
 		while (!completed) {
@@ -225,7 +225,7 @@ final class InteractiveShell {
 			}
 			if (!eofForwarded) {
 				try {
-					eofForwarded = forwardLocalInput(pieces, process.stdin(), pendingInput, endOfInputCommand);
+					eofForwarded = forwardLocalInput(pieces, process.stdin(), outgoing, endOfInputCommand);
 				} catch (final IllegalStateException e) {
 					// The command completed while this input was being queued (the final Receive
 					// beat it): nothing can consume it anymore. Stop forwarding — the next poll
@@ -256,16 +256,18 @@ final class InteractiveShell {
 	private static boolean forwardLocalInput(
 		final InputSource pieces,
 		final BufferedWriter stdin,
-		final StringBuilder pendingInput,
+		final OutgoingInput outgoing,
 		final String endOfInputCommand
 	) throws IOException {
 		int budget = MAX_INPUT_CHARS_PER_ROUND;
 		boolean wrote = false;
 		while (budget > 0) {
-			if (pendingInput.length() > 0) {
-				final int take = Math.min(budget, pendingInput.length());
-				stdin.write(pendingInput.substring(0, take));
-				pendingInput.delete(0, take);
+			if (outgoing.pending.length() > 0) {
+				final int take = Math.min(budget, outgoing.pending.length());
+				final String slice = outgoing.pending.substring(0, take);
+				stdin.write(slice);
+				outgoing.pending.delete(0, take);
+				outgoing.atLineStart = LINE_SEPARATOR.endsWith(String.valueOf(slice.charAt(slice.length() - 1)));
 				budget -= take;
 				wrote = true;
 				continue;
@@ -274,9 +276,9 @@ final class InteractiveShell {
 			if (piece == null) {
 				break;
 			}
-			pendingInput.append(piece);
+			outgoing.pending.append(piece);
 		}
-		if (pendingInput.length() == 0 && pieces.endOfInput()) {
+		if (outgoing.pending.length() == 0 && pieces.endOfInput()) {
 			if (endOfInputCommand == null) {
 				// Closing flushes the written characters too: they travel with the End mark, one
 				// single Send.
@@ -284,6 +286,12 @@ final class InteractiveShell {
 			} else {
 				// Console-mode stdin has no end of input: the remote command would wait forever
 				// for the next line, so the local EOF is translated into the command that ends it.
+				// A local input ending mid-line (no trailing newline) must get its line terminated
+				// first, or the exit would be glued onto it — "echo hiexit" runs, nothing exits,
+				// and an idle session never times out.
+				if (!outgoing.atLineStart) {
+					stdin.write(LINE_SEPARATOR);
+				}
 				stdin.write(endOfInputCommand);
 				stdin.write(LINE_SEPARATOR);
 				stdin.flush();
@@ -294,6 +302,16 @@ final class InteractiveShell {
 			stdin.flush();
 		}
 		return false;
+	}
+
+	/** What the pump still owes the remote stdin, plus whether it stopped on a line boundary. */
+	private static final class OutgoingInput {
+
+		/** The tail of a piece the current round could not fit entirely. */
+		private final StringBuilder pending = new StringBuilder();
+
+		/** Whether the last character forwarded ended a line (true before anything is sent). */
+		private boolean atLineStart = true;
 	}
 
 	/** Write everything already buffered for the channel — never a protocol round trip. */

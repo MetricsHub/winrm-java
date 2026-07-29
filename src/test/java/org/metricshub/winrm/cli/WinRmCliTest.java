@@ -124,12 +124,12 @@ class WinRmCliTest {
 	}
 
 	@Test
-	void shellRunsAQuietCmdOverConsoleModeStdin() throws Exception {
+	void shellRunsAQuietCmdUnderASingleByteCodePage() throws Exception {
 		// Full stack against the in-process WSMan server, through the CLI's real connect factory.
-		// The shell must be echo-free — cmd.exe started with /Q, and console-mode stdin never
-		// echoes what it receives either — AND use console mode, the only stdin mode that carries
-		// non-ASCII command lines (cmd.exe mangles a piped stdin under console code page 65001).
-		// The ANSI code page probe precedes the shell: its answer encodes what the user types.
+		// The shell must be echo-free (cmd.exe /Q) and must NOT run under console code page 65001:
+		// a remote cmd.exe decodes the command lines it reads from stdin one byte at a time under
+		// that page, losing every non-ASCII character. The ANSI code page probe precedes the shell
+		// and its answer becomes the shell's console code page.
 		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
 			server.enqueue(
 				200,
@@ -183,9 +183,11 @@ class WinRmCliTest {
 			assertEquals(0, invocation.exitCode);
 			final List<String> requests = server.decryptedRequests();
 			assertTrue(requests.get(0).contains("Win32_OperatingSystem"), requests.get(0));
+			final String create = requests.get(1);
+			assertTrue(create.contains("<wsman:Option Name=\"WINRS_CODEPAGE\">1252</wsman:Option>"), create);
 			final String command = requests.get(2);
 			assertTrue(command.contains("<rsp:Command>cmd.exe /Q</rsp:Command>"), command);
-			assertTrue(command.contains("<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">TRUE</wsman:Option>"), command);
+			assertTrue(command.contains("<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">FALSE</wsman:Option>"), command);
 		}
 	}
 
