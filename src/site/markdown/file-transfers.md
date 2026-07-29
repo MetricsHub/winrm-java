@@ -40,7 +40,7 @@ With **transfer-and-run**, files are copied to a per-client-machine transfer dir
 remote host:
 
 ```text
-<windir>\Temp\SEN_ShareFor_<CLIENT-COMPUTER-NAME>$
+<windir>\Temp\winrm-upload-<CLIENT-COMPUTER-NAME>
 ```
 
 * `<windir>` is discovered on the remote host with the WQL query
@@ -50,15 +50,16 @@ remote host:
   directory. Clients that report the same computer name (cloned machines, containers) share one —
   which is safe, because the content-addressed file names below prevent them from ever
   overwriting each other's payloads; they simply also share the cache and the 30-day cleanup.
-  The name and the trailing `$` are kept from the pre-2.0.0 SMB implementation, which used this
-  directory as a hidden share — no share is created anymore.
+  Versions before 2.0.0 used `<windir>\Temp\SEN_ShareFor_<CLIENT-COMPUTER-NAME>$`, exposed as a
+  hidden SMB share — no share is created anymore, and a directory left behind by an older
+  version is neither reused nor cleaned up: it can simply be deleted.
 * The directory is created if missing (`IF NOT EXIST ... MKDIR ...`).
 
 Inside that directory the remote file name is **content-addressed**: a 12-hex-digit fragment of
 the file's SHA-256 digest is inserted before the extension:
 
 ```text
-collect.vbs  →  <windir>\Temp\SEN_ShareFor_MYHOST$\collect.1a2b3c4d5e6f.vbs
+collect.vbs  →  <windir>\Temp\winrm-upload-MYHOST\collect.1a2b3c4d5e6f.vbs
 ```
 
 Because the name identifies the content, two files with the same name but different content get
@@ -143,7 +144,7 @@ path, and the result is executed through `CMD.EXE /C (...)`:
 ```text
 given:    CSCRIPT c:\scripts\collect.vbs /debug
 uploads:  c:\scripts\collect.vbs
-executes: CMD.EXE /C (CSCRIPT C:\Windows\Temp\SEN_ShareFor_MYHOST$\collect.1a2b3c4d5e6f.vbs /debug)
+executes: CMD.EXE /C (CSCRIPT C:\Windows\Temp\winrm-upload-MYHOST\collect.1a2b3c4d5e6f.vbs /debug)
 ```
 
 Notes:

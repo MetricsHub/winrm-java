@@ -129,7 +129,7 @@ public class WindowsRemoteProcessUtils {
 	 */
 	public static String buildNewOutputFileName() {
 		return String.format(
-			"SEN_%s_%d_%d",
+			"winrm-%s-%d-%d",
 			Utils.getComputerName(),
 			Utils.getCurrentTimeMillis(),
 			(long) (Math.random() * 1000000)

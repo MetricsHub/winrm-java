@@ -263,7 +263,7 @@ separately:
 | --- | --- |
 | **WQL queries** (`client.wql(...)`) | Remote access to the listener, access to the **WMI plug-in**, and rights on the target **WMI namespace** (`ROOT\CIMV2` by default) — plus whatever the queried class itself demands. |
 | **Remote commands** (`client.command(...)`) | Remote access to the listener, remote shell access on the host (`AllowRemoteShellAccess`, `True` by default), and whatever rights **the command itself** needs once it runs. |
-| **Transfer-and-run** (`upload(...)`) | Both of the above, plus write access to `<windir>\Temp\SEN_ShareFor_<CLIENT>$`, and `certutil` and `forfiles` present on the host. See [File Transfers](file-transfers.html). |
+| **Transfer-and-run** (`upload(...)`) | Both of the above, plus write access to `<windir>\Temp\winrm-upload-<CLIENT>`, and `certutil` and `forfiles` present on the host. See [File Transfers](file-transfers.html). |
 | **`uploadFile(...)`** to an explicit path | Remote shell access, write access to the destination directory, and `certutil` on the host (the same transfer engine, minus the transfer directory and its `forfiles` housekeeping). |
 
 So an account can perfectly well run WQL queries and fail to run commands, or the reverse. When

@@ -53,9 +53,9 @@ public class WinRMCommandExecutor {
 	 * 		"CSCRIPT c:\\MyScript.vbs", null, "remote-srv", null, null, null, 30000, Arrays.asList("c:\\MyScript.vbs"), false);
 	 * </code>
 	 * This will copy <b>c:\\MyScript.vbs</b> to <b>remote-srv</b>, typically in
-	 * <b>C:\\Windows\\Temp\\SEN_ShareFor_MYHOST</b> and the command that is executed will therefore
+	 * <b>C:\\Windows\\Temp\\winrm-upload-MYHOST</b> and the command that is executed will therefore
 	 * become:
-	 * <code>CSCRIPT "C:\\Windows\\Temp\\SEN_ShareFor_MYHOST\\MyScript.vbs"</code>
+	 * <code>CSCRIPT "C:\\Windows\\Temp\\winrm-upload-MYHOST\\MyScript.vbs"</code>
 	 *
 	 * @param command The command to execute. (Mandatory)
 	 * @param protocol The HTTP protocol (HTTP by default)

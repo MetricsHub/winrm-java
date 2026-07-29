@@ -27,6 +27,16 @@ The Windows Remote Management (WinRM) Java Client is a library that enables to:
 >   `WqlQuery.getSelectedProperties()`/`getSubPropertiesMap()` are now **unmodifiable views**
 >   (and `WinRMWqlExecutor` copies the lists passed to its constructor): callers that mutated
 >   the returned collections must now copy them first.
+> * The remote transfer directory used by `upload(...)`/`localFileToCopyList` is now
+>   **`<windir>\Temp\winrm-upload-<CLIENT-COMPUTER-NAME>`** instead of the
+>   `SEN_ShareFor_<CLIENT-COMPUTER-NAME>$` name kept from the old SMB implementation. Directories
+>   left behind by earlier versions are neither reused nor cleaned up (they can simply be
+>   deleted), and hosts hardened with per-directory ACLs must grant write access on the new path.
+>   For consumers of the public `WindowsTempShare.getOrCreateShare(...)` API, the created SMB
+>   share (and the returned UNC path) follows the same rename — and without the trailing `$` the
+>   share is **no longer hidden** from network browsing. The generated unique file names of
+>   `WindowsRemoteProcessUtils.buildNewOutputFileName()` changed from `SEN_...` to `winrm-...`
+>   accordingly.
 
 ## Prerequisites on the target host
 

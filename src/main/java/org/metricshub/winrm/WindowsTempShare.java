@@ -216,7 +216,7 @@ public class WindowsTempShare {
 	static String buildPathOnCluster(final String path) {
 		Utils.checkNonNull(path, "path");
 
-		return String.format("%s\\Temp\\SEN_TempFor_%s", path, Utils.getComputerName());
+		return String.format("%s\\Temp\\winrm-upload-%s", path, Utils.getComputerName());
 	}
 
 	/**
@@ -234,12 +234,13 @@ public class WindowsTempShare {
 	}
 
 	/**
-	 * Build the Share name with the computer name.
+	 * Build the name of the per-client-machine transfer directory (also used as the share name
+	 * in the legacy SMB flow) with the computer name.
 	 *
 	 * @return The share name.
 	 */
 	static String buildShareName() {
-		return String.format("SEN_ShareFor_%s$", Utils.getComputerName());
+		return String.format("winrm-upload-%s", Utils.getComputerName());
 	}
 
 	/**

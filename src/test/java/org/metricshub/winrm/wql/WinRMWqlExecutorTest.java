@@ -114,7 +114,7 @@ class WinRMWqlExecutorTest {
 			enqueueEnumeration(
 				server,
 				instance("Win32_Share", "Name", "C$", "Path", "C:\\"),
-				instance("Win32_Share", "Name", "SEN_ShareFor_PC$", "Path", "C:\\Windows\\Temp\\SEN_ShareFor_PC$")
+				instance("Win32_Share", "Name", "winrm-upload-PC", "Path", "C:\\Windows\\Temp\\winrm-upload-PC")
 			);
 
 			final WinRMWqlExecutor actual = executeWql(
@@ -133,7 +133,7 @@ class WinRMWqlExecutorTest {
 			// Headers keep the order of the WQL SELECT clause, and each row is mapped onto it
 			assertEquals(asList("Name", "Path"), actual.getHeaders());
 			assertEquals(
-				asList(asList("C$", "C:\\"), asList("SEN_ShareFor_PC$", "C:\\Windows\\Temp\\SEN_ShareFor_PC$")),
+				asList(asList("C$", "C:\\"), asList("winrm-upload-PC", "C:\\Windows\\Temp\\winrm-upload-PC")),
 				actual.getRows()
 			);
 			assertTrue(actual.getExecutionTime() >= 0);
