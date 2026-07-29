@@ -177,7 +177,7 @@ necessarily do for you:
 $cert = New-SelfSignedCertificate -DnsName 'server.example.com' -CertStoreLocation Cert:\LocalMachine\My
 New-WSManInstance -ResourceURI winrm/config/Listener `
   -SelectorSet @{ Address = '*'; Transport = 'HTTPS' } `
-  -ValueSet @{ CertificateThumbprint = $cert.Thumbprint }
+  -ValueSet @{ Hostname = 'server.example.com'; CertificateThumbprint = $cert.Thumbprint }
 New-NetFirewallRule -DisplayName 'WinRM HTTPS' -Direction Inbound -Protocol TCP -LocalPort 5986 -Action Allow
 ```
 
@@ -192,7 +192,14 @@ Management (WinRM) → WinRM Service → "Allow remote server management through
 **Enabled** (registry: `HKLM\Software\Policies\Microsoft\Windows\WinRM\Service`,
 `AllowAutoConfig` = 1).
 
-Two things the policy does *not* do, and that you must configure alongside it:
+> [!WARNING]
+> Enabling that policy also requires filling in its **IPv4 filter** and **IPv6 filter** fields —
+> `*` to listen on all addresses of that family, or a range to restrict it. Leaving a filter **empty
+> disables the listener for that address family**, so a policy that is "Enabled" with blank filters
+> can leave the whole fleet without a listener even after the service and firewall are configured.
+> They are `IPv4Filter` and `IPv6Filter` under the same registry key.
+
+Two further things the policy does *not* do, and that you must configure alongside it:
 
 * **open the firewall** — add the inbound rule for port 5985 (or 5986) through the Windows Firewall
   policy, and
@@ -257,7 +264,7 @@ separately:
 | **WQL queries** (`client.wql(...)`) | Remote access to the listener, access to the **WMI plug-in**, and rights on the target **WMI namespace** (`ROOT\CIMV2` by default) — plus whatever the queried class itself demands. |
 | **Remote commands** (`client.command(...)`) | Remote access to the listener, remote shell access on the host (`AllowRemoteShellAccess`, `True` by default), and whatever rights **the command itself** needs once it runs. |
 | **Transfer-and-run** (`upload(...)`) | Both of the above, plus write access to `<windir>\Temp\SEN_ShareFor_<CLIENT>$`, and `certutil` and `forfiles` present on the host. See [File Transfers](file-transfers.html). |
-| **`uploadFile(...)`** to an explicit path | Remote shell access, plus write access to the destination directory. |
+| **`uploadFile(...)`** to an explicit path | Remote shell access, write access to the destination directory, and `certutil` on the host (the same transfer engine, minus the transfer directory and its `forfiles` housekeeping). |
 
 So an account can perfectly well run WQL queries and fail to run commands, or the reverse. When
 diagnosing, test the two independently — as in [Checking from the client](#Checking_from_the_client)
@@ -348,8 +355,8 @@ the host, the tighter they are:
 | `MaxMemoryPerShellMB` | Memory per shell, including child processes | Historically **150 MB**; 1024 MB on modern hosts. A command whose output is large can hit it. |
 | `MaxShellsPerUser` | Concurrent shells per user | 5 on older hosts, 30 on modern ones. Close clients you no longer need. |
 | `MaxConcurrentOperationsPerUser` | Concurrent operations per user | 15 on Windows Server 2008 R2, 1500 later. File transfers are batched specifically to stay under low limits. |
-| `MaxEnvelopeSizekb` | SOAP envelope size | 150 KB default; caps how much a single response can carry. |
-| `IdleTimeout` | How long an idle shell survives | 180000 ms default, 60000 ms minimum. |
+| `MaxEnvelopeSizekb` | SOAP envelope size | 150 KB on older hosts, **500 KB** on modern ones; caps how much a single response can carry. |
+| `IdleTimeout` | How long an idle shell survives | 180000 ms (3 min) on older hosts, **7200000 ms** (2 h) on modern ones; 60000 ms minimum. |
 
 Read them with `winrm get winrm/config`. Raising a quota is a considered decision, not a reflex —
 prefer narrowing the query or splitting the command.
