@@ -310,6 +310,16 @@ whereas assigning the value wholesale risks dropping the entries already there.
   net localgroup WinRMRemoteWMIUsers__ /add 'DOMAIN\monitoring'
   ```
 
+  > [!NOTE]
+  > `WinRMRemoteWMIUsers__` and `Remote Management Users` carry the *same* description in Windows
+  > ("can access WMI resources over management protocols"), which makes them easy to confuse.
+  > `WinRMRemoteWMIUsers__` is the one Microsoft's WinRM documentation names for the WMI plug-in on
+  > Windows 8 / Server 2012 **and later** — it is current, not a legacy name — and it is created when
+  > WinRM is configured, so a host where WinRM was never enabled may not have it yet.
+  >
+  > Either way, **membership in neither group is sufficient on its own**: the namespace rights below
+  > and the `RootSDDL` entry from step 1 are what actually grant access.
+
 * Then grant the account rights on the WMI namespace itself, since group membership alone does not
   confer them. Run `wmimgmt.msc` → **WMI Control** → *Properties* → *Security*, select the
   namespace (`Root\CIMV2` for almost everything), *Security*, add the account, and grant
