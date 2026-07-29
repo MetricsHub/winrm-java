@@ -41,8 +41,9 @@ WinRM must be enabled on the targeted Windows host, and the account must have su
 * **Privileges**: domain administrators, any domain account in the host's local `Administrators`,
   and the built-in local `Administrator` work as-is. **Other local administrator accounts are
   denied** by UAC remote token filtering unless `LocalAccountTokenFilterPolicy` is set to 1.
-  Non-administrator accounts need explicit grants on the WinRM listener (`RootSDDL`) and on WMI
-  (`WinRMRemoteWMIUsers__` plus namespace rights).
+  Non-administrator accounts need an explicit grant on the WinRM listener (`RootSDDL`), plus — only
+  if they run WQL queries — WMI grants (`WinRMRemoteWMIUsers__` and namespace rights). An account
+  that only runs commands never reaches WMI and needs nothing there.
 * `AllowUnencrypted`, `Basic`, `CredSSP` and `TrustedHosts` do **not** need to be changed: over
   plain HTTP the payload is protected by NTLM message encryption, and `TrustedHosts` is a
   Windows-client setting that a Java client never reads.

@@ -218,7 +218,7 @@ a frequent reason a Windows Server that "should" work does not.
 | **Domain administrator** (or any domain account in the host's local `Administrators`) | **Yes.** Nothing to configure. |
 | **Built-in local `Administrator`** | **Yes** (it is exempt from UAC token filtering by default). |
 | **Any other local account in `Administrators`** | **No** — access denied until `LocalAccountTokenFilterPolicy` is set. See below. |
-| **Non-administrator account** | **No** — needs explicit grants on the listener *and* on WMI. See [Configuring a non-administrator account](#Configuring_a_non-administrator_account). |
+| **Non-administrator account** | **No** — needs an explicit grant on the listener, plus WMI grants *if it runs WQL queries*. See [Configuring a non-administrator account](#Configuring_a_non-administrator_account). |
 
 Administrator rights are what make WinRM work with zero host configuration, because the default
 security descriptor on the WinRM listener grants full access to `BUILTIN\Administrators` and to
@@ -273,7 +273,9 @@ above.
 ### Configuring a non-administrator account
 
 Non-administrative access is possible, and is the right choice for a monitoring account that only
-needs to read WMI. It takes explicit grants in two or three places.
+needs to read WMI. Step 1 below is always required. **Step 2 is only needed for WQL queries** (and
+therefore for transfer-and-run, which discovers the remote Windows directory with one): an account
+that only runs commands or calls `uploadFile(...)` never reaches WMI, so grant it nothing there.
 
 **1. Grant remote access to the WinRM listener.** The default listener security descriptor
 (`RootSDDL`) grants full access to `BUILTIN\Administrators` and read access to interactive users
