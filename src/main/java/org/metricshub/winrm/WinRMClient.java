@@ -392,6 +392,11 @@ public final class WinRMClient implements AutoCloseable {
 		 * @param timeout the timeout (at least one millisecond)
 		 * @return this builder
 		 */
+		public Builder timeout(final Duration timeout) {
+			this.timeout = checkPositive(timeout, "timeout");
+			return this;
+		}
+
 		/**
 		 * Set the console code page of the remote command shell. Default: 65001 (UTF-8), which makes
 		 * command output UTF-8 whatever the remote locale — the right choice for reading output and
@@ -411,11 +416,6 @@ public final class WinRMClient implements AutoCloseable {
 				throw new IllegalArgumentException("consoleCodePage must not be negative.");
 			}
 			this.consoleCodePage = consoleCodePage;
-			return this;
-		}
-
-		public Builder timeout(final Duration timeout) {
-			this.timeout = checkPositive(timeout, "timeout");
 			return this;
 		}
 

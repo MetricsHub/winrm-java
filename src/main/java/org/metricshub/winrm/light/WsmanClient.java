@@ -615,14 +615,15 @@ final class WsmanClient implements AutoCloseable {
 				finishBounded(maxWaitMs);
 				return null;
 			}
-			// The per-round-trip timeout caps the poll — but never below the wire minimum: an
-			// inactivity timeout under the protocol floor would otherwise turn EVERY poll into a
-			// local sleep, and a poller could never observe the command's completion.
-			final long budget = Math.max(1, Math.min(maxWaitMs, Math.max(operationTimeoutMs, MIN_WIRE_POLL_MS)));
+			// The per-round-trip timeout caps the poll, strictly: a bounded wait must never outlast
+			// the inactivity tolerance its caller configured.
+			final long budget = Math.max(1, Math.min(maxWaitMs, operationTimeoutMs));
 			if (budget < MIN_WIRE_POLL_MS) {
-				// The CALLER asked for less than any network round trip can honor: waiting the
-				// budget out locally is the only way. The protocol advances on the next fetch or
-				// full-size poll.
+				// Less than any network round trip can honor — because the caller asked for it, or
+				// because the handle's own per-round-trip timeout is below the protocol's floor.
+				// Waiting the budget out locally is the only way to honor it; the protocol advances
+				// on the next full-size poll or on an unbounded fetch, whose socket budget is the
+				// same per-round-trip timeout.
 				Thread.sleep(budget);
 				return new Chunk(new byte[0], new byte[0]);
 			}
@@ -847,9 +848,8 @@ final class WsmanClient implements AutoCloseable {
 		 * the completed command's state with the shell.
 		 */
 		private void terminateCompleted(final long budgetMs) {
-			// Same clamp as the bounded poll: an inactivity timeout under the wire minimum must not
-			// starve the best-effort Signal that a caller's comfortable budget could well afford.
-			final long budget = Math.max(1, Math.min(budgetMs, Math.max(operationTimeoutMs, MIN_WIRE_POLL_MS)));
+			// Same strict clamp as the bounded poll: the per-round-trip timeout caps this cleanup too.
+			final long budget = Math.max(1, Math.min(budgetMs, operationTimeoutMs));
 			if (budget < MIN_WIRE_POLL_MS) {
 				return;
 			}

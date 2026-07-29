@@ -582,20 +582,25 @@ class StreamingApiTest {
 	}
 
 	@Test
-	void boundedPollsStillReachTheWireWithASubFloorInactivityTimeout() throws Exception {
+	void aSubFloorInactivityTimeoutKeepsBoundedPollsLocalAndTheProcessUsable() throws Exception {
 		enqueueCommandStartup();
 		server
 			.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 4))))
 			.enqueue(200, envelope(signalResponse()));
 
-		// The process's inactivity timeout (500 ms) sits below the wire-poll minimum: the poll cap
-		// must not push a caller's comfortable wait under the protocol floor, or no poll would ever
-		// reach the wire and completion could never be observed.
+		// The per-round-trip timeout caps a bounded poll STRICTLY: a 500 ms inactivity timeout
+		// bounds the poll to 500 ms however long the caller's wait, and 500 ms is below what a
+		// round trip can honor (the server holds a bounded Receive for at least 500 ms, plus
+		// transit). Such a poll is therefore waited out locally, touching nothing...
 		try (WinRMClient client = builder().timeout(Duration.ofMillis(500)).build()) {
 			try (RemoteProcess process = client.command("run.exe").charset(StandardCharsets.UTF_8).start()) {
-				assertFalse(process.poll(Duration.ofSeconds(5)), "the Done chunk itself is not completion yet");
-				assertTrue(process.poll(Duration.ofSeconds(5)), "completion must be observable");
-				assertEquals(4, process.exitCode());
+				final int requestsBefore = server.decryptedRequests().size();
+				assertFalse(process.poll(Duration.ofSeconds(5)), "a sub-floor budget cannot observe completion");
+				assertEquals(requestsBefore, server.decryptedRequests().size(), "no request may reach the wire");
+
+				// ...and the process stays fully usable: the unbounded path, whose socket budget is
+				// that same per-round-trip timeout, observes the completion.
+				assertEquals(4, process.waitFor());
 				assertEquals("done", process.stdout().readLine());
 			}
 		}

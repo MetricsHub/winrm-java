@@ -248,10 +248,12 @@ public final class RemoteProcess implements AutoCloseable {
 	 * The wait is the polling <i>cadence</i>, not a hard bound on the round trip: how long the
 	 * answer itself may take to arrive is governed by the request timeout (the inactivity
 	 * timeout), so one slow answer from a loaded server does not fail the stream — use
-	 * {@link #waitFor(Duration)} when a hard deadline is needed. A wait too short for a network
-	 * round trip — the WSMan service holds a bounded Receive for at least 500 ms before answering
-	 * "nothing yet" — is waited out locally without touching the wire: the stream then does not
-	 * advance. Use waits of about a second or more to actually poll the server.
+	 * {@link #waitFor(Duration)} when a hard deadline is needed. The request timeout also
+	 * <i>caps</i> the cadence, and a resulting budget too short for a network round trip — the
+	 * WSMan service holds a bounded Receive for at least 500 ms before answering "nothing yet" —
+	 * is waited out locally without touching the wire: the stream then does not advance. So poll
+	 * with waits of about a second or more, on a request whose timeout is at least as long;
+	 * a shorter request timeout leaves {@link #waitFor()} and the readers as the ways to advance.
 	 *
 	 * @param maxWait when the server should answer at the latest (at least one millisecond)
 	 * @return {@code true} when the command has completed — the exit code is then available from
