@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
+import org.metricshub.winrm.light.FakeWsmanResponses;
 import org.metricshub.winrm.light.FakeWsmanServer;
 
 class WinRmCliTest {
@@ -120,6 +121,63 @@ class WinRmCliTest {
 		assertTrue(remote.shellStarted);
 		assertEquals("Microsoft Windows\r\nC:\\>", invocation.stdout);
 		assertTrue(remote.closed);
+	}
+
+	@Test
+	void shellRunsAQuietCmdOverPipeModeStdin() throws Exception {
+		// Full stack against the in-process WSMan server, through the CLI's real connect factory:
+		// the shell must be echo-free — cmd.exe started with /Q (no command echo) over pipe-mode
+		// stdin (the winrs -noecho equivalent: input is never echoed by the remote console).
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			enqueueShellCreation(server);
+			server
+				.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.commandResponse("CMD-1")))
+				.enqueue(
+					200,
+					FakeWsmanResponses.envelope(FakeWsmanResponses.receiveResponse("", FakeWsmanResponses.done("CMD-1", 0)))
+				)
+				.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.signalResponse()));
+			enqueueShellDeletion(server);
+
+			// A local input that never delivers anything: the pump only ever polls, keeping the
+			// scripted exchange deterministic (the daemon reader thread blocks forever).
+			final java.io.InputStream never = new java.io.InputStream() {
+				@Override
+				public int read() {
+					try {
+						new java.util.concurrent.CountDownLatch(1).await();
+					} catch (final InterruptedException e) {
+						Thread.currentThread().interrupt();
+					}
+					return -1;
+				}
+			};
+
+			final Invocation invocation = invoke(
+				new String[]
+				{
+						"-h",
+						"127.0.0.1",
+						"-P",
+						String.valueOf(server.port()),
+						"-u",
+						"FAKE\\user",
+						"-p",
+						"secret",
+						"-t",
+						"10000",
+						"shell"
+				},
+				WinRmCli::connect,
+				new WinRmCli.LocalInput(true, never)
+			);
+
+			assertEquals(0, invocation.exitCode);
+			final List<String> requests = server.decryptedRequests();
+			final String command = requests.get(1);
+			assertTrue(command.contains("<rsp:Command>cmd.exe /Q</rsp:Command>"), command);
+			assertTrue(command.contains("<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">FALSE</wsman:Option>"), command);
+		}
 	}
 
 	@Test

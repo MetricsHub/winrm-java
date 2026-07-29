@@ -120,9 +120,14 @@ java -jar winrm-java-standalone.jar -h server.example.net -u 'DOMAIN\user' -pf p
 ```
 
 `shell` starts `cmd.exe` on the remote host and bridges it to the local terminal until the remote
-shell exits (type `exit`, or send end-of-input: Ctrl+Z then Enter on Windows, Ctrl+D elsewhere).
-The remote exit code is propagated through the usual [exit-code contract](#Exit_codes).
+shell exits (type `exit`, or send end-of-input: Ctrl+Z then Enter on Windows, Ctrl+D elsewhere —
+the remote `cmd.exe` exits on the EOF). The remote exit code is propagated through the usual
+[exit-code contract](#Exit_codes).
 
+* **Echo is off** — the remote shell runs `cmd.exe /Q` over pipe-mode standard input (the
+  `winrs -noecho` equivalent), so the input you forward is never repeated back by the remote
+  side: your terminal already shows what you type, and the output stream carries the prompts and
+  the command output only.
 * **Line-oriented, like `winrs`** — input is line-buffered by the local terminal and forwarded
   when you press Enter. There is no raw-terminal/PTY mode (with zero dependencies there is none in
   pure Java): full-screen programs, cmd.exe line editing, tab completion, and ANSI cursor control

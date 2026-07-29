@@ -551,6 +551,12 @@ public final class WinRmCli {
 	/** The real remote operations: the streaming terminals of the fluent {@link WinRMClient}. */
 	static final class FluentRemoteOperations implements RemoteOperations {
 
+		/**
+		 * What the {@code shell} subcommand runs remotely: {@code cmd.exe} with its command echo
+		 * off ({@code /Q}) — piped-in command lines are not repeated in the output.
+		 */
+		static final String SHELL_COMMAND = "cmd.exe /Q";
+
 		private final WinRMClient client;
 
 		FluentRemoteOperations(final WinRMClient client) {
@@ -591,12 +597,17 @@ public final class WinRmCli {
 			final PrintStream err,
 			final AtomicBoolean interruptRequested
 		) throws Exception {
-			// The remote side of the bridge: cmd.exe with console-mode stdin, exactly like winrs.
-			// The timeout bounds each protocol round trip; an idle session never trips it, because
-			// every poll completes with output or the protocol's "nothing yet" answer.
+			// The remote side of the bridge: cmd.exe with its command echo off (/Q) over pipe-mode
+			// stdin (the winrs -noecho equivalent), so the session never echoes the forwarded input
+			// back — the local terminal already shows what the user types, and the output stream
+			// carries prompts and command output only. Pipe-mode stdin also makes the local
+			// end-of-input a real EOF: cmd.exe exits on it. The timeout bounds each protocol round
+			// trip; an idle session never trips it, because every poll completes with output or the
+			// protocol's "nothing yet" answer.
 			try (
-				RemoteProcess process = client.command("cmd.exe")
+				RemoteProcess process = client.command(SHELL_COMMAND)
 					.timeout(Duration.ofMillis(timeout))
+					.stdin()
 					.start()) {
 				return InteractiveShell
 					.run(process, localInput, out, err, interruptRequested, InteractiveShell.DEFAULT_POLL_MILLIS);
