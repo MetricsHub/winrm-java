@@ -95,11 +95,11 @@ class InteractiveShellTest {
 
 	/**
 	 * The exact remote process the production shell subcommand starts: {@code cmd.exe /Q} over
-	 * pipe-mode stdin — the pump tests must exercise the production configuration (the ctrl_c
-	 * Signal under pipe-mode stdin is live-verified against a real Windows host).
+	 * console-mode stdin — the only mode that carries non-ASCII command lines (cmd.exe mangles a
+	 * piped stdin under console code page 65001), live-verified against a real Windows host.
 	 */
 	private static RemoteProcess shellProcess(final WinRMClient client) {
-		return client.command(WinRmCli.FluentRemoteOperations.SHELL_COMMAND).stdin().start();
+		return client.command(WinRmCli.FluentRemoteOperations.SHELL_COMMAND).start();
 	}
 
 	/** An input source whose {@code nextPiece()} answers are fully scripted, including "not yet". */
@@ -165,7 +165,8 @@ class InteractiveShellTest {
 					new PrintStream(stdout, true, "UTF-8"),
 					new PrintStream(stderr, true, "UTF-8"),
 					new AtomicBoolean(),
-					POLL_MILLIS
+					POLL_MILLIS,
+					null
 				);
 			}
 		}
@@ -207,7 +208,8 @@ class InteractiveShellTest {
 					new PrintStream(stdout, true, "UTF-8"),
 					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
 					interruptRequested,
-					POLL_MILLIS
+					POLL_MILLIS,
+					null
 				);
 			}
 		}
@@ -269,7 +271,8 @@ class InteractiveShellTest {
 					out,
 					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
 					new AtomicBoolean(),
-					POLL_MILLIS
+					POLL_MILLIS,
+					null
 				);
 			}
 		}
@@ -323,7 +326,8 @@ class InteractiveShellTest {
 					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
 					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
 					new AtomicBoolean(),
-					POLL_MILLIS
+					POLL_MILLIS,
+					null
 				);
 			}
 		}
@@ -363,7 +367,8 @@ class InteractiveShellTest {
 					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
 					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
 					new AtomicBoolean(),
-					POLL_MILLIS
+					POLL_MILLIS,
+					null
 				);
 			}
 		}

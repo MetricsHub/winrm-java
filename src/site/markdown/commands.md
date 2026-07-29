@@ -49,6 +49,7 @@ Everything between `command(...)` and `execute()` is optional:
 | `upload(Path...)` | none | Local files to copy to the host before running (see below). |
 | `stdin(String)` / `stdin(Path)` / `stdin(InputStream)` | none | Standard input fed to the command — the remote equivalent of a `< file` redirection (see below). |
 | `stdin()` | console semantics | Declare interactive input through `RemoteProcess.stdin()` (with `start()`): pipe semantics without pre-supplied content (see below). |
+| `stdinCharset(Charset)` | the output charset | The charset used to *encode* standard input, when it differs from the output charset (see below). |
 | `onStdout(Consumer<String>)` / `onStderr(Consumer<String>)` | none | Callbacks receiving each chunk of output live while `execute()` runs (see below). |
 
 ## The result
@@ -153,6 +154,30 @@ floods its output in the meantime) hangs both sides until the inactivity timeout
 `RemoteProcess` also exposes `interrupt()` — the WSMan `ctrl_c` Signal, the remote equivalent of
 a console Ctrl+C: it interrupts the command's child process without terminating the command or
 the process handle.
+
+### Input encoding
+
+Input encoding is not symmetric with output encoding, because Windows treats the two directions
+differently:
+
+* **Pipe semantics** (any `stdin(...)`, including the no-argument form) — the bytes reach the
+  process **unconverted**. They are encoded with the request's charset (UTF-8 by default), which
+  is what a program reading a UTF-8 stream expects, and `stdin(Path)`/`stdin(InputStream)` send
+  the bytes verbatim.
+* **Console semantics** (no `stdin` declaration — a command started with `start()` and written to
+  through `RemoteProcess.stdin()`) — the WinRM service converts the bytes with the remote
+  machine's **ANSI** code page before handing them to the console. Encode accordingly with
+  `stdinCharset(...)`; the CLI's `shell` subcommand queries `Win32_OperatingSystem.CodeSet` once
+  per session for exactly this.
+
+Output is unaffected either way: it follows the shell's console code page, which this client
+pins to UTF-8.
+
+> A remote `cmd.exe` reading its **command lines** from a *piped* stdin cannot handle non-ASCII
+> at all under console code page 65001 — Windows decodes that input one byte at a time, turning
+> every non-ASCII byte into `U+FFFD`. That is why an interactive session must use console
+> semantics. Data piped to an ordinary program (`sort`, `findstr`, your own executable) is not
+> affected: it never goes through cmd's parser.
 
 ### Tailing the output of a blocking execution
 

@@ -53,6 +53,7 @@ public final class CommandRequest {
 	private String workingDirectory;
 	private Duration timeout;
 	private Charset charset;
+	private Charset stdinCharset;
 	private final List<Path> uploads = new ArrayList<>();
 	private Consumer<String> stdoutConsumer;
 	private Consumer<String> stderrConsumer;
@@ -119,6 +120,27 @@ public final class CommandRequest {
 	public CommandRequest charset(final Charset charset) {
 		Utils.checkNonNull(charset, "charset");
 		this.charset = charset;
+		return this;
+	}
+
+	/**
+	 * Set the charset used to <b>encode</b> the command's standard input, when it differs from the
+	 * output charset. Default: the output charset (see {@link #charset(Charset)}).
+	 * <p>
+	 * The two directions are not symmetric on Windows. Output follows the shell's console code
+	 * page, which this client pins to UTF-8. Input written to a command created with
+	 * <i>console-mode</i> stdin is converted by the WinRM service with the remote machine's
+	 * <b>ANSI</b> code page instead — so an interactive session (the CLI's {@code shell}
+	 * subcommand) must encode what it sends with that code page, whatever the console code page
+	 * is. Input handed to a command created with pipe semantics (any {@code stdin(...)} on this
+	 * request) reaches the process unconverted and needs no override.
+	 *
+	 * @param charset the input charset
+	 * @return this request
+	 */
+	public CommandRequest stdinCharset(final Charset charset) {
+		Utils.checkNonNull(charset, "charset");
+		this.stdinCharset = charset;
 		return this;
 	}
 
@@ -377,7 +399,7 @@ public final class CommandRequest {
 				.startCommand(prepared.command, prepared.workingDirectory, timeoutMillis, !pipeStdin);
 			if (stdinSource != null) {
 				try {
-					feedStdin(cursor, prepared.charset);
+					feedStdin(cursor, prepared.stdinCharset);
 				} catch (final Exception e) {
 					// The input could not be delivered: terminate the command and release the client's
 					// connection before reporting — a failed start must not leave an open handle
@@ -390,7 +412,14 @@ public final class CommandRequest {
 					throw e;
 				}
 			}
-			return new RemoteProcess(cursor, prepared.charset, client.hostname(), timeout, stdinSource != null);
+			return new RemoteProcess(
+				cursor,
+				prepared.charset,
+				prepared.stdinCharset,
+				client.hostname(),
+				timeout,
+				stdinSource != null
+			);
 		} catch (final TimeoutException e) {
 			throw timeoutException(e);
 		} catch (final IOException e) {
@@ -406,11 +435,13 @@ public final class CommandRequest {
 		final String command;
 		final String workingDirectory;
 		final Charset charset;
+		final Charset stdinCharset;
 
-		Prepared(final String command, final String workingDirectory, final Charset charset) {
+		Prepared(final String command, final String workingDirectory, final Charset charset, final Charset stdinCharset) {
 			this.command = command;
 			this.workingDirectory = workingDirectory;
 			this.charset = charset;
+			this.stdinCharset = stdinCharset;
 		}
 	}
 
@@ -440,7 +471,8 @@ public final class CommandRequest {
 		}
 
 		final Charset actualCharset = charset != null ? charset : WindowsRemoteExecutor.SHELL_OUTPUT_CHARSET;
-		return new Prepared(actualCommand, actualWorkingDirectory, actualCharset);
+		final Charset actualStdinCharset = stdinCharset != null ? stdinCharset : actualCharset;
+		return new Prepared(actualCommand, actualWorkingDirectory, actualCharset, actualStdinCharset);
 	}
 
 	/**
@@ -459,7 +491,7 @@ public final class CommandRequest {
 			CommandCursor cursor = client.executor()
 				.startCommand(prepared.command, prepared.workingDirectory, timeoutMillis, !pipeStdin)) {
 			if (stdinSource != null) {
-				feedStdin(cursor, prepared.charset);
+				feedStdin(cursor, prepared.stdinCharset);
 			}
 			CommandCursor.Chunk chunk;
 			while ((chunk = cursor.next()) != null) {

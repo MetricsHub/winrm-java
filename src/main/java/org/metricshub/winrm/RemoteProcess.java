@@ -85,7 +85,7 @@ public final class RemoteProcess implements AutoCloseable {
 	private final CommandCursor cursor;
 	private final String hostname;
 	private final Duration timeout;
-	private final Charset charset;
+	private final Charset stdinCharset;
 
 	private final ChunkDecoder stdoutDecoder;
 	private final ChunkDecoder stderrDecoder;
@@ -117,6 +117,7 @@ public final class RemoteProcess implements AutoCloseable {
 	RemoteProcess(
 		final CommandCursor cursor,
 		final Charset charset,
+		final Charset stdinCharset,
 		final String hostname,
 		final Duration timeout,
 		final boolean stdinAlreadySupplied
@@ -124,7 +125,7 @@ public final class RemoteProcess implements AutoCloseable {
 		this.cursor = cursor;
 		this.hostname = hostname;
 		this.timeout = timeout;
-		this.charset = charset;
+		this.stdinCharset = stdinCharset;
 		this.stdoutDecoder = new ChunkDecoder(charset);
 		this.stderrDecoder = new ChunkDecoder(charset);
 		this.stdout = new BufferedReader(new ChannelReader(stdoutPending));
@@ -432,7 +433,7 @@ public final class RemoteProcess implements AutoCloseable {
 			bytes = new byte[0];
 		} else {
 			if (stdinEncoder == null) {
-				stdinEncoder = new ChunkEncoder(charset);
+				stdinEncoder = new ChunkEncoder(stdinCharset);
 			}
 			bytes = stdinEncoder.encode(stdinPending.toString(), end);
 			stdinPending.setLength(0);

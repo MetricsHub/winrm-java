@@ -92,6 +92,9 @@ final class InteractiveShell {
 	 */
 	private static final int INPUT_QUEUE_CAPACITY = 256;
 
+	/** What terminates a line for the remote {@code cmd.exe}. */
+	private static final String LINE_SEPARATOR = "\r\n";
+
 	private InteractiveShell() {}
 
 	/**
@@ -165,6 +168,8 @@ final class InteractiveShell {
 	 * @param interruptRequested set externally (e.g. by a Ctrl+C handler) to forward a
 	 *        {@code ctrl_c} Signal on the next round; cleared once forwarded
 	 * @param pollMillis the poll cadence in milliseconds
+	 * @param endOfInputCommand what to send when the local input ends, for a remote command whose
+	 *        stdin has no end of input (console mode); {@code null} closes the remote stdin instead
 	 * @return the remote command's exit code
 	 * @throws IOException when forwarding the local input fails
 	 */
@@ -174,13 +179,14 @@ final class InteractiveShell {
 		final PrintStream out,
 		final PrintStream err,
 		final AtomicBoolean interruptRequested,
-		final long pollMillis
+		final long pollMillis,
+		final String endOfInputCommand
 	) throws IOException {
 		final QueuedInputSource pieces = new QueuedInputSource();
 		final Thread reader = new Thread(() -> pieces.readAll(localInput), "winrm-shell-stdin");
 		reader.setDaemon(true);
 		reader.start();
-		return bridge(process, pieces, out, err, interruptRequested, pollMillis);
+		return bridge(process, pieces, out, err, interruptRequested, pollMillis, endOfInputCommand);
 	}
 
 	/**
@@ -194,6 +200,8 @@ final class InteractiveShell {
 	 * @param err where the remote standard error goes
 	 * @param interruptRequested checked (and cleared) every round; forwards a {@code ctrl_c} Signal
 	 * @param pollMillis the poll cadence in milliseconds
+	 * @param endOfInputCommand what to send when the local input ends, for a remote command whose
+	 *        stdin has no end of input (console mode); {@code null} closes the remote stdin instead
 	 * @return the remote command's exit code
 	 * @throws IOException when forwarding the local input fails
 	 */
@@ -203,7 +211,8 @@ final class InteractiveShell {
 		final PrintStream out,
 		final PrintStream err,
 		final AtomicBoolean interruptRequested,
-		final long pollMillis
+		final long pollMillis,
+		final String endOfInputCommand
 	) throws IOException {
 		// The tail of a piece the current round could not fit entirely: forwarded first on the
 		// next rounds, before any new piece is pulled.
@@ -216,7 +225,7 @@ final class InteractiveShell {
 			}
 			if (!eofForwarded) {
 				try {
-					eofForwarded = forwardLocalInput(pieces, process.stdin(), pendingInput);
+					eofForwarded = forwardLocalInput(pieces, process.stdin(), pendingInput, endOfInputCommand);
 				} catch (final IllegalStateException e) {
 					// The command completed while this input was being queued (the final Receive
 					// beat it): nothing can consume it anymore. Stop forwarding — the next poll
@@ -247,7 +256,8 @@ final class InteractiveShell {
 	private static boolean forwardLocalInput(
 		final InputSource pieces,
 		final BufferedWriter stdin,
-		final StringBuilder pendingInput
+		final StringBuilder pendingInput,
+		final String endOfInputCommand
 	) throws IOException {
 		int budget = MAX_INPUT_CHARS_PER_ROUND;
 		boolean wrote = false;
@@ -267,9 +277,17 @@ final class InteractiveShell {
 			pendingInput.append(piece);
 		}
 		if (pendingInput.length() == 0 && pieces.endOfInput()) {
-			// Closing flushes the written characters too: they travel with the End mark, one
-			// single Send.
-			stdin.close();
+			if (endOfInputCommand == null) {
+				// Closing flushes the written characters too: they travel with the End mark, one
+				// single Send.
+				stdin.close();
+			} else {
+				// Console-mode stdin has no end of input: the remote command would wait forever
+				// for the next line, so the local EOF is translated into the command that ends it.
+				stdin.write(endOfInputCommand);
+				stdin.write(LINE_SEPARATOR);
+				stdin.flush();
+			}
 			return true;
 		}
 		if (wrote) {

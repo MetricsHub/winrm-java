@@ -33,6 +33,7 @@ import java.net.ConnectException;
 import java.net.NoRouteToHostException;
 import java.net.SocketException;
 import java.net.UnknownHostException;
+import java.nio.charset.Charset;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
@@ -553,9 +554,20 @@ public final class WinRmCli {
 
 		/**
 		 * What the {@code shell} subcommand runs remotely: {@code cmd.exe} with its command echo
-		 * off ({@code /Q}) — piped-in command lines are not repeated in the output.
+		 * off ({@code /Q}), so a forwarded command line is never repeated in the output.
 		 */
 		static final String SHELL_COMMAND = "cmd.exe /Q";
+
+		/** What the shell sends when the local input ends: console-mode stdin has no EOF. */
+		static final String SHELL_EXIT_COMMAND = "exit";
+
+		/**
+		 * The code page assumed for the interactive shell's input when the remote machine cannot
+		 * be asked: Windows-1252, the most widespread Windows ANSI code page. ASCII — the whole
+		 * command vocabulary — is identical in every ANSI code page, so only non-ASCII characters
+		 * of an unqueryable host are at risk.
+		 */
+		static final Charset DEFAULT_SHELL_INPUT_CHARSET = Charset.forName("windows-1252");
 
 		private final WinRMClient client;
 
@@ -597,21 +609,65 @@ public final class WinRmCli {
 			final PrintStream err,
 			final AtomicBoolean interruptRequested
 		) throws Exception {
-			// The remote side of the bridge: cmd.exe with its command echo off (/Q) over pipe-mode
-			// stdin (the winrs -noecho equivalent), so the session never echoes the forwarded input
-			// back — the local terminal already shows what the user types, and the output stream
-			// carries prompts and command output only. Pipe-mode stdin also makes the local
-			// end-of-input a real EOF: cmd.exe exits on it. The timeout bounds each protocol round
-			// trip; an idle session never trips it, because every poll completes with output or the
-			// protocol's "nothing yet" answer.
+			// The remote side of the bridge: cmd.exe with its command echo off (/Q) over the
+			// default CONSOLE-mode stdin, which never echoes what it receives either — so the
+			// output stream carries prompts and command output only, and the local terminal alone
+			// shows what the user types.
+			//
+			// Console mode is also the only mode that carries non-ASCII command lines: cmd.exe
+			// parses a PIPED stdin one byte at a time under console code page 65001 (the page this
+			// client pins for correct UTF-8 output), turning every non-ASCII byte into U+FFFD. In
+			// console mode the WinRM service converts the bytes itself, with the remote machine's
+			// ANSI code page — hence the stdinCharset below. It has no end of input, so the local
+			// EOF is translated into an "exit" command by the pump.
+			//
+			// The timeout bounds each protocol round trip; an idle session never trips it, because
+			// every poll completes with output or the protocol's "nothing yet" answer.
 			try (
 				RemoteProcess process = client.command(SHELL_COMMAND)
 					.timeout(Duration.ofMillis(timeout))
-					.stdin()
+					.stdinCharset(remoteAnsiCharset(timeout))
 					.start()) {
-				return InteractiveShell
-					.run(process, localInput, out, err, interruptRequested, InteractiveShell.DEFAULT_POLL_MILLIS);
+				return InteractiveShell.run(
+					process,
+					localInput,
+					out,
+					err,
+					interruptRequested,
+					InteractiveShell.DEFAULT_POLL_MILLIS,
+					SHELL_EXIT_COMMAND
+				);
 			}
+		}
+
+		/**
+		 * The remote machine's ANSI code page, which the WinRM service uses to convert console-mode
+		 * standard input. {@code Win32_OperatingSystem.CodeSet} reports exactly that value (this is
+		 * the ANSI page — the reason it is the wrong answer for decoding OUTPUT, which follows the
+		 * console page instead). A host that cannot answer falls back to
+		 * {@link #DEFAULT_SHELL_INPUT_CHARSET}: an unusable code page must degrade non-ASCII input,
+		 * never prevent the session from opening.
+		 */
+		private Charset remoteAnsiCharset(final long timeout) {
+			try {
+				final List<WqlRow> rows;
+				try (
+					Stream<WqlRow> stream = client
+						.wql("SELECT CodeSet FROM Win32_OperatingSystem")
+						.timeout(Duration.ofMillis(timeout))
+						.stream()) {
+					rows = stream.collect(java.util.stream.Collectors.toList());
+				}
+				if (!rows.isEmpty()) {
+					final String codeSet = rows.get(0).string("CodeSet");
+					if (codeSet != null && !codeSet.trim().isEmpty()) {
+						return Charset.forName("windows-" + codeSet.trim());
+					}
+				}
+			} catch (final RuntimeException ignored) {
+				// No WMI access, an exotic code page, an unsupported charset: fall back below.
+			}
+			return DEFAULT_SHELL_INPUT_CHARSET;
 		}
 
 		@Override
