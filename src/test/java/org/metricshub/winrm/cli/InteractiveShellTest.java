@@ -103,7 +103,9 @@ class InteractiveShellTest {
 		return client
 			.command(WinRmCli.FluentRemoteOperations.SHELL_COMMAND)
 			.charset(
-				WinRmCli.FluentRemoteOperations.charsetOfCodePage(WinRmCli.FluentRemoteOperations.DEFAULT_SHELL_CODE_PAGE)
+				WinRmCli.FluentRemoteOperations
+					.sessionEncoding(WinRmCli.FluentRemoteOperations.DEFAULT_SHELL_CODE_PAGE)
+					.charset()
 			)
 			.stdin()
 			.start();

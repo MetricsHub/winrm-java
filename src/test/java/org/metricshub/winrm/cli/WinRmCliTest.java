@@ -192,6 +192,38 @@ class WinRmCliTest {
 	}
 
 	@Test
+	void theShellCodePageAndCharsetAreAlwaysResolvedTogether() {
+		// A page this JVM has a charset for is used as reported...
+		assertEquals(1252, WinRmCli.FluentRemoteOperations.sessionEncoding(1252).codePage());
+		assertEquals(
+			java.nio.charset.Charset.forName("windows-1252"),
+			WinRmCli.FluentRemoteOperations.sessionEncoding(1252).charset()
+		);
+		assertEquals(850, WinRmCli.FluentRemoteOperations.sessionEncoding(850).codePage());
+		assertEquals(
+			java.nio.charset.Charset.forName("IBM850"),
+			WinRmCli.FluentRemoteOperations.sessionEncoding(850).charset()
+		);
+
+		// ...but 65001 — what a host configured for UTF-8 reports as its ANSI page — is precisely
+		// the page an interactive cmd.exe cannot read command lines under, so BOTH the page and
+		// the charset fall back rather than pinning the shell to a page the session cannot use.
+		assertEquals(1252, WinRmCli.FluentRemoteOperations.sessionEncoding(65001).codePage());
+		assertEquals(
+			java.nio.charset.Charset.forName("windows-1252"),
+			WinRmCli.FluentRemoteOperations.sessionEncoding(65001).charset()
+		);
+
+		// An unknown page falls back on both counts too: a charset that does not match the shell's
+		// code page would corrupt the session in both directions.
+		assertEquals(1252, WinRmCli.FluentRemoteOperations.sessionEncoding(999_999).codePage());
+		assertEquals(
+			java.nio.charset.Charset.forName("windows-1252"),
+			WinRmCli.FluentRemoteOperations.sessionEncoding(999_999).charset()
+		);
+	}
+
+	@Test
 	void shellTakesNoArgument() throws Exception {
 		final Invocation invocation = invoke(concat(REQUIRED, "shell", "cmd.exe"), args -> failingRemote());
 		assertEquals(WinRmCli.EXIT_USAGE, invocation.exitCode);

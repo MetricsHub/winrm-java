@@ -578,6 +578,9 @@ public final class WinRmCli {
 		 */
 		static final int DEFAULT_SHELL_CODE_PAGE = 1252;
 
+		/** The UTF-8 code page: the client's default for commands, and unusable for a shell. */
+		private static final int UTF8_CODE_PAGE = 65001;
+
 		private final WinRMClient client;
 		private final java.util.function.IntFunction<WinRMClient> clientFactory;
 
@@ -636,9 +639,8 @@ public final class WinRmCli {
 			// The code page is fixed when the shell is created, so it must be known BEFORE the
 			// first command: the probe runs on this connection (a WQL query creates no shell) and
 			// the session then opens its own connection with the page pinned.
-			final int codePage = remoteAnsiCodePage(timeout);
-			final Charset charset = charsetOfCodePage(codePage);
-			try (WinRMClient shellClient = clientFactory.apply(codePage)) {
+			final SessionEncoding encoding = sessionEncoding(remoteAnsiCodePage(timeout));
+			try (WinRMClient shellClient = clientFactory.apply(encoding.codePage())) {
 				// cmd.exe /Q: no command echo — the local terminal already shows what the user
 				// types. Pipe-mode stdin (stdin()) makes the local end-of-input a real EOF, which
 				// cmd.exe exits on.
@@ -646,7 +648,7 @@ public final class WinRmCli {
 					RemoteProcess process = shellClient
 						.command(SHELL_COMMAND)
 						.timeout(Duration.ofMillis(timeout))
-						.charset(charset)
+						.charset(encoding.charset())
 						.stdin()
 						.start()) {
 					return InteractiveShell.run(
@@ -662,16 +664,60 @@ public final class WinRmCli {
 			}
 		}
 
-		/** The charset of a Windows code page number, falling back to the default shell page. */
-		static Charset charsetOfCodePage(final int codePage) {
-			for (final String name : new String[] { "windows-" + codePage, "IBM" + codePage, "x-IBM" + codePage }) {
-				try {
-					return Charset.forName(name);
-				} catch (final RuntimeException ignored) {
-					// Try the next naming convention.
+		/**
+		 * The console code page an interactive session runs under, together with the charset that
+		 * encodes and decodes it — resolved as ONE decision, so the shell can never be created
+		 * under a page whose bytes the session would then misread.
+		 */
+		static final class SessionEncoding {
+
+			private final int codePage;
+			private final Charset charset;
+
+			SessionEncoding(final int codePage, final Charset charset) {
+				this.codePage = codePage;
+				this.charset = charset;
+			}
+
+			int codePage() {
+				return codePage;
+			}
+
+			Charset charset() {
+				return charset;
+			}
+		}
+
+		/**
+		 * Resolve the session's code page and charset from the code page the remote machine
+		 * reports. Two answers are refused, and both fall back to {@link #DEFAULT_SHELL_CODE_PAGE}
+		 * for BOTH the page and the charset:
+		 * <ul>
+		 * <li>65001 — a host configured for UTF-8 reports it as its ANSI page, and 65001 is
+		 * precisely the page an interactive {@code cmd.exe} cannot read command lines under;</li>
+		 * <li>a page this JVM has no charset for — encoding the session with a charset that does
+		 * not match the shell's page would corrupt both directions.</li>
+		 * </ul>
+		 *
+		 * @param reportedCodePage the code page the remote machine reported
+		 * @return the code page to pin and the charset to use with it, always consistent
+		 */
+		static SessionEncoding sessionEncoding(final int reportedCodePage) {
+			if (reportedCodePage != UTF8_CODE_PAGE) {
+				for (final String name : new String[] {
+						"windows-" + reportedCodePage,
+						"IBM" + reportedCodePage,
+						"x-IBM" + reportedCodePage,
+						"MS" + reportedCodePage
+				}) {
+					try {
+						return new SessionEncoding(reportedCodePage, Charset.forName(name));
+					} catch (final RuntimeException ignored) {
+						// Try the next naming convention.
+					}
 				}
 			}
-			return Charset.forName("windows-" + DEFAULT_SHELL_CODE_PAGE);
+			return new SessionEncoding(DEFAULT_SHELL_CODE_PAGE, Charset.forName("windows-" + DEFAULT_SHELL_CODE_PAGE));
 		}
 
 		/**
