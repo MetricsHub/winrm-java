@@ -24,5 +24,7 @@ Code quality checks are performed during the build with `mvn verify` (checkstyle
 
 ## Documentation
 
-Any change that affects the end user of this library must be properly documented in README.md.
+Any change that affects the end user of this library must be properly documented in the site documentation under `src/site/markdown/`. In particular, `src/site/markdown/cli.md` is the single source of truth for the command-line client: new CLI options go in its options table, plus one short line in the `--help` output.
+
+README.md is deliberately terse — a quick start, a few representative examples, and links to the full documentation. Do NOT catalog every option or minor feature there; update README.md only when a change invalidates or alters what it already shows (quick-start snippets, examples, upgrade notes).
 

@@ -134,6 +134,31 @@ class CliArgumentsTest {
 	}
 
 	@Test
+	void parsesTheRemoteWorkingDirectory() throws Exception {
+		try (
+			CliArguments parsed = CliArguments.parse(
+				new String[]
+				{ "-h", "host", "-u", "user", "-p", "secret", "-d", "C:\\build", "command", "build.cmd" }
+			)) {
+			assertEquals("C:\\build", parsed.directory());
+		}
+		try (
+			CliArguments parsed = CliArguments.parse(
+				new String[]
+				{ "-h", "host", "-u", "user", "-p", "secret", "--directory=C:\\build", "shell" }
+			)) {
+			assertEquals("C:\\build", parsed.directory());
+		}
+		try (
+			CliArguments parsed = CliArguments.parse(
+				new String[]
+				{ "-h", "host", "-u", "user", "-p", "secret", "command", "whoami" }
+			)) {
+			assertNull(parsed.directory());
+		}
+	}
+
+	@Test
 	void acceptsEveryCommandAlias() throws Exception {
 		for (final String alias : List.of("command", "cmd", "exec", "run")) {
 			try (
@@ -214,6 +239,13 @@ class CliArgumentsTest {
 				{
 						"--https-permissive requires --https",
 						concat(base, "--https-permissive", "command", "whoami")
+				},
+				{ "-d requires a value", concat(base, "-d") },
+				{ "--directory requires a value", concat(base, "--directory=", "command", "whoami") },
+				{ "--directory requires a value", concat(base, "--directory", "  ", "command", "whoami") },
+				{
+						"--directory requires the command or shell subcommand",
+						concat(base, "-d", "C:\\build", "wql", "SELECT Name FROM Win32_Service")
 				},
 				{ "-P must be between 1 and 65535", concat(base, "-P", "65536", "command", "whoami") },
 				{ "-t must be greater than zero", concat(base, "-t", "0", "command", "whoami") },

@@ -255,6 +255,7 @@ public final class WinRmCli {
 				// automatically when detected, unconditionally with --stdin.
 				final int exitCode = remote.executeCommand(
 					arguments.input(),
+					arguments.directory(),
 					arguments.timeout(),
 					arguments.forwardStdin() || !localInput.terminal ? localInput.stream : null,
 					chunk -> {
@@ -298,6 +299,7 @@ public final class WinRmCli {
 		try {
 			final int exitCode = remote.shell(
 				arguments.timeout(),
+				arguments.directory(),
 				localInput.stream,
 				standardOutput,
 				standardError,
@@ -495,6 +497,7 @@ public final class WinRmCli {
 			"  -pf, --password-file <file> Read a UTF-8 password from a file (preferred for automation)\n" +
 			"  -P, --port <port>           Target port (default: HTTP 5985, HTTPS 5986)\n" +
 			"  -t, --timeout <ms>          Operation timeout in milliseconds (default: 60000)\n" +
+			"  -d, --directory <path>      Working directory of the remote command or shell\n" +
 			"  -i, --stdin                 Forward the local standard input to the remote command\n" +
 			"      --https                 Use HTTPS\n" +
 			"      --https-permissive      Trust any HTTPS certificate and hostname (insecure)\n" +
@@ -539,11 +542,13 @@ public final class WinRmCli {
 
 		/**
 		 * Run the command, forwarding each decoded output chunk to the matching consumer as it
-		 * arrives, and return the remote exit code. A non-null {@code stdin} is consumed to its end
-		 * and forwarded as the command's standard input.
+		 * arrives, and return the remote exit code. A non-null {@code workingDirectory} is the
+		 * directory the command starts in. A non-null {@code stdin} is consumed to its end and
+		 * forwarded as the command's standard input.
 		 */
 		int executeCommand(
 			String command,
+			String workingDirectory,
 			long timeout,
 			InputStream stdin,
 			Consumer<String> stdoutConsumer,
@@ -551,11 +556,18 @@ public final class WinRmCli {
 		) throws Exception;
 
 		/**
-		 * Start {@code cmd.exe} on the remote host and bridge it to the given local streams until
-		 * it exits; return its exit code. See {@link InteractiveShell}.
+		 * Start {@code cmd.exe} on the remote host — in the given working directory when non-null —
+		 * and bridge it to the given local streams until it exits; return its exit code. See
+		 * {@link InteractiveShell}.
 		 */
-		int shell(long timeout, InputStream localInput, PrintStream out, PrintStream err, AtomicBoolean interruptRequested)
-			throws Exception;
+		int shell(
+			long timeout,
+			String workingDirectory,
+			InputStream localInput,
+			PrintStream out,
+			PrintStream err,
+			AtomicBoolean interruptRequested
+		) throws Exception;
 
 		@Override
 		void close();
@@ -605,6 +617,7 @@ public final class WinRmCli {
 		@Override
 		public int executeCommand(
 			final String command,
+			final String workingDirectory,
 			final long timeout,
 			final InputStream stdin,
 			final Consumer<String> stdoutConsumer,
@@ -615,6 +628,11 @@ public final class WinRmCli {
 				.timeout(Duration.ofMillis(timeout))
 				.onStdout(stdoutConsumer)
 				.onStderr(stderrConsumer);
+			// A CLI invocation is one client running one command, so the API's "first command
+			// only" pinning of the working directory always applies here.
+			if (workingDirectory != null) {
+				request.workingDirectory(workingDirectory);
+			}
 			if (stdin != null) {
 				request.stdin(stdin);
 			}
@@ -624,6 +642,7 @@ public final class WinRmCli {
 		@Override
 		public int shell(
 			final long timeout,
+			final String workingDirectory,
 			final InputStream localInput,
 			final PrintStream out,
 			final PrintStream err,
@@ -644,13 +663,17 @@ public final class WinRmCli {
 				// cmd.exe /Q: no command echo — the local terminal already shows what the user
 				// types. Pipe-mode stdin (stdin()) makes the local end-of-input a real EOF, which
 				// cmd.exe exits on.
-				try (
-					RemoteProcess process = shellClient
-						.command(SHELL_COMMAND)
-						.timeout(Duration.ofMillis(timeout))
-						.charset(encoding.charset())
-						.stdin()
-						.start()) {
+				final CommandRequest shellRequest = shellClient
+					.command(SHELL_COMMAND)
+					.timeout(Duration.ofMillis(timeout))
+					.charset(encoding.charset())
+					.stdin();
+				// The session client's first (and only) command is the shell itself, so the
+				// working directory always takes effect.
+				if (workingDirectory != null) {
+					shellRequest.workingDirectory(workingDirectory);
+				}
+				try (RemoteProcess process = shellRequest.start()) {
 					return InteractiveShell.run(
 						process,
 						localInput,
