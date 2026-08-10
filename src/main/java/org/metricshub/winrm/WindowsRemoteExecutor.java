@@ -195,6 +195,47 @@ public interface WindowsRemoteExecutor extends AutoCloseable {
 	}
 
 	/**
+	 * <p>
+	 * Variant of {@link #startCommand(String, String, long, boolean)} that also sets environment
+	 * variables in the remote shell. Like the working directory, the environment is shell-scoped:
+	 * it is honored only when the shell is created, i.e. by the first command this executor runs.
+	 * </p>
+	 * <p>
+	 * The default implementation delegates to {@link #startCommand(String, String, long, boolean)}
+	 * when no variable is requested — an executor unaware of this variant keeps working for
+	 * ordinary commands — and throws {@link UnsupportedOperationException} otherwise: only
+	 * executors that can put the variables on the wire (such as the built-in lightweight backend)
+	 * implement it, and silently dropping them would run the command in the wrong environment.
+	 * </p>
+	 *
+	 * @param command The command to execute
+	 * @param workingDirectory Path of the directory for the spawned process on the remote system (can be null)
+	 * @param environment Environment variables of the remote shell, in insertion order (can be null
+	 *        or empty for none)
+	 * @param timeout timeout in milliseconds of each WSMan round trip — the inactivity timeout of
+	 *        the stream, not an overall deadline (throws an IllegalArgumentException if negative
+	 *        or zero)
+	 * @param consoleModeStdin the value of the {@code WINRS_CONSOLEMODE_STDIN} option: {@code true}
+	 *        for console semantics (the historical default), {@code false} for pipe semantics
+	 * @return a cursor over the command output, owning the executor's connection until the command
+	 *         completes or the cursor is closed — always close it (try-with-resources)
+	 * @throws TimeoutException when the server does not answer the command startup in time
+	 * @throws WindowsRemoteException For any problem encountered
+	 */
+	default CommandCursor startCommand(
+		final String command,
+		final String workingDirectory,
+		final Map<String, String> environment,
+		final long timeout,
+		final boolean consoleModeStdin
+	) throws TimeoutException, WindowsRemoteException {
+		if (environment == null || environment.isEmpty()) {
+			return startCommand(command, workingDirectory, timeout, consoleModeStdin);
+		}
+		throw new UnsupportedOperationException(getClass().getName() + " does not support shell environment variables.");
+	}
+
+	/**
 	 * Execute the command on the remote
 	 *
 	 * @param command The command to execute
@@ -212,6 +253,44 @@ public interface WindowsRemoteExecutor extends AutoCloseable {
 		final Charset charset,
 		final long timeout
 	) throws WindowsRemoteException, TimeoutException;
+
+	/**
+	 * <p>
+	 * Variant of {@link #executeCommand(String, String, Charset, long)} that also sets environment
+	 * variables in the remote shell. Like the working directory, the environment is shell-scoped:
+	 * it is honored only when the shell is created, i.e. by the first command this executor runs.
+	 * </p>
+	 * <p>
+	 * The default implementation delegates to {@link #executeCommand(String, String, Charset, long)}
+	 * when no variable is requested — an executor unaware of this variant keeps working for
+	 * ordinary commands — and throws {@link UnsupportedOperationException} otherwise: only
+	 * executors that can put the variables on the wire (such as the built-in lightweight backend)
+	 * implement it, and silently dropping them would run the command in the wrong environment.
+	 * </p>
+	 *
+	 * @param command The command to execute
+	 * @param workingDirectory Path of the directory for the spawned process on the remote system (can be null)
+	 * @param environment Environment variables of the remote shell, in insertion order (can be null
+	 *        or empty for none)
+	 * @param charset The charset decoding the command output; {@code null} uses
+	 *        {@link #SHELL_OUTPUT_CHARSET}, which is what the remote shell actually emits
+	 * @param timeout Timeout in milliseconds
+	 * @return The command result
+	 * @throws WindowsRemoteException For any problem encountered
+	 * @throws TimeoutException To notify userName of timeout.
+	 */
+	default WindowsRemoteCommandResult executeCommand(
+		final String command,
+		final String workingDirectory,
+		final Map<String, String> environment,
+		final Charset charset,
+		final long timeout
+	) throws WindowsRemoteException, TimeoutException {
+		if (environment == null || environment.isEmpty()) {
+			return executeCommand(command, workingDirectory, charset, timeout);
+		}
+		throw new UnsupportedOperationException(getClass().getName() + " does not support shell environment variables.");
+	}
 
 	/**
 	 * Get the hostname.

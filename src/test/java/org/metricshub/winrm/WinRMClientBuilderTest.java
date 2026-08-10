@@ -134,6 +134,8 @@ class WinRMClientBuilderTest {
 			assertThrows(IllegalArgumentException.class, () -> client.command(" "));
 			final CommandRequest request = client.command("ipconfig");
 			assertThrows(IllegalArgumentException.class, () -> request.workingDirectory(" "));
+			assertThrows(IllegalArgumentException.class, () -> request.environment(" ", "value"));
+			assertThrows(IllegalArgumentException.class, () -> request.environment("NAME", null));
 			assertThrows(IllegalArgumentException.class, () -> request.timeout(Duration.ZERO));
 			assertThrows(IllegalArgumentException.class, () -> request.charset(null));
 			assertThrows(IllegalArgumentException.class, () -> request.upload((java.nio.file.Path) null));

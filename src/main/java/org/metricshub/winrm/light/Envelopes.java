@@ -24,6 +24,7 @@ import java.math.BigDecimal;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -144,12 +145,15 @@ final class Envelopes {
 	/**
 	 * Create a command shell.
 	 *
+	 * @param environment environment variables of the shell, in insertion order; {@code null} or
+	 *        empty omits the {@code rsp:Environment} block
 	 * @param codePage the console code page of the shell ({@code WINRS_CODEPAGE}); 0 uses
 	 *        {@link #CODEPAGE_UTF8}, the default that makes every command's output UTF-8
 	 */
 	static String createShell(
 		final String url,
 		final String workingDirectory,
+		final Map<String, String> environment,
 		final long timeoutMs,
 		final int codePage
 	) {
@@ -161,13 +165,33 @@ final class Envelopes {
 		final String workingDir = (workingDirectory == null || workingDirectory.trim().isEmpty())
 			? ""
 			: "<rsp:WorkingDirectory>" + escape(workingDirectory) + "</rsp:WorkingDirectory>";
+		// The MS-WSMV Shell_Type schema is a sequence: Environment, then WorkingDirectory, then the
+		// stream declarations — the order of the protocol's own Create example.
 		return envelopeOpen(true) +
 			header(url, SHELL_RESOURCE_URI, ACTION_CREATE, timeoutMs, null, optionSet) +
 			"<s:Body><rsp:Shell>" +
+			environmentBlock(environment) +
+			workingDir +
 			"<rsp:InputStreams>stdin</rsp:InputStreams>" +
 			"<rsp:OutputStreams>stdout stderr</rsp:OutputStreams>" +
-			workingDir +
 			"</rsp:Shell></s:Body></s:Envelope>";
+	}
+
+	/** The {@code rsp:Environment} block of a Create request, or an empty string for no variables. */
+	private static String environmentBlock(final Map<String, String> environment) {
+		if (environment == null || environment.isEmpty()) {
+			return "";
+		}
+		final StringBuilder block = new StringBuilder("<rsp:Environment>");
+		for (final Map.Entry<String, String> variable : environment.entrySet()) {
+			block
+				.append("<rsp:Variable Name=\"")
+				.append(escape(variable.getKey()))
+				.append("\">")
+				.append(escape(variable.getValue()))
+				.append("</rsp:Variable>");
+		}
+		return block.append("</rsp:Environment>").toString();
 	}
 
 	/**

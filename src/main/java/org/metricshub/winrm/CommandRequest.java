@@ -28,7 +28,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
@@ -51,6 +53,7 @@ public final class CommandRequest {
 	private final WinRMClient client;
 	private final String commandLine;
 	private String workingDirectory;
+	private final Map<String, String> environment = new LinkedHashMap<>();
 	private Duration timeout;
 	private Charset charset;
 	private Charset stdinCharset;
@@ -90,6 +93,31 @@ public final class CommandRequest {
 	public CommandRequest workingDirectory(final String workingDirectory) {
 		Utils.checkNonBlank(workingDirectory, "workingDirectory");
 		this.workingDirectory = workingDirectory;
+		return this;
+	}
+
+	/**
+	 * Set an environment variable in the remote shell — the equivalent of {@code winrs -env}. May
+	 * be called several times; insertion order is preserved, and setting the same name again
+	 * replaces its value. Like {@link #workingDirectory(String)}, the environment is shell-scoped:
+	 * the remote command shell is created on the first command a client executes and is reused
+	 * afterward, so this setting takes effect only when this is the client's first command.
+	 *
+	 * <pre>{@code
+	 * CommandResult result = client.command("build.cmd")
+	 * 	.environment("BUILD_NUMBER", "42")
+	 * 	.environment("CONFIG", "release")
+	 * 	.execute();
+	 * }</pre>
+	 *
+	 * @param name the variable name
+	 * @param value the variable value
+	 * @return this request
+	 */
+	public CommandRequest environment(final String name, final String value) {
+		Utils.checkNonBlank(name, "name");
+		Utils.checkNonNull(value, "value");
+		environment.put(name, value);
 		return this;
 	}
 
@@ -332,7 +360,13 @@ public final class CommandRequest {
 			if (stdoutConsumer == null && stderrConsumer == null && stdinSource == null) {
 				final WindowsRemoteCommandResult result = client
 					.executor()
-					.executeCommand(prepared.command, prepared.workingDirectory, prepared.charset, remaining);
+					.executeCommand(
+						prepared.command,
+						prepared.workingDirectory,
+						prepared.environment,
+						prepared.charset,
+						remaining
+					);
 
 				return new CommandResult(
 					result.getStdout(),
@@ -396,7 +430,7 @@ public final class CommandRequest {
 			// round trip (inactivity), not the overall exchange the preparation steps count against.
 			final CommandCursor cursor = client
 				.executor()
-				.startCommand(prepared.command, prepared.workingDirectory, timeoutMillis, !pipeStdin);
+				.startCommand(prepared.command, prepared.workingDirectory, prepared.environment, timeoutMillis, !pipeStdin);
 			if (stdinSource != null) {
 				try {
 					feedStdin(cursor, prepared.stdinCharset);
@@ -429,17 +463,25 @@ public final class CommandRequest {
 		}
 	}
 
-	/** The command, working directory and charset actually sent, after the preparation steps. */
+	/** The command, working directory, environment and charset actually sent, after the preparation steps. */
 	private static final class Prepared {
 
 		final String command;
 		final String workingDirectory;
+		final Map<String, String> environment;
 		final Charset charset;
 		final Charset stdinCharset;
 
-		Prepared(final String command, final String workingDirectory, final Charset charset, final Charset stdinCharset) {
+		Prepared(
+			final String command,
+			final String workingDirectory,
+			final Map<String, String> environment,
+			final Charset charset,
+			final Charset stdinCharset
+		) {
 			this.command = command;
 			this.workingDirectory = workingDirectory;
+			this.environment = environment;
 			this.charset = charset;
 			this.stdinCharset = stdinCharset;
 		}
@@ -454,25 +496,31 @@ public final class CommandRequest {
 		throws IOException, TimeoutException, WindowsRemoteException {
 		String actualCommand = commandLine;
 		String actualWorkingDirectory = workingDirectory;
+		Map<String, String> actualEnvironment = environment;
 
 		if (!uploads.isEmpty()) {
 			// Copy the files through the command shell and rewrite the command to reference the
-			// remote copies; the transfer commands create the shell, so the working directory no
-			// longer applies (the shell already exists when the real command runs).
+			// remote copies. The transfer commands are what actually creates the shell, so the
+			// shell-scoped environment must ride them — the real command then inherits it. The
+			// working directory is not carried over: with uploads it has never applied, and the
+			// transfer commands were built for the default directory.
 			final List<String> localFiles = uploads.stream().map(Path::toString).collect(Collectors.toList());
 			final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
 				client.executor(),
 				commandLine,
 				localFiles,
+				environment,
 				TimeoutHelper.getRemainingTime(timeoutMillis, start, "No time left to copy the local files")
 			);
 			actualCommand = String.format("CMD.EXE /C (%s)", updatedCommand);
 			actualWorkingDirectory = null;
+			// Already applied when the transfer commands created the shell.
+			actualEnvironment = null;
 		}
 
 		final Charset actualCharset = charset != null ? charset : WindowsRemoteExecutor.SHELL_OUTPUT_CHARSET;
 		final Charset actualStdinCharset = stdinCharset != null ? stdinCharset : actualCharset;
-		return new Prepared(actualCommand, actualWorkingDirectory, actualCharset, actualStdinCharset);
+		return new Prepared(actualCommand, actualWorkingDirectory, actualEnvironment, actualCharset, actualStdinCharset);
 	}
 
 	/**
@@ -489,7 +537,7 @@ public final class CommandRequest {
 		final StringBuilder stderr = new StringBuilder();
 		try (
 			CommandCursor cursor = client.executor()
-				.startCommand(prepared.command, prepared.workingDirectory, timeoutMillis, !pipeStdin)) {
+				.startCommand(prepared.command, prepared.workingDirectory, prepared.environment, timeoutMillis, !pipeStdin)) {
 			if (stdinSource != null) {
 				feedStdin(cursor, prepared.stdinCharset);
 			}
