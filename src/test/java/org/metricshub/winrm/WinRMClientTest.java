@@ -39,7 +39,10 @@ import static org.metricshub.winrm.light.FakeWsmanResponses.stream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -279,6 +282,59 @@ class WinRMClientTest {
 		final int workingDirectory = create.indexOf("<rsp:WorkingDirectory>");
 		final int inputStreams = create.indexOf("<rsp:InputStreams>");
 		assertTrue(environment < workingDirectory && workingDirectory < inputStreams, create);
+	}
+
+	@Test
+	void powerShellEncodesTheScriptSoNoEscapingIsNeeded() throws Exception {
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(stream("stdout", "CMD-1", "Spooler".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0))
+				)
+			)
+			.enqueue(200, envelope(signalResponse()));
+
+		// Quotes, pipes, a $variable, a newline, and non-ASCII text: none of it needs escaping.
+		final String script = "Get-Service | Where-Object { $_.Status -eq 'Running' } |\n"
+			+ "ForEach-Object { \"état: $($_.Name)\" }";
+
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			final CommandResult result = client.powerShell(script).execute();
+			assertEquals("Spooler", result.stdout());
+			assertEquals(0, result.exitCode());
+		}
+
+		final String command = server.decryptedRequests().get(1);
+		final Matcher matcher = Pattern
+			.compile("powershell\\.exe -NoProfile -NonInteractive -EncodedCommand ([A-Za-z0-9+/=]+)")
+			.matcher(command);
+		assertTrue(matcher.find(), command);
+		// What powershell.exe decodes on the host is exactly the script, UTF-16LE as -EncodedCommand expects.
+		assertEquals(script, new String(Base64.getDecoder().decode(matcher.group(1)), StandardCharsets.UTF_16LE));
+	}
+
+	@Test
+	void powerShellRejectsABlankScript() throws Exception {
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			assertThrows(IllegalArgumentException.class, () -> client.powerShell(null));
+			assertThrows(IllegalArgumentException.class, () -> client.powerShell("  \n\t"));
+		}
+	}
+
+	@Test
+	void powerShellRejectsAScriptTooLongOnceEncoded() throws Exception {
+		// 4000 characters encode to ~10667 base64 characters, above cmd.exe's 8191 limit.
+		final String script = "Write-Output '" + "x".repeat(4000) + "'";
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			final IllegalArgumentException e = assertThrows(
+				IllegalArgumentException.class,
+				() -> client.powerShell(script)
+			);
+			assertTrue(e.getMessage().contains("-File"), e.getMessage());
+		}
 	}
 
 	@Test

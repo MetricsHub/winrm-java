@@ -1,4 +1,4 @@
-keywords: command, execute, cmd, stdout, stderr, stdin, exit code, file copy, script
+keywords: command, execute, cmd, powershell, encodedcommand, stdout, stderr, stdin, exit code, file copy, script
 description: Execute remote commands with the fluent WinRMClient API, capture output and exit codes, feed standard input, and copy local files to the host.
 
 # Remote Commands
@@ -52,6 +52,40 @@ Everything between `command(...)` and `execute()` is optional:
 | `stdin()` | console semantics | Declare interactive input through `RemoteProcess.stdin()` (with `start()`): pipe semantics without pre-supplied content (see below). |
 | `stdinCharset(Charset)` | the output charset | The charset used to *encode* standard input, when it differs from the output charset (see below). |
 | `onStdout(Consumer<String>)` / `onStderr(Consumer<String>)` | none | Callbacks receiving each chunk of output live while `execute()` runs (see below). |
+
+## Running PowerShell
+
+`powerShell(...)` prepares a PowerShell script execution the same way `command(...)` prepares a
+command line. The script travels base64-encoded
+(`powershell.exe -NoProfile -NonInteractive -EncodedCommand …`), so **no quoting or escaping is
+ever needed**: quotes, pipes, newlines, and `$variables` reach PowerShell exactly as written.
+
+```java
+CommandResult result = client.powerShell(
+        "Get-Service | Where-Object { $_.Status -eq 'Running' } | Select-Object -First 5 Name"
+    ).execute();
+```
+
+It returns the same request object as `command(...)`: every option and terminal described on this
+page — `timeout(...)`, `charset(...)`, `stdin(...)`, `onStdout(...)`, `execute()`, `start()` —
+works unchanged.
+
+Points to know:
+
+* **Exit code** — `powershell.exe` exits with 0 on success and 1 when the script ends with a
+  terminating error; call `exit <n>` in the script for a specific code.
+* **Script size** — the encoded invocation must fit in the remote shell's 8191-character command
+  line, which caps the script at roughly 3000 characters. Beyond that, `powerShell(...)` throws an
+  `IllegalArgumentException` and the script should travel as a file instead:
+
+  ```java
+  client.command("powershell.exe -NoProfile -ExecutionPolicy Bypass -File c:\\scripts\\collect.ps1")
+      .upload(Path.of("c:\\scripts\\collect.ps1"))
+      .execute();
+  ```
+
+* **Windows PowerShell** — the script runs in `powershell.exe` (Windows PowerShell 5.x, present on
+  every supported Windows). To target PowerShell 7+, invoke `pwsh` yourself with `command(...)`.
 
 ## The result
 
