@@ -159,6 +159,52 @@ class CliArgumentsTest {
 	}
 
 	@Test
+	void parsesRepeatableEnvironmentVariables() throws Exception {
+		try (
+			CliArguments parsed = CliArguments.parse(
+				new String[]
+				{
+						"-h",
+						"host",
+						"-u",
+						"user",
+						"-p",
+						"secret",
+						"--env",
+						"BUILD_NUMBER=42",
+						"--env=CONFIG=release",
+						"--env",
+						"OPTIONS=a=b",
+						"command",
+						"build.cmd"
+				}
+			)) {
+			// Insertion order preserved; the value is split on the FIRST '=' only.
+			assertEquals(List.of("BUILD_NUMBER", "CONFIG", "OPTIONS"), List.copyOf(parsed.environment().keySet()));
+			assertEquals("42", parsed.environment().get("BUILD_NUMBER"));
+			assertEquals("release", parsed.environment().get("CONFIG"));
+			assertEquals("a=b", parsed.environment().get("OPTIONS"));
+		}
+		// A repeated name replaces the value; an empty value is allowed (winrs-style).
+		try (
+			CliArguments parsed = CliArguments.parse(
+				new String[]
+				{ "-h", "host", "-u", "user", "-p", "secret", "--env", "A=1", "--env", "A=2", "--env", "B=", "shell" }
+			)) {
+			assertEquals("2", parsed.environment().get("A"));
+			assertEquals("", parsed.environment().get("B"));
+		}
+		// Without the option, the environment is empty.
+		try (
+			CliArguments parsed = CliArguments.parse(
+				new String[]
+				{ "-h", "host", "-u", "user", "-p", "secret", "command", "whoami" }
+			)) {
+			assertTrue(parsed.environment().isEmpty());
+		}
+	}
+
+	@Test
 	void acceptsEveryCommandAlias() throws Exception {
 		for (final String alias : List.of("command", "cmd", "exec", "run")) {
 			try (
@@ -246,6 +292,14 @@ class CliArgumentsTest {
 				{
 						"--directory requires the command or shell subcommand",
 						concat(base, "-d", "C:\\build", "wql", "SELECT Name FROM Win32_Service")
+				},
+				{ "--env requires a value", concat(base, "--env") },
+				{ "--env requires NAME=VALUE", concat(base, "--env", "NOEQUALS", "command", "whoami") },
+				{ "--env requires NAME=VALUE", concat(base, "--env", "=value", "command", "whoami") },
+				{ "--env requires NAME=VALUE", concat(base, "--env", " =value", "command", "whoami") },
+				{
+						"--env requires the command or shell subcommand",
+						concat(base, "--env", "A=b", "wql", "SELECT Name FROM Win32_Service")
 				},
 				{ "-P must be between 1 and 65535", concat(base, "-P", "65536", "command", "whoami") },
 				{ "-t must be greater than zero", concat(base, "-t", "0", "command", "whoami") },

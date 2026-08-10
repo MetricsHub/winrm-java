@@ -31,8 +31,10 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
 import org.metricshub.winrm.service.WinRMEndpoint;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
@@ -70,6 +72,7 @@ final class CliArguments implements AutoCloseable {
 	private final boolean kerberosRealmInferred;
 	private final boolean forwardStdin;
 	private final String directory;
+	private final Map<String, String> environment;
 	private final String input;
 
 	private CliArguments(final Builder builder) {
@@ -87,6 +90,7 @@ final class CliArguments implements AutoCloseable {
 		kerberosRealmInferred = builder.kerberosRealmInferred;
 		forwardStdin = builder.forwardStdin;
 		directory = builder.directory;
+		environment = builder.environment;
 		input = builder.input;
 	}
 
@@ -160,6 +164,9 @@ final class CliArguments implements AutoCloseable {
 		case "-d":
 			builder.directory = optionValue(arguments, index, option);
 			return nextIndex(argument, index);
+		case "--env":
+			parseEnvironmentVariable(builder, optionValue(arguments, index, option), option);
+			return nextIndex(argument, index);
 		case "--ntlm":
 			builder.ntlm = true;
 			return index + 1;
@@ -185,6 +192,20 @@ final class CliArguments implements AutoCloseable {
 		default:
 			throw new CliUsageException("unknown option " + safeOptionName(argument));
 		}
+	}
+
+	/**
+	 * Record one {@code --env NAME=VALUE} occurrence, winrs-style: the value is split on its FIRST
+	 * {@code =} (so the variable's value may itself contain {@code =}), the name must be non-blank,
+	 * insertion order is preserved, and repeating a name replaces its value.
+	 */
+	private static void parseEnvironmentVariable(final Builder builder, final String value, final String option)
+		throws CliUsageException {
+		final int separator = value.indexOf('=');
+		if (separator < 0 || value.substring(0, separator).trim().isEmpty()) {
+			throw new CliUsageException(option + " requires NAME=VALUE");
+		}
+		builder.environment.put(value.substring(0, separator), value.substring(separator + 1));
 	}
 
 	private static void parseOperation(final Builder builder, final String name, final List<String> values)
@@ -255,6 +276,9 @@ final class CliArguments implements AutoCloseable {
 		}
 		if (builder.directory != null && builder.operation == Operation.WQL) {
 			throw new CliUsageException("--directory requires the command or shell subcommand");
+		}
+		if (!builder.environment.isEmpty() && builder.operation == Operation.WQL) {
+			throw new CliUsageException("--env requires the command or shell subcommand");
 		}
 		if (builder.operation == Operation.SHELL && builder.timeout < MIN_SHELL_TIMEOUT) {
 			throw new CliUsageException("shell requires --timeout of at least " + MIN_SHELL_TIMEOUT + " milliseconds");
@@ -496,6 +520,10 @@ final class CliArguments implements AutoCloseable {
 		return directory;
 	}
 
+	Map<String, String> environment() {
+		return environment;
+	}
+
 	String input() {
 		return input;
 	}
@@ -524,6 +552,7 @@ final class CliArguments implements AutoCloseable {
 		private boolean kerberosRealmInferred;
 		private boolean forwardStdin;
 		private String directory;
+		private final Map<String, String> environment = new LinkedHashMap<>();
 		private Integer port;
 		private long timeout = DEFAULT_TIMEOUT;
 		private String input;

@@ -328,6 +328,17 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final long timeout,
 		final boolean consoleModeStdin
 	) throws TimeoutException, WindowsRemoteException {
+		return startCommand(command, workingDirectory, null, timeout, consoleModeStdin);
+	}
+
+	@Override
+	public CommandCursor startCommand(
+		final String command,
+		final String workingDirectory,
+		final Map<String, String> environment,
+		final long timeout,
+		final boolean consoleModeStdin
+	) throws TimeoutException, WindowsRemoteException {
 		checkNotClosed();
 		Utils.checkNonNull(command, "command");
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
@@ -335,7 +346,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		// Shell creation and command startup happen here, on the caller's thread, so failures
 		// surface immediately rather than on the first output chunk.
 		final WsmanClient.RemoteCommand remoteCommand = callStreaming(
-			() -> client.startCommand(command, workingDirectory, timeout, true, consoleModeStdin)
+			() -> client.startCommand(command, workingDirectory, environment, timeout, true, consoleModeStdin)
 		);
 		return new CommandCursor() {
 			@Override
@@ -430,6 +441,17 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final Charset charset,
 		final long timeout
 	) throws WindowsRemoteException, TimeoutException {
+		return executeCommand(command, workingDirectory, null, charset, timeout);
+	}
+
+	@Override
+	public WindowsRemoteCommandResult executeCommand(
+		final String command,
+		final String workingDirectory,
+		final Map<String, String> environment,
+		final Charset charset,
+		final long timeout
+	) throws WindowsRemoteException, TimeoutException {
 		checkNotClosed();
 		Utils.checkNonNull(command, "command");
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
@@ -439,7 +461,13 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		return executeWithTimeout(
 			() -> {
 				final long start = Utils.getCurrentTimeMillis();
-				final WsmanClient.CommandOutput output = client.executeCommand(command, workingDirectory, charset, timeout);
+				final WsmanClient.CommandOutput output = client.executeCommand(
+					command,
+					workingDirectory,
+					environment,
+					charset,
+					timeout
+				);
 				final float executionTime = (Utils.getCurrentTimeMillis() - start) / 1000.0f;
 				return new WindowsRemoteCommandResult(output.stdout, output.stderr, executionTime, output.exitCode);
 			},

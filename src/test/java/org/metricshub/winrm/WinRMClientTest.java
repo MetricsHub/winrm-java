@@ -240,6 +240,47 @@ class WinRMClientTest {
 	}
 
 	@Test
+	void environmentVariablesAreSentInTheCreateShellRequest() throws Exception {
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueue(
+				200,
+				envelope(receiveResponse(stream("stdout", "CMD-1", "42".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
+			)
+			.enqueue(200, envelope(signalResponse()));
+
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			final CommandResult result = client
+				.command("echo %BUILD_NUMBER%")
+				.environment("BUILD_NUMBER", "42")
+				.environment("CONFIG", "a<b&\"c\"")
+				.workingDirectory("C:\\build")
+				.execute();
+
+			assertEquals("42", result.stdout());
+		}
+
+		final String create = server.decryptedRequests().get(0);
+		// Insertion order preserved, values XML-escaped.
+		assertTrue(
+			create.contains(
+				"<rsp:Environment>" +
+					"<rsp:Variable Name=\"BUILD_NUMBER\">42</rsp:Variable>" +
+					"<rsp:Variable Name=\"CONFIG\">a&lt;b&amp;&quot;c&quot;</rsp:Variable>" +
+					"</rsp:Environment>"
+			),
+			create
+		);
+		// The MS-WSMV Shell_Type schema sequence: Environment, then WorkingDirectory, then the
+		// stream declarations.
+		final int environment = create.indexOf("<rsp:Environment>");
+		final int workingDirectory = create.indexOf("<rsp:WorkingDirectory>");
+		final int inputStreams = create.indexOf("<rsp:InputStreams>");
+		assertTrue(environment < workingDirectory && workingDirectory < inputStreams, create);
+	}
+
+	@Test
 	void commandDecodesOutputAsUtf8WithoutProbingTheRemoteCodeSet() throws Exception {
 		server
 			.enqueue(200, envelope(resourceCreated("SHELL-1")))
@@ -522,7 +563,13 @@ class WinRMClientTest {
 		try (WinRMClient client = builder(PASSWORD).build()) {
 			assertEquals(
 				"first",
-				client.command("first.exe").workingDirectory("C:\\Work").charset(StandardCharsets.UTF_8).execute().stdout()
+				client
+					.command("first.exe")
+					.workingDirectory("C:\\Work")
+					.environment("BUILD_NUMBER", "42")
+					.charset(StandardCharsets.UTF_8)
+					.execute()
+					.stdout()
 			);
 			assertEquals("second", client.command("second.exe").charset(StandardCharsets.UTF_8).execute().stdout());
 		}
@@ -540,9 +587,14 @@ class WinRMClientTest {
 			.collect(java.util.stream.Collectors.toList());
 		assertEquals(2, creates.size());
 		assertEquals(2, requests.stream().filter(r -> r.contains(">second.exe<")).count());
-		// The recreated shell keeps the working directory pinned by the FIRST command, even though
-		// the retried command did not set one.
+		// The recreated shell keeps the working directory AND the environment pinned by the FIRST
+		// command, even though the retried command did not set them.
 		assertTrue(creates.get(1).contains("<rsp:WorkingDirectory>C:\\Work</rsp:WorkingDirectory>"), creates.get(1));
+		assertTrue(
+			creates.get(1)
+				.contains("<rsp:Environment><rsp:Variable Name=\"BUILD_NUMBER\">42</rsp:Variable></rsp:Environment>"),
+			creates.get(1)
+		);
 	}
 
 	@Test

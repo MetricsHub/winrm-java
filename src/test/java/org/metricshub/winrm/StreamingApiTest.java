@@ -42,6 +42,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -791,6 +792,57 @@ class StreamingApiTest {
 
 		assertEquals(canned, legacy.startCommand("dir", null, 1000, true));
 		assertThrows(UnsupportedOperationException.class, () -> legacy.startCommand("dir", null, 1000, false));
+	}
+
+	@Test
+	void executorsUnawareOfEnvironmentVariablesKeepWorkingWhenNoneAreSet() throws Exception {
+		// A pre-existing executor overrides only the historical entry points: the environment-aware
+		// defaults must delegate to them when no variable is requested, and must refuse — never
+		// silently drop the variables — otherwise.
+		final CommandCursor canned = new CommandCursor() {
+			@Override
+			public Chunk next() {
+				return null;
+			}
+
+			@Override
+			public int exitCode() {
+				return 0;
+			}
+
+			@Override
+			public void close() {}
+		};
+		final WindowsRemoteCommandResult cannedResult = new WindowsRemoteCommandResult("out", "", 0.1f, 0);
+		final WindowsRemoteExecutor legacy = new ScriptedWindowsRemoteExecutor() {
+			@Override
+			public CommandCursor startCommand(final String command, final String workingDirectory, final long timeout) {
+				return canned;
+			}
+
+			@Override
+			public WindowsRemoteCommandResult executeCommand(
+				final String command,
+				final String workingDirectory,
+				final java.nio.charset.Charset charset,
+				final long timeout
+			) {
+				return cannedResult;
+			}
+		};
+
+		assertEquals(canned, legacy.startCommand("dir", null, null, 1000, true));
+		assertEquals(canned, legacy.startCommand("dir", null, Map.of(), 1000, true));
+		assertEquals(cannedResult, legacy.executeCommand("dir", null, null, StandardCharsets.UTF_8, 1000));
+		assertEquals(cannedResult, legacy.executeCommand("dir", null, Map.of(), StandardCharsets.UTF_8, 1000));
+		assertThrows(
+			UnsupportedOperationException.class,
+			() -> legacy.startCommand("dir", null, Map.of("A", "1"), 1000, true)
+		);
+		assertThrows(
+			UnsupportedOperationException.class,
+			() -> legacy.executeCommand("dir", null, Map.of("A", "1"), StandardCharsets.UTF_8, 1000)
+		);
 	}
 
 	private static byte[] concat(final byte[] a, final byte[] b) {

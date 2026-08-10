@@ -256,6 +256,7 @@ public final class WinRmCli {
 				final int exitCode = remote.executeCommand(
 					arguments.input(),
 					arguments.directory(),
+					arguments.environment(),
 					arguments.timeout(),
 					arguments.forwardStdin() || !localInput.terminal ? localInput.stream : null,
 					chunk -> {
@@ -300,6 +301,7 @@ public final class WinRmCli {
 			final int exitCode = remote.shell(
 				arguments.timeout(),
 				arguments.directory(),
+				arguments.environment(),
 				localInput.stream,
 				standardOutput,
 				standardError,
@@ -498,6 +500,7 @@ public final class WinRmCli {
 			"  -P, --port <port>           Target port (default: HTTP 5985, HTTPS 5986)\n" +
 			"  -t, --timeout <ms>          Operation timeout in milliseconds (default: 60000)\n" +
 			"  -d, --directory <path>      Working directory of the remote command or shell\n" +
+			"      --env <NAME=VALUE>      Environment variable of the remote command or shell (repeatable)\n" +
 			"  -i, --stdin                 Forward the local standard input to the remote command\n" +
 			"      --https                 Use HTTPS\n" +
 			"      --https-permissive      Trust any HTTPS certificate and hostname (insecure)\n" +
@@ -543,12 +546,14 @@ public final class WinRmCli {
 		/**
 		 * Run the command, forwarding each decoded output chunk to the matching consumer as it
 		 * arrives, and return the remote exit code. A non-null {@code workingDirectory} is the
-		 * directory the command starts in. A non-null {@code stdin} is consumed to its end and
-		 * forwarded as the command's standard input.
+		 * directory the command starts in; a non-empty {@code environment} is set in the remote
+		 * shell. A non-null {@code stdin} is consumed to its end and forwarded as the command's
+		 * standard input.
 		 */
 		int executeCommand(
 			String command,
 			String workingDirectory,
+			Map<String, String> environment,
 			long timeout,
 			InputStream stdin,
 			Consumer<String> stdoutConsumer,
@@ -556,13 +561,14 @@ public final class WinRmCli {
 		) throws Exception;
 
 		/**
-		 * Start {@code cmd.exe} on the remote host — in the given working directory when non-null —
-		 * and bridge it to the given local streams until it exits; return its exit code. See
-		 * {@link InteractiveShell}.
+		 * Start {@code cmd.exe} on the remote host — in the given working directory when non-null,
+		 * with the given environment variables when non-empty — and bridge it to the given local
+		 * streams until it exits; return its exit code. See {@link InteractiveShell}.
 		 */
 		int shell(
 			long timeout,
 			String workingDirectory,
+			Map<String, String> environment,
 			InputStream localInput,
 			PrintStream out,
 			PrintStream err,
@@ -618,6 +624,7 @@ public final class WinRmCli {
 		public int executeCommand(
 			final String command,
 			final String workingDirectory,
+			final Map<String, String> environment,
 			final long timeout,
 			final InputStream stdin,
 			final Consumer<String> stdoutConsumer,
@@ -629,9 +636,12 @@ public final class WinRmCli {
 				.onStdout(stdoutConsumer)
 				.onStderr(stderrConsumer);
 			// A CLI invocation is one client running one command, so the API's "first command
-			// only" pinning of the working directory always applies here.
+			// only" pinning of the working directory and environment always applies here.
 			if (workingDirectory != null) {
 				request.workingDirectory(workingDirectory);
+			}
+			if (environment != null) {
+				environment.forEach(request::environment);
 			}
 			if (stdin != null) {
 				request.stdin(stdin);
@@ -643,6 +653,7 @@ public final class WinRmCli {
 		public int shell(
 			final long timeout,
 			final String workingDirectory,
+			final Map<String, String> environment,
 			final InputStream localInput,
 			final PrintStream out,
 			final PrintStream err,
@@ -669,9 +680,12 @@ public final class WinRmCli {
 					.charset(encoding.charset())
 					.stdin();
 				// The session client's first (and only) command is the shell itself, so the
-				// working directory always takes effect.
+				// working directory and environment always take effect.
 				if (workingDirectory != null) {
 					shellRequest.workingDirectory(workingDirectory);
+				}
+				if (environment != null) {
+					environment.forEach(shellRequest::environment);
 				}
 				try (RemoteProcess process = shellRequest.start()) {
 					return InteractiveShell.run(

@@ -87,12 +87,13 @@ final class WsmanClient implements AutoCloseable {
 	private String pendingAuthorization;
 	private String shellId;
 
-	// The shell's working directory is pinned by the FIRST command on this connection and reused
-	// whenever the shell must be (re)created — e.g. after the server reaped it — so a recreation
-	// stays invisible to the caller instead of silently moving later commands to the default
-	// directory. Guarded by connectionPermit, like shellId.
+	// The shell's working directory and environment variables are pinned by the FIRST command on
+	// this connection and reused whenever the shell must be (re)created — e.g. after the server
+	// reaped it — so a recreation stays invisible to the caller instead of silently moving later
+	// commands to the default directory or environment. Guarded by connectionPermit, like shellId.
 	private String shellWorkingDirectory;
-	private boolean shellWorkingDirectoryPinned;
+	private Map<String, String> shellEnvironment;
+	private boolean shellSettingsPinned;
 
 	// A single NTLM connection is a serial channel: one socket, stateful RC4 ciphers with sequence
 	// numbers, and a single shellId. Concurrent callers (e.g. one executor shared across
@@ -425,6 +426,7 @@ final class WsmanClient implements AutoCloseable {
 	 *
 	 * @param commandLine the command line to run
 	 * @param workingDirectory working directory of the shell (only honored when the shell is created)
+	 * @param environment environment variables of the shell (only honored when the shell is created)
 	 * @param charset the charset decoding the output streams; {@code null} uses
 	 *        {@link WindowsRemoteExecutor#SHELL_OUTPUT_CHARSET}
 	 * @param operationTimeoutMs this operation's timeout, driving the WSMan OperationTimeout header
@@ -433,13 +435,22 @@ final class WsmanClient implements AutoCloseable {
 	CommandOutput executeCommand(
 		final String commandLine,
 		final String workingDirectory,
+		final Map<String, String> environment,
 		final Charset charset,
 		final long operationTimeoutMs
 	) throws Exception {
 		final Charset cs = charset != null ? charset : WindowsRemoteExecutor.SHELL_OUTPUT_CHARSET;
 		final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
 		final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
-		try (RemoteCommand command = startCommand(commandLine, workingDirectory, operationTimeoutMs, false, true)) {
+		try (
+			RemoteCommand command = startCommand(
+				commandLine,
+				workingDirectory,
+				environment,
+				operationTimeoutMs,
+				false,
+				true
+			)) {
 			RemoteCommand.Chunk chunk;
 			while ((chunk = command.nextChunk()) != null) {
 				stdout.write(chunk.stdout, 0, chunk.stdout.length);
@@ -461,6 +472,7 @@ final class WsmanClient implements AutoCloseable {
 	 *
 	 * @param commandLine the command line to run
 	 * @param workingDirectory working directory of the shell (only honored when the shell is created)
+	 * @param environment environment variables of the shell (only honored when the shell is created)
 	 * @param operationTimeoutMs each WSMan round trip's timeout, driving the OperationTimeout
 	 *        header and the socket read timeout — for a streaming consumer this is the inactivity
 	 *        timeout: the longest silence tolerated between two responses
@@ -474,6 +486,7 @@ final class WsmanClient implements AutoCloseable {
 	RemoteCommand startCommand(
 		final String commandLine,
 		final String workingDirectory,
+		final Map<String, String> environment,
 		final long operationTimeoutMs,
 		final boolean failOnQuietTimeout,
 		final boolean consoleModeStdin
@@ -484,12 +497,17 @@ final class WsmanClient implements AutoCloseable {
 		boolean opened = false;
 		try {
 			configureTimeouts(operationTimeoutMs, failOnQuietTimeout);
-			if (!shellWorkingDirectoryPinned) {
+			if (!shellSettingsPinned) {
 				shellWorkingDirectory = workingDirectory;
-				shellWorkingDirectoryPinned = true;
+				// A defensive copy: a recreation must replay exactly what the first command set, not
+				// whatever the caller's map contains by then.
+				shellEnvironment = environment == null || environment.isEmpty()
+					? null
+					: new LinkedHashMap<>(environment);
+				shellSettingsPinned = true;
 			}
 			if (shellId == null) {
-				createShell(shellWorkingDirectory, operationTimeoutMs, failOnQuietTimeout);
+				createShell(shellWorkingDirectory, shellEnvironment, operationTimeoutMs, failOnQuietTimeout);
 			}
 			// The caller's timeout may have fired while the Create response was being awaited (socket
 			// reads do not observe interrupts): never START the command after the reported timeout.
@@ -503,9 +521,10 @@ final class WsmanClient implements AutoCloseable {
 				}
 				// The server reaped the cached shell between commands (e.g. its IdleTimeout expired on a
 				// long-lived client). The Command was rejected before it could run, so it is safe to
-				// recreate the shell — with its ORIGINAL working directory — and retry once.
+				// recreate the shell — with its ORIGINAL working directory and environment — and retry
+				// once.
 				shellId = null;
-				createShell(shellWorkingDirectory, operationTimeoutMs, failOnQuietTimeout);
+				createShell(shellWorkingDirectory, shellEnvironment, operationTimeoutMs, failOnQuietTimeout);
 				checkNotCancelled();
 				commandId = sendCommand(commandLine, operationTimeoutMs, failOnQuietTimeout, consoleModeStdin);
 			}
@@ -877,10 +896,14 @@ final class WsmanClient implements AutoCloseable {
 		}
 	}
 
-	private void createShell(final String workingDirectory, final long timeoutMs, final boolean failOnQuietTimeout)
-		throws Exception {
+	private void createShell(
+		final String workingDirectory,
+		final Map<String, String> environment,
+		final long timeoutMs,
+		final boolean failOnQuietTimeout
+	) throws Exception {
 		final Document doc = exchange(
-			Envelopes.createShell(url, workingDirectory, timeoutMs, consoleCodePage),
+			Envelopes.createShell(url, workingDirectory, environment, timeoutMs, consoleCodePage),
 			"Create shell",
 			timeoutMs,
 			failOnQuietTimeout
