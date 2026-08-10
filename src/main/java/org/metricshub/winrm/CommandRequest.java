@@ -58,6 +58,14 @@ public final class CommandRequest {
 	/** cmd.exe rejects command lines longer than 8191 characters. */
 	private static final int MAX_COMMAND_LINE_LENGTH = 8191;
 
+	/**
+	 * The {@code CMD.EXE /C (...)} wrapper an uploaded request adds around the invocation. The
+	 * length check always reserves room for it, so a script accepted by
+	 * {@link WinRMClient#powerShell(String)} stays valid whether or not {@link #upload(Path...)}
+	 * is called afterward.
+	 */
+	private static final int CMD_WRAPPER_LENGTH = "CMD.EXE /C ()".length();
+
 	private final WinRMClient client;
 	/** The command line — or, for a {@link WinRMClient#powerShell(String)} request, the raw script text. */
 	private final String commandLine;
@@ -121,12 +129,12 @@ public final class CommandRequest {
 	private static String encodePowerShell(final String script) {
 		final String encoded = POWERSHELL_PREFIX
 			+ Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
-		if (encoded.length() > MAX_COMMAND_LINE_LENGTH) {
+		if (encoded.length() > MAX_COMMAND_LINE_LENGTH - CMD_WRAPPER_LENGTH) {
 			throw new IllegalArgumentException(
 				String.format(
-					"The encoded PowerShell invocation is %d characters, above the remote shell's %d-character " +
-						"command-line limit: run the script from a file instead — " +
-						"command(\"powershell.exe -NoProfile -File <remote path>\").upload(<local path>).",
+					"The encoded PowerShell invocation (%d characters, plus the CMD.EXE /C wrapper of an uploaded " +
+						"request) exceeds the remote shell's %d-character command-line limit: run the script from a " +
+						"file instead — command(\"powershell.exe -NoProfile -File <remote path>\").upload(<local path>).",
 					encoded.length(),
 					MAX_COMMAND_LINE_LENGTH
 				)

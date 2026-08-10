@@ -390,6 +390,17 @@ class WinRMClientTest {
 	}
 
 	@Test
+	void powerShellLengthCheckReservesRoomForTheUploadWrapper() throws Exception {
+		// 3046 characters encode to an 8182-character invocation: below cmd.exe's 8191 limit on
+		// its own, but over it once an uploaded request adds the 13-character CMD.EXE /C ( )
+		// wrapper — the check reserves that room, so upload() can never push a request over.
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			assertNotNull(client.powerShell("x".repeat(3040)));
+			assertThrows(IllegalArgumentException.class, () -> client.powerShell("x".repeat(3046)));
+		}
+	}
+
+	@Test
 	void powerShellRejectsAScriptTooLongOnceEncoded() throws Exception {
 		// 4000 characters encode to ~10667 base64 characters, above cmd.exe's 8191 limit.
 		final String script = "Write-Output '" + "x".repeat(4000) + "'";
