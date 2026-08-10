@@ -74,6 +74,8 @@ Points to know:
 
 * **Exit code** — `powershell.exe` exits with 0 on success and 1 when the script ends with a
   terminating error; call `exit <n>` in the script for a specific code.
+* **Uploads** — `upload(...)` works as with any command: references to the uploaded files in the
+  script are rewritten to the remote copies *before* the script is encoded.
 * **Script size** — the encoded invocation must fit in the remote shell's 8191-character command
   line, which caps the script at roughly 3000 characters. Beyond that, `powerShell(...)` throws an
   `IllegalArgumentException` and the script should travel as a file instead:

@@ -22,11 +22,9 @@ package org.metricshub.winrm;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 import javax.net.ssl.SSLContext;
@@ -79,12 +77,6 @@ public final class WinRMClient implements AutoCloseable {
 
 	/** Default operation timeout when the builder does not set one. */
 	private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
-
-	/** The invocation {@link #powerShell(String)} appends the encoded script to. */
-	private static final String POWERSHELL_PREFIX = "powershell.exe -NoProfile -NonInteractive -EncodedCommand ";
-
-	/** cmd.exe rejects command lines longer than 8191 characters. */
-	private static final int MAX_COMMAND_LINE_LENGTH = 8191;
 
 	private final WindowsRemoteExecutor executor;
 	private final String hostname;
@@ -149,9 +141,11 @@ public final class WinRMClient implements AutoCloseable {
 	 * }</pre>
 	 *
 	 * The returned request is the same as for {@link #command(String)}: every option and both
-	 * terminals apply unchanged. {@code powershell.exe} exits with 0 on success and 1 when the
-	 * script ends with a terminating error; call {@code exit <n>} in the script for a specific
-	 * exit code.
+	 * terminals apply unchanged — including {@link CommandRequest#upload(Path...)}, whose path
+	 * rewriting happens on the script text <i>before</i> it is encoded, so a script referencing an
+	 * uploaded file runs against the remote copy. {@code powershell.exe} exits with 0 on success
+	 * and 1 when the script ends with a terminating error; call {@code exit <n>} in the script for
+	 * a specific exit code.
 	 * <p>
 	 * The encoded invocation must fit in the remote shell's 8191-character command line, which
 	 * caps the script at roughly 3000 characters. Run a longer script from a file instead:
@@ -164,20 +158,7 @@ public final class WinRMClient implements AutoCloseable {
 	 */
 	public CommandRequest powerShell(final String script) {
 		Utils.checkNonBlank(script, "script");
-		final String commandLine = POWERSHELL_PREFIX
-			+ Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
-		if (commandLine.length() > MAX_COMMAND_LINE_LENGTH) {
-			throw new IllegalArgumentException(
-				String.format(
-					"The encoded PowerShell invocation is %d characters, above the remote shell's %d-character " +
-						"command-line limit: run the script from a file instead — " +
-						"command(\"powershell.exe -NoProfile -File <remote path>\").upload(<local path>).",
-					commandLine.length(),
-					MAX_COMMAND_LINE_LENGTH
-				)
-			);
-		}
-		return new CommandRequest(this, commandLine);
+		return new CommandRequest(this, script, true);
 	}
 
 	/**

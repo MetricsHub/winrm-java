@@ -24,10 +24,12 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,8 +52,16 @@ public final class CommandRequest {
 	/** How many bytes of pre-supplied input are read and sent at a time. */
 	private static final int STDIN_BUFFER_SIZE = 64 * 1024;
 
+	/** The invocation an encoded PowerShell script is appended to. */
+	private static final String POWERSHELL_PREFIX = "powershell.exe -NoProfile -NonInteractive -EncodedCommand ";
+
+	/** cmd.exe rejects command lines longer than 8191 characters. */
+	private static final int MAX_COMMAND_LINE_LENGTH = 8191;
+
 	private final WinRMClient client;
+	/** The command line — or, for a {@link WinRMClient#powerShell(String)} request, the raw script text. */
 	private final String commandLine;
+	private final boolean powerShell;
 	private String workingDirectory;
 	private final Map<String, String> environment = new LinkedHashMap<>();
 	private Duration timeout;
@@ -76,10 +86,53 @@ public final class CommandRequest {
 	 * @param commandLine the command line to execute
 	 */
 	CommandRequest(final WinRMClient client, final String commandLine) {
+		this(client, commandLine, false);
+	}
+
+	/**
+	 * Create the request.
+	 *
+	 * @param client the client the command runs on
+	 * @param commandLine the command line to execute — or, when {@code powerShell} is set, the raw
+	 *        script text, encoded as {@code -EncodedCommand} when the command starts (after any
+	 *        {@link #upload(Path...)} path rewriting)
+	 * @param powerShell whether the text is a PowerShell script
+	 */
+	CommandRequest(final WinRMClient client, final String commandLine, final boolean powerShell) {
 		Utils.checkNonBlank(commandLine, "commandLine");
 		this.client = client;
 		this.commandLine = commandLine;
+		this.powerShell = powerShell;
 		this.timeout = client.defaultTimeout();
+		if (powerShell) {
+			// Fail on an over-long script now, at the call site — not when the command starts.
+			encodePowerShell(commandLine);
+		}
+	}
+
+	/**
+	 * Build the {@code powershell.exe -EncodedCommand} invocation delivering the given script
+	 * verbatim (base64 of its UTF-16LE bytes, the encoding {@code -EncodedCommand} expects).
+	 *
+	 * @param script the PowerShell script
+	 * @return the invocation command line
+	 * @throws IllegalArgumentException when the invocation exceeds the remote shell's command-line limit
+	 */
+	private static String encodePowerShell(final String script) {
+		final String encoded = POWERSHELL_PREFIX
+			+ Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
+		if (encoded.length() > MAX_COMMAND_LINE_LENGTH) {
+			throw new IllegalArgumentException(
+				String.format(
+					"The encoded PowerShell invocation is %d characters, above the remote shell's %d-character " +
+						"command-line limit: run the script from a file instead — " +
+						"command(\"powershell.exe -NoProfile -File <remote path>\").upload(<local path>).",
+					encoded.length(),
+					MAX_COMMAND_LINE_LENGTH
+				)
+			);
+		}
+		return encoded;
 	}
 
 	/**
@@ -512,10 +565,14 @@ public final class CommandRequest {
 				environment,
 				TimeoutHelper.getRemainingTime(timeoutMillis, start, "No time left to copy the local files")
 			);
-			actualCommand = String.format("CMD.EXE /C (%s)", updatedCommand);
+			// A PowerShell script is encoded only now, AFTER the rewriting: the local paths it
+			// references must be replaced while they are still plain text.
+			actualCommand = String.format("CMD.EXE /C (%s)", powerShell ? encodePowerShell(updatedCommand) : updatedCommand);
 			actualWorkingDirectory = null;
 			// Already applied when the transfer commands created the shell.
 			actualEnvironment = null;
+		} else if (powerShell) {
+			actualCommand = encodePowerShell(commandLine);
 		}
 
 		final Charset actualCharset = charset != null ? charset : WindowsRemoteExecutor.SHELL_OUTPUT_CHARSET;
