@@ -69,6 +69,7 @@ final class CliArguments implements AutoCloseable {
 	private final String kerberosRealm;
 	private final boolean kerberosRealmInferred;
 	private final boolean forwardStdin;
+	private final String directory;
 	private final String input;
 
 	private CliArguments(final Builder builder) {
@@ -85,6 +86,7 @@ final class CliArguments implements AutoCloseable {
 		kerberosRealm = builder.kerberosRealm;
 		kerberosRealmInferred = builder.kerberosRealmInferred;
 		forwardStdin = builder.forwardStdin;
+		directory = builder.directory;
 		input = builder.input;
 	}
 
@@ -153,6 +155,10 @@ final class CliArguments implements AutoCloseable {
 		case "--timeout":
 		case "-t":
 			builder.timeout = parseTimeout(optionValue(arguments, index, option), option);
+			return nextIndex(argument, index);
+		case "--directory":
+		case "-d":
+			builder.directory = optionValue(arguments, index, option);
 			return nextIndex(argument, index);
 		case "--ntlm":
 			builder.ntlm = true;
@@ -243,6 +249,12 @@ final class CliArguments implements AutoCloseable {
 		}
 		if (builder.forwardStdin && builder.operation != Operation.COMMAND) {
 			throw new CliUsageException("--stdin requires the command subcommand");
+		}
+		if (builder.directory != null && builder.directory.trim().isEmpty()) {
+			throw new CliUsageException("--directory requires a value");
+		}
+		if (builder.directory != null && builder.operation == Operation.WQL) {
+			throw new CliUsageException("--directory requires the command or shell subcommand");
 		}
 		if (builder.operation == Operation.SHELL && builder.timeout < MIN_SHELL_TIMEOUT) {
 			throw new CliUsageException("shell requires --timeout of at least " + MIN_SHELL_TIMEOUT + " milliseconds");
@@ -480,6 +492,10 @@ final class CliArguments implements AutoCloseable {
 		return forwardStdin;
 	}
 
+	String directory() {
+		return directory;
+	}
+
 	String input() {
 		return input;
 	}
@@ -507,6 +523,7 @@ final class CliArguments implements AutoCloseable {
 		private String kerberosRealm;
 		private boolean kerberosRealmInferred;
 		private boolean forwardStdin;
+		private String directory;
 		private Integer port;
 		private long timeout = DEFAULT_TIMEOUT;
 		private String input;

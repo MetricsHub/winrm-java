@@ -55,6 +55,7 @@ class WinRmCliTest {
 		assertTrue(help.stdout.contains("command|cmd|exec|run"));
 		assertTrue(help.stdout.contains("[options] shell"));
 		assertTrue(help.stdout.contains("-P, --port"));
+		assertTrue(help.stdout.contains("-d, --directory"));
 		assertTrue(help.stdout.contains("--kerberos-kdc"));
 		assertTrue(help.stdout.contains("--kerberos-realm"));
 		// The details (streaming behavior, password files, exit codes) live in the online manual.
@@ -107,6 +108,61 @@ class WinRmCliTest {
 		assertEquals("output", invocation.stdout);
 		assertEquals("warning", invocation.stderr);
 		assertEquals("echo \"hello world\"", remote.command);
+	}
+
+	@Test
+	void passesTheDirectoryOptionThroughAsTheWorkingDirectory() throws Exception {
+		final FakeRemote remote = new FakeRemote();
+		final Invocation invocation = invoke(concat(REQUIRED, "-d", "C:\\build", "exec", "build.cmd"), args -> remote);
+		assertEquals(0, invocation.exitCode);
+		assertEquals("C:\\build", remote.workingDirectory);
+
+		// The shell subcommand starts in the requested directory too.
+		final FakeRemote shellRemote = new FakeRemote();
+		assertEquals(0, invoke(concat(REQUIRED, "--directory=C:\\build", "shell"), args -> shellRemote).exitCode);
+		assertEquals("C:\\build", shellRemote.workingDirectory);
+
+		// Without the option, no working directory is sent: the remote default applies.
+		final FakeRemote defaulted = new FakeRemote();
+		assertEquals(0, invoke(concat(REQUIRED, "exec", "build.cmd"), args -> defaulted).exitCode);
+		org.junit.jupiter.api.Assertions.assertNull(defaulted.workingDirectory);
+	}
+
+	@Test
+	void sendsTheWorkingDirectoryInTheCreateShellRequest() throws Exception {
+		// Full stack against the in-process WSMan server, through the CLI's real connect factory:
+		// --directory must reach the wire as rsp:WorkingDirectory in the Create shell request.
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			enqueueShellCreation(server);
+			enqueueCommandExchange(server, "ok".getBytes(StandardCharsets.UTF_8), new byte[0], 0);
+			enqueueShellDeletion(server);
+
+			final Invocation invocation = invoke(
+				new String[]
+				{
+						"-h",
+						"127.0.0.1",
+						"-P",
+						String.valueOf(server.port()),
+						"-u",
+						"FAKE\\user",
+						"-p",
+						"secret",
+						"-t",
+						"30000",
+						"-d",
+						"C:\\build",
+						"exec",
+						"build.cmd"
+				},
+				WinRmCli::connect
+			);
+
+			assertEquals(0, invocation.exitCode);
+			assertEquals("ok", invocation.stdout);
+			final String create = server.decryptedRequests().get(0);
+			assertTrue(create.contains("<rsp:WorkingDirectory>C:\\build</rsp:WorkingDirectory>"), create);
+		}
 	}
 
 	@Test
@@ -174,6 +230,8 @@ class WinRmCliTest {
 						"secret",
 						"-t",
 						"10000",
+						"-d",
+						"C:\\build",
 						"shell"
 				},
 				WinRmCli::connect,
@@ -185,6 +243,7 @@ class WinRmCliTest {
 			assertTrue(requests.get(0).contains("Win32_OperatingSystem"), requests.get(0));
 			final String create = requests.get(1);
 			assertTrue(create.contains("<wsman:Option Name=\"WINRS_CODEPAGE\">1252</wsman:Option>"), create);
+			assertTrue(create.contains("<rsp:WorkingDirectory>C:\\build</rsp:WorkingDirectory>"), create);
 			final String command = requests.get(2);
 			assertTrue(command.contains("<rsp:Command>cmd.exe /Q</rsp:Command>"), command);
 			assertTrue(command.contains("<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">FALSE</wsman:Option>"), command);
@@ -605,6 +664,7 @@ class WinRmCliTest {
 		private int commandExitCode;
 		private Exception failure;
 		private String command;
+		private String workingDirectory;
 		private java.io.InputStream forwardedStdin;
 		private boolean shellStarted;
 		private boolean closed;
@@ -619,12 +679,14 @@ class WinRmCliTest {
 		@Override
 		public int executeCommand(
 			final String command,
+			final String workingDirectory,
 			final long timeout,
 			final java.io.InputStream stdin,
 			final Consumer<String> stdoutConsumer,
 			final Consumer<String> stderrConsumer
 		) throws Exception {
 			this.command = command;
+			this.workingDirectory = workingDirectory;
 			this.forwardedStdin = stdin;
 			failIfConfigured();
 			stdoutChunks.forEach(stdoutConsumer);
@@ -635,12 +697,14 @@ class WinRmCliTest {
 		@Override
 		public int shell(
 			final long timeout,
+			final String workingDirectory,
 			final java.io.InputStream localInput,
 			final java.io.PrintStream out,
 			final java.io.PrintStream err,
 			final java.util.concurrent.atomic.AtomicBoolean interruptRequested
 		) throws Exception {
 			shellStarted = true;
+			this.workingDirectory = workingDirectory;
 			failIfConfigured();
 			stdoutChunks.forEach(chunk -> {
 				out.print(chunk);
