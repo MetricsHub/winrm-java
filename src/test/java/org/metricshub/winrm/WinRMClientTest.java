@@ -43,6 +43,7 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.metricshub.winrm.exceptions.WinRMAuthenticationException;
 import org.metricshub.winrm.exceptions.WinRMFaultException;
 import org.metricshub.winrm.exceptions.WinRMTimeoutException;
@@ -278,6 +279,70 @@ class WinRMClientTest {
 		final int workingDirectory = create.indexOf("<rsp:WorkingDirectory>");
 		final int inputStreams = create.indexOf("<rsp:InputStreams>");
 		assertTrue(environment < workingDirectory && workingDirectory < inputStreams, create);
+	}
+
+	@Test
+	void uploadsCarryTheEnvironmentIntoTheShellTheyCreate(@TempDir final java.nio.file.Path tempDir) throws Exception {
+		// .environment(...) combined with .upload(...): the transfer commands run FIRST and are
+		// what actually creates the shell, so they must carry the environment — the real command
+		// then inherits it. Without that, the variables would be silently dropped.
+		final byte[] content = "collect".getBytes(StandardCharsets.UTF_8);
+		final java.nio.file.Path localFile = tempDir.resolve("collect.bat");
+		java.nio.file.Files.write(localFile, content);
+		final StringBuilder digest = new StringBuilder();
+		for (final byte b : java.security.MessageDigest.getInstance("SHA-256").digest(content)) {
+			digest.append(String.format("%02x", b));
+		}
+		final String certutil = "SHA256 hash of file x:\r\n" +
+			digest +
+			"\r\nCertUtil: -hashfile command completed successfully.\r\n";
+
+		server
+			// ShellFileCopy locates the Windows directory with a WQL query (no shell involved)...
+			.enqueue(200, envelope(enumerationDone(instance("Win32_OperatingSystem", "WindowsDirectory", "C:\\Windows"))))
+			// ...then its first command leg (cleanup + MKDIR) creates the shell...
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueue(200, envelope(receiveResponse("", done("CMD-1", 0))))
+			.enqueue(200, envelope(signalResponse()))
+			// ...the digest probe reports an identical remote copy (transfer skipped)...
+			.enqueue(200, envelope(commandResponse("CMD-2")))
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(stream("stdout", "CMD-2", certutil.getBytes(StandardCharsets.UTF_8)), done("CMD-2", 0))
+				)
+			)
+			.enqueue(200, envelope(signalResponse()))
+			// ...and the real command runs in the SAME shell.
+			.enqueue(200, envelope(commandResponse("CMD-3")))
+			.enqueue(
+				200,
+				envelope(receiveResponse(stream("stdout", "CMD-3", "done".getBytes(StandardCharsets.UTF_8)), done("CMD-3", 0)))
+			)
+			.enqueue(200, envelope(signalResponse()));
+
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			final CommandResult result = client
+				.command(localFile.toString())
+				.upload(localFile)
+				.environment("BUILD_NUMBER", "42")
+				.execute();
+
+			assertEquals("done", result.stdout());
+		}
+
+		final List<String> requests = server.decryptedRequests();
+		final List<String> creates = requests
+			.stream()
+			.filter(r -> r.contains("<rsp:InputStreams>"))
+			.collect(java.util.stream.Collectors.toList());
+		assertEquals(1, creates.size(), () -> String.join("\n---\n", requests));
+		assertTrue(
+			creates.get(0)
+				.contains("<rsp:Environment><rsp:Variable Name=\"BUILD_NUMBER\">42</rsp:Variable></rsp:Environment>"),
+			creates.get(0)
+		);
 	}
 
 	@Test

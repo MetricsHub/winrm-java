@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
@@ -142,6 +143,34 @@ public class ShellFileCopy {
 		final List<String> localFiles,
 		final long timeout
 	) throws IOException, TimeoutException, WindowsRemoteException {
+		return copyLocalFilesToRemote(windowsRemoteExecutor, command, localFiles, null, timeout);
+	}
+
+	/**
+	 * Variant of {@link #copyLocalFilesToRemote(WindowsRemoteExecutor, String, List, long)} that
+	 * also sets environment variables in the remote shell. The transfer commands are the first
+	 * commands the executor runs, so they are what actually creates (and pins the settings of)
+	 * the shell the caller's command will then run in: shell-scoped settings must ride them, or
+	 * they would be silently lost.
+	 *
+	 * @param windowsRemoteExecutor Executor connected to the remote host (mandatory)
+	 * @param command The command referencing the local files (mandatory)
+	 * @param localFiles The list of local files to copy (may be null or empty: no-op)
+	 * @param environment Environment variables of the remote shell, in insertion order (can be
+	 *        null or empty for none)
+	 * @param timeout Timeout in milliseconds (throws an IllegalArgumentException if negative or zero)
+	 * @return The command updated with the remote paths of the copied files
+	 * @throws IOException If a local file cannot be read
+	 * @throws TimeoutException To notify userName of timeout
+	 * @throws WindowsRemoteException For any problem encountered on the remote host
+	 */
+	public static String copyLocalFilesToRemote(
+		final WindowsRemoteExecutor windowsRemoteExecutor,
+		final String command,
+		final List<String> localFiles,
+		final Map<String, String> environment,
+		final long timeout
+	) throws IOException, TimeoutException, WindowsRemoteException {
 		Utils.checkNonNull(windowsRemoteExecutor, "windowsRemoteExecutor");
 		Utils.checkNonNull(command, "command");
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
@@ -171,6 +200,7 @@ public class ShellFileCopy {
 			String
 				.format("forfiles /P \"%s\" /D -%d /C \"cmd /c del /f /q @path\" 2>NUL & ", remoteDirectory, CLEANUP_AGE_DAYS) +
 				WindowsTempShare.buildCreateRemoteDirectoryCommand(remoteDirectory),
+			environment,
 			"create the remote temporary directory",
 			timeout,
 			start
@@ -178,7 +208,14 @@ public class ShellFileCopy {
 
 		String updatedCommand = command;
 		for (final String localFile : localFiles) {
-			final String remoteFile = copyFile(windowsRemoteExecutor, Paths.get(localFile), remoteDirectory, timeout, start);
+			final String remoteFile = copyFile(
+				windowsRemoteExecutor,
+				Paths.get(localFile),
+				remoteDirectory,
+				environment,
+				timeout,
+				start
+			);
 
 			updatedCommand = WindowsRemoteProcessUtils.caseInsensitiveReplace(updatedCommand, localFile, remoteFile);
 		}
@@ -193,6 +230,7 @@ public class ShellFileCopy {
 	 * @param windowsRemoteExecutor Executor connected to the remote host
 	 * @param localPath The local file to copy
 	 * @param remoteDirectory The existing remote directory receiving the file
+	 * @param environment Environment variables of the remote shell (can be null or empty for none)
 	 * @param timeout Timeout in milliseconds
 	 * @param start Operation start time in milliseconds
 	 * @return the path of the file on the remote host
@@ -204,6 +242,7 @@ public class ShellFileCopy {
 		final WindowsRemoteExecutor windowsRemoteExecutor,
 		final Path localPath,
 		final String remoteDirectory,
+		final Map<String, String> environment,
 		final long timeout,
 		final long start
 	) throws IOException, TimeoutException, WindowsRemoteException {
@@ -227,7 +266,7 @@ public class ShellFileCopy {
 		final String remoteFile = remoteDirectory + "\\"
 			+ contentAddressedName(fileName, content, maxRemoteNameLength(remoteDirectory));
 
-		transferContent(windowsRemoteExecutor, localPath, content, remoteFile, timeout, start);
+		transferContent(windowsRemoteExecutor, localPath, content, remoteFile, environment, timeout, start);
 
 		return remoteFile;
 	}
@@ -285,12 +324,13 @@ public class ShellFileCopy {
 		runChecked(
 			windowsRemoteExecutor,
 			WindowsTempShare.buildCreateRemoteDirectoryCommand(remoteDirectory),
+			null,
 			"create the remote directory",
 			timeout,
 			start
 		);
 
-		transferContent(windowsRemoteExecutor, localPath, content, remoteFile, timeout, start);
+		transferContent(windowsRemoteExecutor, localPath, content, remoteFile, null, timeout, start);
 	}
 
 	/**
@@ -322,6 +362,7 @@ public class ShellFileCopy {
 	 * @param localPath The local file, for the failure messages
 	 * @param content The file content
 	 * @param remoteFile The destination path on the remote host
+	 * @param environment Environment variables of the remote shell (can be null or empty for none)
 	 * @param timeout Timeout in milliseconds
 	 * @param start Operation start time in milliseconds
 	 * @throws TimeoutException To notify userName of timeout
@@ -332,13 +373,20 @@ public class ShellFileCopy {
 		final Path localPath,
 		final byte[] content,
 		final String remoteFile,
+		final Map<String, String> environment,
 		final long timeout,
 		final long start
 	) throws TimeoutException, WindowsRemoteException {
 		// Skip the transfer if the remote host already has an identical copy. A destination that
 		// exists with a DIFFERENT digest (e.g. a cached copy corrupted or modified in place) is
 		// remembered: it must be repaired by replacement, not trusted.
-		final Optional<RemoteDigest> existing = remoteDigest(windowsRemoteExecutor, remoteFile, timeout, start);
+		final Optional<RemoteDigest> existing = remoteDigest(
+			windowsRemoteExecutor,
+			remoteFile,
+			environment,
+			timeout,
+			start
+		);
 		if (existing.isPresent() && existing.get().matches(content)) {
 			return;
 		}
@@ -354,6 +402,7 @@ public class ShellFileCopy {
 					: String.format("IF NOT EXIST \"%s\" TYPE NUL >\"%s\"", remoteFile, remoteFile)) +
 					" & " +
 					digestProbe(remoteFile),
+				environment,
 				"create an empty file",
 				timeout,
 				start
@@ -375,7 +424,7 @@ public class ShellFileCopy {
 		// so a concurrent operation can never invalidate a copy another operation verified.
 		final String stagingFile = String.format("%s.%s.part", remoteFile, uniqueSuffix());
 		try {
-			upload(windowsRemoteExecutor, content, stagingFile, localPath, timeout, start);
+			upload(windowsRemoteExecutor, content, stagingFile, localPath, environment, timeout, start);
 
 			publish(
 				windowsRemoteExecutor,
@@ -384,11 +433,12 @@ public class ShellFileCopy {
 				mismatchedDestination,
 				content,
 				localPath,
+				environment,
 				timeout,
 				start
 			);
 		} catch (final TimeoutException | WindowsRemoteException | RuntimeException e) {
-			bestEffortDelete(windowsRemoteExecutor, timeout, start, stagingFile);
+			bestEffortDelete(windowsRemoteExecutor, environment, timeout, start, stagingFile);
 
 			throw e;
 		}
@@ -426,6 +476,7 @@ public class ShellFileCopy {
 	 *        must be replaced
 	 * @param content The expected file content
 	 * @param localPath The local file, for the failure message
+	 * @param environment Environment variables of the remote shell (can be null or empty for none)
 	 * @param timeout Timeout in milliseconds
 	 * @param start Operation start time in milliseconds
 	 * @throws TimeoutException To notify userName of timeout
@@ -439,6 +490,7 @@ public class ShellFileCopy {
 		final boolean replaceMismatched,
 		final byte[] content,
 		final Path localPath,
+		final Map<String, String> environment,
 		final long timeout,
 		final long start
 	) throws TimeoutException, WindowsRemoteException {
@@ -453,6 +505,7 @@ public class ShellFileCopy {
 				)) +
 				" & " +
 				digestProbe(remoteFile),
+			environment,
 			"publish the transferred file",
 			timeout,
 			start
@@ -489,6 +542,7 @@ public class ShellFileCopy {
 	 * @param content The file content
 	 * @param remoteFile The target path on the remote host
 	 * @param localPath The local file, for the failure message
+	 * @param environment Environment variables of the remote shell (can be null or empty for none)
 	 * @param timeout Timeout in milliseconds
 	 * @param start Operation start time in milliseconds
 	 * @throws TimeoutException To notify userName of timeout
@@ -499,6 +553,7 @@ public class ShellFileCopy {
 		final byte[] content,
 		final String remoteFile,
 		final Path localPath,
+		final Map<String, String> environment,
 		final long timeout,
 		final long start
 	) throws TimeoutException, WindowsRemoteException {
@@ -510,7 +565,7 @@ public class ShellFileCopy {
 				Base64.getEncoder().encodeToString(content),
 				base64File
 			)) {
-				runChecked(windowsRemoteExecutor, uploadCommand, "upload the file content", timeout, start);
+				runChecked(windowsRemoteExecutor, uploadCommand, environment, "upload the file content", timeout, start);
 			}
 
 			final WindowsRemoteCommandResult decoded = run(
@@ -518,6 +573,7 @@ public class ShellFileCopy {
 				String.format("certutil -f -decode \"%s\" \"%s\" && DEL /F /Q \"%s\"", base64File, remoteFile, base64File) +
 					" & " +
 					digestProbe(remoteFile),
+				environment,
 				"decode the transferred file",
 				timeout,
 				start
@@ -538,7 +594,7 @@ public class ShellFileCopy {
 				throw integrityCheckFailure(localPath, remoteFile, windowsRemoteExecutor);
 			}
 		} catch (final TimeoutException | WindowsRemoteException | RuntimeException e) {
-			bestEffortDelete(windowsRemoteExecutor, timeout, start, base64File, remoteFile);
+			bestEffortDelete(windowsRemoteExecutor, environment, timeout, start, base64File, remoteFile);
 
 			throw e;
 		}
@@ -584,6 +640,7 @@ public class ShellFileCopy {
 	 *
 	 * @param windowsRemoteExecutor Executor connected to the remote host
 	 * @param remoteFile The remote file to hash
+	 * @param environment Environment variables of the remote shell (can be null or empty for none)
 	 * @param timeout Timeout in milliseconds
 	 * @param start Operation start time in milliseconds
 	 * @return the digest of the remote file, or an empty Optional if it couldn't be computed
@@ -594,12 +651,14 @@ public class ShellFileCopy {
 	private static Optional<RemoteDigest> remoteDigest(
 		final WindowsRemoteExecutor windowsRemoteExecutor,
 		final String remoteFile,
+		final Map<String, String> environment,
 		final long timeout,
 		final long start
 	) throws TimeoutException, WindowsRemoteException {
 		final WindowsRemoteCommandResult result = run(
 			windowsRemoteExecutor,
 			digestProbe(remoteFile),
+			environment,
 			"hash the remote file",
 			timeout,
 			start
@@ -674,6 +733,7 @@ public class ShellFileCopy {
 	 *
 	 * @param windowsRemoteExecutor Executor connected to the remote host
 	 * @param command The command to execute
+	 * @param environment Environment variables of the remote shell (can be null or empty for none)
 	 * @param description What the command does, for the timeout and failure messages
 	 * @param timeout Timeout in milliseconds
 	 * @param start Operation start time in milliseconds
@@ -683,11 +743,19 @@ public class ShellFileCopy {
 	private static void runChecked(
 		final WindowsRemoteExecutor windowsRemoteExecutor,
 		final String command,
+		final Map<String, String> environment,
 		final String description,
 		final long timeout,
 		final long start
 	) throws TimeoutException, WindowsRemoteException {
-		final WindowsRemoteCommandResult result = run(windowsRemoteExecutor, command, description, timeout, start);
+		final WindowsRemoteCommandResult result = run(
+			windowsRemoteExecutor,
+			command,
+			environment,
+			description,
+			timeout,
+			start
+		);
 
 		if (result.getStatusCode() != 0) {
 			throw new WindowsRemoteException(
@@ -705,15 +773,19 @@ public class ShellFileCopy {
 	private static WindowsRemoteCommandResult run(
 		final WindowsRemoteExecutor windowsRemoteExecutor,
 		final String command,
+		final Map<String, String> environment,
 		final String description,
 		final long timeout,
 		final long start
 	) throws TimeoutException, WindowsRemoteException {
 		for (int attempt = 0;; attempt++) {
 			try {
+				// The environment rides every leg: whichever command happens to create the shell
+				// pins it (the others are no-ops), and the caller's command then inherits it.
 				return windowsRemoteExecutor.executeCommand(
 					command,
 					null,
+					environment,
 					null,
 					TimeoutHelper.getRemainingTime(timeout, start, "No time left to " + description)
 				);
@@ -766,12 +838,14 @@ public class ShellFileCopy {
 	 * where the original exception must not be masked.
 	 *
 	 * @param windowsRemoteExecutor Executor connected to the remote host
+	 * @param environment Environment variables of the remote shell (can be null or empty for none)
 	 * @param timeout Timeout in milliseconds
 	 * @param start Operation start time in milliseconds
 	 * @param remoteFiles The remote files to delete
 	 */
 	private static void bestEffortDelete(
 		final WindowsRemoteExecutor windowsRemoteExecutor,
+		final Map<String, String> environment,
 		final long timeout,
 		final long start,
 		final String... remoteFiles
@@ -782,7 +856,7 @@ public class ShellFileCopy {
 		}
 
 		try {
-			run(windowsRemoteExecutor, "DEL /F /Q" + files, "clean up", timeout, start);
+			run(windowsRemoteExecutor, "DEL /F /Q" + files, environment, "clean up", timeout, start);
 		} catch (final Exception ignored) {
 			// Cleanup is best-effort: the exception that triggered it matters more
 		}

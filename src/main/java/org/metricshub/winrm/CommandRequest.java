@@ -500,17 +500,21 @@ public final class CommandRequest {
 
 		if (!uploads.isEmpty()) {
 			// Copy the files through the command shell and rewrite the command to reference the
-			// remote copies; the transfer commands create the shell, so the working directory and
-			// environment no longer apply (the shell already exists when the real command runs).
+			// remote copies. The transfer commands are what actually creates the shell, so the
+			// shell-scoped environment must ride them — the real command then inherits it. The
+			// working directory is not carried over: with uploads it has never applied, and the
+			// transfer commands were built for the default directory.
 			final List<String> localFiles = uploads.stream().map(Path::toString).collect(Collectors.toList());
 			final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
 				client.executor(),
 				commandLine,
 				localFiles,
+				environment,
 				TimeoutHelper.getRemainingTime(timeoutMillis, start, "No time left to copy the local files")
 			);
 			actualCommand = String.format("CMD.EXE /C (%s)", updatedCommand);
 			actualWorkingDirectory = null;
+			// Already applied when the transfer commands created the shell.
 			actualEnvironment = null;
 		}
 

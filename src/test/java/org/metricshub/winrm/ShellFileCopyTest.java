@@ -339,6 +339,86 @@ class ShellFileCopyTest {
 	}
 
 	@Test
+	void transferCommandsCarryTheShellEnvironment() throws Exception {
+		// The transfer commands are what actually creates (and pins the settings of) the remote
+		// shell: the caller's shell-scoped environment must ride every leg, or the command the
+		// files were uploaded for would silently run without it.
+		final byte[] content = "env".getBytes(UTF_8);
+		final Path localFile = tempDir.resolve("env.bat");
+		Files.write(localFile, content);
+
+		// Cheap skip path: the remote copy already carries the identical digest
+		final ScriptedWindowsRemoteExecutor delegate = executorWithTempDirectory()
+			.expectCommand("certutil -hashfile", hashOutput("SHA256", sha256Hex(content)));
+
+		final Map<String, String> environment = Map.of("BUILD_NUMBER", "42");
+		final List<Map<String, String>> received = new java.util.ArrayList<>();
+		final WindowsRemoteExecutor recording = new WindowsRemoteExecutor() {
+			@Override
+			public List<Map<String, Object>> executeWql(final String wqlQuery, final long timeout) {
+				return delegate.executeWql(wqlQuery, timeout);
+			}
+
+			@Override
+			public WindowsRemoteCommandResult executeCommand(
+				final String command,
+				final String workingDirectory,
+				final java.nio.charset.Charset charset,
+				final long timeout
+			) {
+				throw new AssertionError("The transfer must use the environment-aware entry point: " + command);
+			}
+
+			@Override
+			public WindowsRemoteCommandResult executeCommand(
+				final String command,
+				final String workingDirectory,
+				final Map<String, String> commandEnvironment,
+				final java.nio.charset.Charset charset,
+				final long timeout
+			) {
+				received.add(commandEnvironment);
+				return delegate.executeCommand(command, workingDirectory, charset, timeout);
+			}
+
+			@Override
+			public String getHostname() {
+				return delegate.getHostname();
+			}
+
+			@Override
+			public String getUsername() {
+				return delegate.getUsername();
+			}
+
+			@Override
+			public char[] getPassword() {
+				return delegate.getPassword();
+			}
+
+			@Override
+			public void close() {
+				delegate.close();
+			}
+		};
+
+		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
+			recording,
+			localFile.toString(),
+			List.of(localFile.toString()),
+			environment,
+			TIMEOUT
+		);
+
+		assertEquals(
+			expectedRemoteDirectory() + "\\" + ShellFileCopy.contentAddressedName("env.bat", content),
+			updatedCommand
+		);
+		// Two legs (cleanup + MKDIR, then the digest probe), each carrying the caller's environment.
+		assertEquals(List.of(environment, environment), received);
+	}
+
+	@Test
 	void returnsCommandUnchangedWithoutFiles() throws Exception {
 		// No handler registered: any remote interaction would fail the test
 		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor();
@@ -356,7 +436,7 @@ class ShellFileCopyTest {
 		// A root path has no file name component (Path.getFileName() is null)
 		assertThrows(
 			IllegalArgumentException.class,
-			() -> ShellFileCopy.copyFile(executor, Path.of("C:\\"), "C:\\Windows\\Temp", TIMEOUT, 0L)
+			() -> ShellFileCopy.copyFile(executor, Path.of("C:\\"), "C:\\Windows\\Temp", null, TIMEOUT, 0L)
 		);
 		assertTrue(executor.getExecutedCommands().isEmpty());
 	}
