@@ -463,7 +463,7 @@ public final class FakeWsmanServer implements AutoCloseable {
 		final byte[] userSessionKey = EncryptionUtils.hmacMd5(ntowfV2, ntProofStr);
 		final byte[] exportedSessionKey = EncryptionUtils.calculateRC4(encryptedSessionKey, userSessionKey);
 
-		final WinRMSession session = new WinRMSession(expectedDomain, null, expectedUser, expectedPassword);
+		final WinRMSession session = new WinRMSession(expectedDomain, null, expectedUser, expectedPassword.toCharArray());
 		session.applyKeys(flags, exportedSessionKey, true);
 		return session;
 	}

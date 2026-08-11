@@ -51,7 +51,7 @@ final class NtlmAuthScheme implements AuthScheme {
 	private final boolean https;
 	private final WinRMSession session;
 
-	NtlmAuthScheme(final String domain, final String username, final String password, final boolean https) {
+	NtlmAuthScheme(final String domain, final String username, final char[] password, final boolean https) {
 		this.https = https;
 		// Uppercase the domain: NTOWFv2 (and thus the NTLM session key) is computed over it, the
 		// Type 3 DomainName field goes on the wire uppercased, and the server derives its session

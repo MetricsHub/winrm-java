@@ -261,7 +261,9 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 
 		final String domain = winRMEndpoint.getDomain();
 		final String username = winRMEndpoint.getUsername();
-		final String password = new String(winRMEndpoint.getPassword());
+		// Keep the caller's char[] by reference, never as a String: the credentials contract is that
+		// wiping that single array after close() leaves no live copy of the secret anywhere.
+		final char[] password = winRMEndpoint.getPassword();
 
 		final List<AuthScheme> schemes = new ArrayList<>();
 		for (final AuthenticationEnum auth : requested) {

@@ -40,8 +40,10 @@ remember to escape the backslash in a string literal:
 "Administrator"           // no domain
 ```
 
-The password is a `char[]`, and the builder deliberately does **not** copy it: after closing the
-client you can wipe the single authoritative copy of the secret (`Arrays.fill(password, '\0')`).
+The password is a `char[]`, and the builder deliberately does **not** copy it: the client keeps
+that same array by reference end-to-end and never converts it to a `String` internally, so after
+closing the client you can wipe the single authoritative copy of the secret
+(`Arrays.fill(password, '\0')`).
 
 ## NTLM
 

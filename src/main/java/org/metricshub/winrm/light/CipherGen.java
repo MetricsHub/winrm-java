@@ -21,6 +21,9 @@ package org.metricshub.winrm.light;
  */
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.Charset;
 import java.security.Key;
 import java.security.MessageDigest;
 import java.util.Arrays;
@@ -48,7 +51,9 @@ public class CipherGen {
 
 	private final String domain;
 	private final String user;
-	private final String password;
+	// char[] end-to-end (diverging from the upstream String-based port): an immutable String copy
+	// of the password could never be wiped, defeating the char[]-based credentials contract.
+	private final char[] password;
 	private final byte[] challenge;
 	private final byte[] targetInformation;
 
@@ -76,13 +81,25 @@ public class CipherGen {
 	private byte[] ntlm2SessionResponseUserSessionKey = null;
 	private byte[] lanManagerSessionKey = null;
 
+	/**
+	 * Create a generator for the NTLM responses of one authentication exchange.
+	 *
+	 * @param random the random source for the client challenges and secondary key
+	 * @param currentTime the current time in milliseconds since the epoch (for the NTLMv2 timestamp)
+	 * @param domain the authentication domain (may be {@code null})
+	 * @param user the user name
+	 * @param password the password, kept as {@code char[]} by reference and never turned into a
+	 *        {@code String}, so the caller retains the single wipeable copy of the secret
+	 * @param challenge the server challenge from the Type 2 message
+	 * @param targetInformation the target information block from the Type 2 message
+	 */
 	@SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = EXPOSE_JUSTIFICATION)
 	public CipherGen(
 		final Random random,
 		final long currentTime,
 		final String domain,
 		final String user,
-		final String password,
+		final char[] password,
 		final byte[] challenge,
 		final byte[] targetInformation
 	) {
@@ -339,15 +356,25 @@ public class CipherGen {
 	 * @return The LM Hash of the given password, used in the calculation of the
 	 *         LM Response.
 	 */
-	private static byte[] lmHash(final String password) throws NtlmException {
+	private static byte[] lmHash(final char[] password) throws NtlmException {
 		try {
-			final byte[] oemPassword = password.toUpperCase(Locale.ROOT).getBytes(NTLMEngineUtils.DEFAULT_CHARSET);
+			// Per-char uppercase (not String.toUpperCase) so no String copy of the password is ever
+			// created. The two can differ only on chars with one-to-many uppercase mappings (e.g. ß),
+			// which the legacy LM hash's OEM charset cannot represent anyway.
+			final char[] upper = new char[password.length];
+			for (int i = 0; i < password.length; i++) {
+				upper[i] = Character.toUpperCase(password[i]);
+			}
+			final byte[] oemPassword = encode(upper, NTLMEngineUtils.DEFAULT_CHARSET);
+			Arrays.fill(upper, '\0');
 
 			final int length = Math.min(oemPassword.length, 14);
 			final byte[] keyBytes = new byte[14];
 			System.arraycopy(oemPassword, 0, keyBytes, 0, length);
+			Arrays.fill(oemPassword, (byte) 0);
 			final Key lowKey = createDESKey(keyBytes, 0);
 			final Key highKey = createDESKey(keyBytes, 7);
+			Arrays.fill(keyBytes, (byte) 0);
 			final byte[] magicConstant = "KGS!@#$%".getBytes(NTLMEngineUtils.DEFAULT_CHARSET);
 			final Cipher des = Cipher.getInstance("DES/ECB/NoPadding");
 			des.init(Cipher.ENCRYPT_MODE, lowKey);
@@ -504,14 +531,35 @@ public class CipherGen {
 	 * @return The NTLM Hash of the given password, used in the calculation of
 	 *         the NTLM Response and the NTLMv2 and LMv2 Hashes.
 	 */
-	private static byte[] ntlmHash(final String password) throws NtlmException {
+	private static byte[] ntlmHash(final char[] password) throws NtlmException {
 		if (NTLMEngineUtils.UNICODE_LITTLE_UNMARKED == null) {
 			throw new NtlmException("Unicode not supported");
 		}
-		final byte[] unicodePassword = password.getBytes(NTLMEngineUtils.UNICODE_LITTLE_UNMARKED);
+		final byte[] unicodePassword = encode(password, NTLMEngineUtils.UNICODE_LITTLE_UNMARKED);
 		final MD4 md4 = new MD4();
 		md4.update(unicodePassword);
+		Arrays.fill(unicodePassword, (byte) 0);
 		return md4.getOutput();
+	}
+
+	/**
+	 * Encode a char[] without going through String — an immutable String copy of the password
+	 * could never be wiped. {@link Charset#encode(CharBuffer)} replaces malformed/unmappable
+	 * input exactly like {@code String.getBytes(Charset)} did, so the produced bytes (and thus
+	 * the derived hashes) are unchanged. The encoder's scratch buffer is zeroed before returning.
+	 *
+	 * @param chars the characters to encode
+	 * @param charset the target charset
+	 * @return the encoded bytes (caller wipes them after use)
+	 */
+	private static byte[] encode(final char[] chars, final Charset charset) {
+		final ByteBuffer buffer = charset.encode(CharBuffer.wrap(chars));
+		final byte[] bytes = new byte[buffer.remaining()];
+		buffer.get(bytes);
+		if (buffer.hasArray()) {
+			Arrays.fill(buffer.array(), (byte) 0);
+		}
+		return bytes;
 	}
 
 	/**
