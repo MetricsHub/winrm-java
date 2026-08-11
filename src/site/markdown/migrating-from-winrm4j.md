@@ -61,8 +61,8 @@ shape differences are visible immediately:
 * The client is **`AutoCloseable`** and meant for try-with-resources — it authenticates once and
   runs any number of commands and queries over the same connection, where winrm4j re-created a
   shell (and re-authenticated) on every `executeCommand(...)` call.
-* The password is a **`char[]`**, not a `String`, so the caller can wipe the single authoritative
-  copy of the secret after closing the client.
+* The password is a **`char[]`**, not a `String`; the builder takes the array as-is, without
+  copying it.
 
 ## Option mapping
 
@@ -83,7 +83,7 @@ with largely overlapping options. Both map to the single
 | `authenticationScheme(AuthSchemes.BASIC)` | none — use NTLM; see [behavioral differences](#behavioral-differences) |
 | `disableCertificateChecks(true)` | `trustAllCertificates()` |
 | `sslContext(SSLContext)` | `sslContext(SSLContext)` — hostname verification stays on |
-| `hostnameVerifier(...)`, `sslSocketFactory(...)` | none — covered by `sslContext(...)` / `trustAllCertificates()`; see [TLS / HTTPS](tls.html) |
+| `hostnameVerifier(...)`, `sslSocketFactory(...)` | none — hostname verification is all or nothing: on with `sslContext(...)`, off (together with certificate validation) with `trustAllCertificates()`. There is no custom-verifier hook, so the certificate must identify the hostname you connect by ([TLS / HTTPS](tls.html)) |
 | `operationTimeout(long)` (milliseconds) | `timeout(Duration)` — different semantics, see [behavioral differences](#behavioral-differences) |
 | `connectionTimeout(long)`, `connectionRequestTimeout(long)`, `receiveTimeout(Long)` | none — the single `timeout(Duration)` is a wall-clock deadline covering all of it |
 | `retriesForConnectionFailures(int)` | `retries(int, Duration)` — **opt-in**; see [behavioral differences](#behavioral-differences) |
@@ -135,8 +135,10 @@ the switch:
   mode and nothing to configure, and hosts that require encryption (`AllowUnencrypted=false`, the
   Windows default) work out of the box.
 * **No Basic authentication.** Basic sends credentials effectively in the clear and is disabled on
-  Windows by default; the client does not implement it. Use NTLM — every account that
-  authenticates with Basic also authenticates with NTLM, with no host-side change.
+  Windows by default; the client does not implement it. Authenticate with NTLM instead — and
+  check the host: `Negotiate` authentication must be enabled on the WinRM service (it is what
+  carries NTLM, and is `True` by default), and NTLM must not be disabled by security policy
+  ([Preparing the Windows Host](preparing-the-host.html)).
 * **Kerberos requires HTTPS.** winrm4j runs Kerberos over plain HTTP; this client refuses at
   `build()`, because it does not implement Kerberos message encryption — without TLS the payload
   would travel unprotected. Connect with `https()` and by the FQDN the KDC knows
