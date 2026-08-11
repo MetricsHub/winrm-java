@@ -27,7 +27,9 @@ import java.nio.charset.Charset;
 import java.security.Key;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Random;
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
@@ -358,13 +360,7 @@ public class CipherGen {
 	 */
 	private static byte[] lmHash(final char[] password) throws NtlmException {
 		try {
-			// Per-char uppercase (not String.toUpperCase) so no String copy of the password is ever
-			// created. The two can differ only on chars with one-to-many uppercase mappings (e.g. ß),
-			// which the legacy LM hash's OEM charset cannot represent anyway.
-			final char[] upper = new char[password.length];
-			for (int i = 0; i < password.length; i++) {
-				upper[i] = Character.toUpperCase(password[i]);
-			}
+			final char[] upper = upperCase(password);
 			final byte[] oemPassword = encode(upper, NTLMEngineUtils.DEFAULT_CHARSET);
 			Arrays.fill(upper, '\0');
 
@@ -552,7 +548,7 @@ public class CipherGen {
 	 * @param charset the target charset
 	 * @return the encoded bytes (caller wipes them after use)
 	 */
-	private static byte[] encode(final char[] chars, final Charset charset) {
+	static byte[] encode(final char[] chars, final Charset charset) {
 		final ByteBuffer buffer = charset.encode(CharBuffer.wrap(chars));
 		final byte[] bytes = new byte[buffer.remaining()];
 		buffer.get(bytes);
@@ -560,6 +556,69 @@ public class CipherGen {
 			Arrays.fill(buffer.array(), (byte) 0);
 		}
 		return bytes;
+	}
+
+	// Full Locale.ROOT uppercase mappings that Character.toUpperCase(int) cannot produce — the
+	// one-to-many expansions (ß -> SS, ligatures, Greek breathing marks) and the few simple
+	// divergences. Lazily built on the legacy LM-hash path only.
+	private static volatile Map<Integer, char[]> uppercaseExpansions;
+
+	/**
+	 * Uppercase a char[] with the exact semantics of {@code String.toUpperCase(Locale.ROOT)},
+	 * including one-to-many expansions, without ever creating a String of the input — an immutable
+	 * String copy of the password could never be wiped. Locale.ROOT uppercasing is context-free
+	 * (the conditional special casings are all lowercase- or locale-specific), so mapping each code
+	 * point independently reproduces the whole-string result.
+	 *
+	 * @param chars the characters to uppercase
+	 * @return the uppercased characters (caller wipes them after use)
+	 */
+	static char[] upperCase(final char[] chars) {
+		final Map<Integer, char[]> expansions = uppercaseExpansions();
+		// An uppercase full mapping is at most 3 chars (e.g. U+0390), so 3x cannot overflow.
+		final char[] scratch = new char[chars.length * 3];
+		int out = 0;
+		for (int i = 0; i < chars.length;) {
+			final int codePoint = Character.codePointAt(chars, i);
+			i += Character.charCount(codePoint);
+			final char[] full = expansions.get(codePoint);
+			if (full != null) {
+				System.arraycopy(full, 0, scratch, out, full.length);
+				out += full.length;
+			} else {
+				out += Character.toChars(Character.toUpperCase(codePoint), scratch, out);
+			}
+		}
+		final char[] upper = Arrays.copyOf(scratch, out);
+		Arrays.fill(scratch, '\0');
+		return upper;
+	}
+
+	/**
+	 * Build (once) the map of code points whose {@code String.toUpperCase(Locale.ROOT)} differs
+	 * from {@code Character.toUpperCase(int)}, by probing every code point through the JDK's own
+	 * casing data. The probing happens on public constants — never on a secret — so this stays
+	 * compatible with the char[]-based credentials contract, and it tracks the running JDK's
+	 * Unicode version by construction. A benign racy double-build yields identical maps.
+	 *
+	 * @return the expansion map
+	 */
+	private static Map<Integer, char[]> uppercaseExpansions() {
+		Map<Integer, char[]> map = uppercaseExpansions;
+		if (map == null) {
+			map = new HashMap<>();
+			for (int codePoint = Character.MIN_CODE_POINT; codePoint <= Character.MAX_CODE_POINT; codePoint++) {
+				if (codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE) {
+					continue;
+				}
+				final String full = new String(Character.toChars(codePoint)).toUpperCase(Locale.ROOT);
+				if (full.codePointCount(0, full.length()) != 1 || full.codePointAt(0) != Character.toUpperCase(codePoint)) {
+					map.put(codePoint, full.toCharArray());
+				}
+			}
+			uppercaseExpansions = map;
+		}
+		return map;
 	}
 
 	/**
