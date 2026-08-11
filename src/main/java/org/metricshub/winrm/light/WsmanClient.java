@@ -22,6 +22,7 @@ package org.metricshub.winrm.light;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -83,6 +84,13 @@ final class WsmanClient implements AutoCloseable {
 	private final String rawUsername;
 	private final AuthScheme auth;
 	private final HttpTransport transport;
+
+	// Opt-in retry policy for transient connection failures (issue #158): how many times one round
+	// trip may re-attempt to establish and authenticate the connection, and the pause before each
+	// attempt. Applies ONLY to failures where the round trip's request provably never reached the
+	// server (see send()); 0 retries — the default — keeps the historical fail-fast behavior.
+	private final int connectRetries;
+	private final long retryDelayMs;
 
 	private String pendingAuthorization;
 	private String shellId;
@@ -150,10 +158,14 @@ final class WsmanClient implements AutoCloseable {
 		final boolean verifyHostname,
 		final AuthScheme auth,
 		final String rawUsername,
-		final int consoleCodePage
+		final int consoleCodePage,
+		final int connectRetries,
+		final long retryDelayMs
 	) {
 		this.timeoutMs = timeoutMs;
 		this.consoleCodePage = consoleCodePage;
+		this.connectRetries = connectRetries;
+		this.retryDelayMs = retryDelayMs;
 		// A non-null socket factory selects HTTPS: TLS wraps the transport and the SOAP travels plaintext.
 		this.url = (sslSocketFactory != null ? "https" : "http") + "://" + host + ":" + port + "/wsman";
 		this.rawUsername = rawUsername;
@@ -1055,9 +1067,30 @@ final class WsmanClient implements AutoCloseable {
 		final byte[] body = soap.getBytes(StandardCharsets.UTF_8);
 		// Stays null while the loop retries the next authentication scheme on a fresh connection.
 		Decoded decoded = null;
+		int retriesLeft = connectRetries;
 		while (decoded == null) {
 			if (!auth.isAuthenticated()) {
-				pendingAuthorization = auth.authenticate(transport);
+				try {
+					// Connect explicitly (rather than letting post() do it lazily) so every failure to
+					// REACH the endpoint — TCP connect, DNS resolution, TLS handshake — surfaces here,
+					// alongside the authentication round trips: the one phase where this round trip's
+					// request provably never reached the server, which is the only situation where a
+					// retry cannot duplicate a side effect (issue #158).
+					transport.connect();
+					pendingAuthorization = auth.authenticate(transport);
+				} catch (final IOException e) {
+					// Transient connection failure: apply the opt-in retry policy — unless the client
+					// is closing (best-effort cleanup must not linger), the retries are exhausted, or
+					// a deadline-bounded poll cannot absorb the pause within its hard bound. A cancelled
+					// worker (its caller was already told the operation timed out) stops in the sleep.
+					if (closed || retriesLeft <= 0 || transport.remainingPollBudgetMillis() <= retryDelayMs) {
+						throw e;
+					}
+					retriesLeft--;
+					auth.reset();
+					Thread.sleep(retryDelayMs);
+					continue;
+				}
 			}
 			// The handshake's Authorization accompanies the first real request; later requests on the
 			// already-authenticated connection carry no Authorization header.

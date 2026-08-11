@@ -143,8 +143,63 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final boolean trustAllCertificates,
 		final int consoleCodePage
 	) throws WinRMException {
+		return createInstance(
+			winRMEndpoint,
+			timeout,
+			ticketCache,
+			authentications,
+			sslContext,
+			trustAllCertificates,
+			consoleCodePage,
+			0,
+			0L
+		);
+	}
+
+	/**
+	 * Create a light WinRM executor with an opt-in retry policy for transient connection failures.
+	 * A round trip is retried only when it failed to establish and authenticate the connection —
+	 * TCP connect, DNS resolution, TLS handshake, or a transport error during the authentication
+	 * handshake — i.e. when its request provably never reached the server; a request that may have
+	 * started executing is never retried, preserving at-most-once execution semantics.
+	 *
+	 * @param winRMEndpoint endpoint with credentials (mandatory)
+	 * @param timeout timeout in milliseconds (must be &gt; 0)
+	 * @param ticketCache Kerberos ticket cache path (used by the Kerberos scheme; {@code null} logs
+	 *        in with the password)
+	 * @param authentications requested authentication schemes, tried in order (NTLM and/or Kerberos);
+	 *        {@code null}/empty means NTLM only
+	 * @param sslContext the {@link SSLContext} providing the HTTPS socket factory (hostname
+	 *        verification stays on); {@code null} uses the default configuration
+	 * @param trustAllCertificates when {@code true} (and no {@code sslContext} is given), trust every
+	 *        server certificate and skip hostname verification — insecure, testing only
+	 * @param consoleCodePage the console code page of the command shell; 0 keeps the default 65001,
+	 *        which makes command output UTF-8 whatever the remote locale
+	 * @param connectRetries how many times one round trip may re-attempt to connect and authenticate
+	 *        (must be &gt;= 0); 0 keeps the historical fail-fast behavior
+	 * @param retryDelay the pause in milliseconds before each retry (must be &gt;= 0)
+	 * @return a new {@code LightWinRMService}
+	 * @throws WinRMException on invalid arguments or an unsupported authentication request
+	 */
+	public static LightWinRMService createInstance(
+		final WinRMEndpoint winRMEndpoint,
+		final long timeout,
+		final java.nio.file.Path ticketCache,
+		final List<AuthenticationEnum> authentications,
+		final SSLContext sslContext,
+		final boolean trustAllCertificates,
+		final int consoleCodePage,
+		final int connectRetries,
+		final long retryDelay
+	) throws WinRMException {
 		Utils.checkNonNull(winRMEndpoint, "winRMEndpoint");
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
+		if (connectRetries < 0) {
+			throw new IllegalArgumentException("connectRetries must not be negative.");
+		}
+		if (retryDelay < 0) {
+			throw new IllegalArgumentException("retryDelay must not be negative.");
+		}
 
 		// HTTPS wraps the transport in TLS and exchanges plaintext SOAP; HTTP uses NTLM message sealing.
 		// TLS validates by default (platform trust store + hostname verification); see LightTls. A
@@ -179,7 +234,9 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			verifyHostname,
 			authScheme,
 			winRMEndpoint.getRawUsername(),
-			consoleCodePage
+			consoleCodePage,
+			connectRetries,
+			retryDelay
 		);
 		return new LightWinRMService(winRMEndpoint, client);
 	}

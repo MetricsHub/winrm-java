@@ -45,6 +45,48 @@ long — but as soon as the server stays silent for a whole timeout, the operati
 For commands, `RemoteProcess.waitFor(Duration)` provides an overall deadline on top when one is
 needed.
 
+## Retrying transient connection failures
+
+By default there is **no retry**: a transient network failure — a dropped connection, a DNS
+hiccup, a momentarily unreachable host — fails the operation immediately. The opt-in
+`retries(...)` builder setting rides out such failures, which long-running monitoring and
+automation workloads usually want:
+
+```java
+WinRMClient client = WinRMClient.builder("server.example.com")
+    .credentials("DOMAIN\\Administrator", password)
+    .retries(2, Duration.ofSeconds(5))   // up to 2 retries, pausing 5 s before each
+    .build();
+```
+
+The policy is deliberately narrow, to preserve **at-most-once execution** for non-idempotent
+commands: a WSMan round trip is retried only when it failed to **establish and authenticate the
+connection** — TCP connect, DNS resolution, the TLS handshake, or a transport error during the
+authentication handshake — because there the request provably never reached the server. WQL
+queries get no broader surface even though they are idempotent: re-issuing a WS-Enumeration
+`Pull` whose response was lost could skip or duplicate rows.
+
+The policy is connection-scoped: it applies to every round trip of every operation on the
+client, including reconnections in the middle of one (WinRM connections are re-established
+transparently when the server drops an idle one). What is **never** retried:
+
+* a request that reached the wire — a command that may have started, a query that may be
+  executing;
+* credential rejections
+  ([`WinRMAuthenticationException`](apidocs/org/metricshub/winrm/exceptions/WinRMAuthenticationException.html));
+* WSMan faults
+  ([`WinRMFaultException`](apidocs/org/metricshub/winrm/exceptions/WinRMFaultException.html)).
+
+Retries stay inside each operation's **wall-clock deadline**: when the timeout elapses mid-pause,
+the operation fails with
+[`WinRMTimeoutException`](apidocs/org/metricshub/winrm/exceptions/WinRMTimeoutException.html)
+exactly as it would without a retry policy. For the streaming terminals (whose timeout is an
+inactivity timeout with no overall deadline), each connection attempt is bounded by that timeout,
+so a retried reconnection can extend the tolerated silence accordingly.
+
+Users migrating from winrm4j: `retries(1, Duration.ofSeconds(5))` is the closest equivalent of
+its default `failureRetryPolicy` (one retry, 5-second pause).
+
 ## The exception surface
 
 The fluent API is **unchecked**: every failure is a
