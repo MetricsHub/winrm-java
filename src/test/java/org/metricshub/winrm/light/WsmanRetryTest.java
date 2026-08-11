@@ -69,6 +69,15 @@ class WsmanRetryTest {
 
 	private LightWinRMService service(final int port, final int retries, final long retryDelayMillis)
 		throws Exception {
+		return service(port, retries, retryDelayMillis, List.of(AuthenticationEnum.NTLM));
+	}
+
+	private LightWinRMService service(
+		final int port,
+		final int retries,
+		final long retryDelayMillis,
+		final List<AuthenticationEnum> authentications
+	) throws Exception {
 		final WinRMEndpoint endpoint = new WinRMEndpoint(
 			WinRMHttpProtocolEnum.HTTP,
 			"127.0.0.1",
@@ -81,7 +90,7 @@ class WsmanRetryTest {
 			endpoint,
 			TIMEOUT,
 			null,
-			List.of(AuthenticationEnum.NTLM),
+			authentications,
 			null,
 			false,
 			0,
@@ -152,6 +161,27 @@ class WsmanRetryTest {
 		}
 	}
 
+	@Test
+	void retriesATransportFailureWrappedByAnOrderedAuthenticationFallback() throws Exception {
+		// With an ordered fallback list the handshake failure reaches the retry policy wrapped in
+		// the fallback's "all requested authentication schemes failed": its transport cause must
+		// still be recognized as a retryable connection failure.
+		server.dropNextConnections(2);
+		enqueueEnumeration(server, instance("Win32_Service", "Name", "Spooler"));
+
+		try (
+			LightWinRMService service = service(
+				server.port(),
+				1,
+				50L,
+				List.of(AuthenticationEnum.NTLM, AuthenticationEnum.NTLM)
+			)) {
+			final List<Map<String, Object>> rows = service.executeWql("SELECT Name FROM Win32_Service", TIMEOUT);
+			assertEquals(1, rows.size());
+			assertEquals(1, server.decryptedRequests().size());
+		}
+	}
+
 	// --- never retried: the request may have executed --------------------------
 
 	@Test
@@ -206,6 +236,31 @@ class WsmanRetryTest {
 		}
 		// With a 60 s pause configured, a fast failure proves the rejection was not retried.
 		assertTrue(System.currentTimeMillis() - start < 30_000L, "a credential rejection must not be retried");
+	}
+
+	@Test
+	void closeDuringARetryPauseAbortsInsteadOfRevivingTheConnection() throws Exception {
+		// close() cannot interrupt a worker sleeping between retries: the pause must recheck the
+		// closed flag afterward, or the retry would reconnect the hard-closed transport and send
+		// the (possibly non-idempotent) operation after the client was closed.
+		server.dropNextConnections(1);
+		enqueueEnumeration(server, instance("Win32_Service", "Name", "Spooler"));
+
+		try (LightWinRMService service = service(server.port(), 3, 800L)) {
+			final Thread closer = new Thread(() -> {
+				try {
+					Thread.sleep(300L);
+				} catch (final InterruptedException e) {
+					Thread.currentThread().interrupt();
+					return;
+				}
+				service.close();
+			});
+			closer.start();
+			assertThrows(WinRMException.class, () -> service.executeWql("SELECT Name FROM Win32_Service", TIMEOUT));
+			closer.join();
+			assertEquals(0, server.decryptedRequests().size(), "no request may be sent after close()");
+		}
 	}
 
 	// --- the wall-clock deadline still governs ---------------------------------

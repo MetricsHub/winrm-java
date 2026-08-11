@@ -1078,17 +1078,31 @@ final class WsmanClient implements AutoCloseable {
 					// retry cannot duplicate a side effect (issue #158).
 					transport.connect();
 					pendingAuthorization = auth.authenticate(transport);
-				} catch (final IOException e) {
-					// Transient connection failure: apply the opt-in retry policy — unless the client
-					// is closing (best-effort cleanup must not linger), the retries are exhausted, or
-					// a deadline-bounded poll cannot absorb the pause within its hard bound. A cancelled
-					// worker (its caller was already told the operation timed out) stops in the sleep.
-					if (closed || retriesLeft <= 0 || transport.remainingPollBudgetMillis() <= retryDelayMs) {
+				} catch (final Exception e) {
+					// Transient connection failure: apply the opt-in retry policy — but only to a
+					// transport I/O failure (possibly wrapped, e.g. by an ordered authentication
+					// fallback), and unless the client is closing (best-effort cleanup must not
+					// linger), the retries are exhausted, or a deadline-bounded poll cannot absorb
+					// the pause within its hard bound. A cancelled worker (its caller was already
+					// told the operation timed out) stops in the sleep.
+					if (closed
+						||
+						retriesLeft <= 0
+						||
+						!isConnectionFailure(e)
+						||
+						transport.remainingPollBudgetMillis() <= retryDelayMs) {
 						throw e;
 					}
 					retriesLeft--;
 					auth.reset();
 					Thread.sleep(retryDelayMs);
+					// close() cannot interrupt a worker sleeping here: recheck after the pause, or
+					// the retry would revive the hard-closed transport and send the (possibly
+					// non-idempotent) operation after the client was closed.
+					if (closed) {
+						throw e;
+					}
 					continue;
 				}
 			}
@@ -1131,6 +1145,22 @@ final class WsmanClient implements AutoCloseable {
 			decoded = new Decoded(resp.status, parse(auth.unwrap(resp)));
 		}
 		return decoded;
+	}
+
+	/**
+	 * Whether the failure is a transport I/O failure — directly, or through its cause chain: an
+	 * ordered authentication fallback reports "all schemes failed" with the last scheme's failure
+	 * as the cause, which must still be recognized when that failure was a transient transport
+	 * error. Anything without an {@link IOException} in the chain (a protocol violation, a
+	 * rejected credential, an interrupt) is not a connection failure and must not be retried.
+	 */
+	private static boolean isConnectionFailure(final Exception exception) {
+		for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+			if (cause instanceof IOException) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	// --- XML helpers --------------------------------------------------------
