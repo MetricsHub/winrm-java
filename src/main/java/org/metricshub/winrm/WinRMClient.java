@@ -147,14 +147,17 @@ public final class WinRMClient implements AutoCloseable {
 	 * and 1 when the script ends with a terminating error; call {@code exit <n>} in the script for
 	 * a specific exit code.
 	 * <p>
-	 * The encoded invocation must fit in the remote shell's 8191-character command line, which
-	 * caps the script at roughly 3000 characters. Run a longer script from a file instead:
-	 * {@code command("powershell.exe -NoProfile -File c:\\scripts\\collect.ps1")
-	 * .upload(Path.of("c:\\scripts\\collect.ps1"))}.
+	 * There is no practical script size limit. A script whose encoded invocation would not fit
+	 * the remote shell's command line (roughly 3000 characters of script) is automatically
+	 * transferred as a temporary {@code .ps1} file — through the WinRM connection itself, exactly
+	 * like {@link CommandRequest#upload(Path...)} — and run with {@code powershell.exe -File}.
+	 * The remote copy is content-addressed, so re-running an identical script skips the transfer.
+	 * Like any request with uploads, the transfer commands are then what creates the remote
+	 * shell, so the shell-scoped {@link CommandRequest#workingDirectory(String)} does not apply.
 	 *
 	 * @param script the PowerShell script to execute, verbatim
 	 * @return the request, to configure and execute
-	 * @throws IllegalArgumentException when the script is blank or too long once encoded
+	 * @throws IllegalArgumentException when the script is blank
 	 */
 	public CommandRequest powerShell(final String script) {
 		Utils.checkNonBlank(script, "script");

@@ -390,27 +390,107 @@ class WinRMClientTest {
 	}
 
 	@Test
-	void powerShellLengthCheckReservesRoomForTheUploadWrapper() throws Exception {
-		// 3046 characters encode to an 8182-character invocation: below cmd.exe's 8191 limit on
-		// its own, but over it once an uploaded request adds the 13-character CMD.EXE /C ( )
-		// wrapper — the check reserves that room, so upload() can never push a request over.
+	void powerShellKeepsAScriptJustUnderTheLimitEncoded() throws Exception {
+		// 3040 characters encode to an 8166-character invocation, which still fits the remote
+		// shell's 8191-character command line WITH room for the CMD.EXE /C ( ) wrapper an uploaded
+		// request would add — so it rides the command line, no file transfer involved.
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueue(
+				200,
+				envelope(receiveResponse(stream("stdout", "CMD-1", "ok".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
+			)
+			.enqueue(200, envelope(signalResponse()));
+
 		try (WinRMClient client = builder(PASSWORD).build()) {
-			assertNotNull(client.powerShell("x".repeat(3040)));
-			assertThrows(IllegalArgumentException.class, () -> client.powerShell("x".repeat(3046)));
+			assertEquals("ok", client.powerShell("x".repeat(3040)).execute().stdout());
 		}
+
+		final String command = server.decryptedRequests().get(1);
+		assertTrue(command.contains("-EncodedCommand"), command);
 	}
 
 	@Test
-	void powerShellRejectsAScriptTooLongOnceEncoded() throws Exception {
-		// 4000 characters encode to ~10667 base64 characters, above cmd.exe's 8191 limit.
+	void powerShellRunsALongScriptFromATransferredFile() throws Exception {
+		// 4000 characters encode to a ~10700-character invocation, beyond cmd.exe's 8191 limit:
+		// the script must travel as a temporary .ps1 file — transferred through the WinRM channel
+		// like an upload — and run with -File. The caller never sees any of this.
 		final String script = "Write-Output '" + "x".repeat(4000) + "'";
-		try (WinRMClient client = builder(PASSWORD).build()) {
-			final IllegalArgumentException e = assertThrows(
-				IllegalArgumentException.class,
-				() -> client.powerShell(script)
-			);
-			assertTrue(e.getMessage().contains("-File"), e.getMessage());
+
+		// The transferred file is the script encoded as UTF-8 with a BOM (powershell.exe -File
+		// would decode a BOM-less file with the ANSI code page).
+		final byte[] body = script.getBytes(StandardCharsets.UTF_8);
+		final byte[] content = new byte[3 + body.length];
+		content[0] = (byte) 0xEF;
+		content[1] = (byte) 0xBB;
+		content[2] = (byte) 0xBF;
+		System.arraycopy(body, 0, content, 3, body.length);
+		final StringBuilder digest = new StringBuilder();
+		for (final byte b : java.security.MessageDigest.getInstance("SHA-256").digest(content)) {
+			digest.append(String.format("%02x", b));
 		}
+		final String certutil = "SHA256 hash of file x:\r\n" +
+			digest +
+			"\r\nCertUtil: -hashfile command completed successfully.\r\n";
+
+		server
+			// ShellFileCopy locates the Windows directory with a WQL query (no shell involved)...
+			.enqueue(200, envelope(enumerationDone(instance("Win32_OperatingSystem", "WindowsDirectory", "C:\\Windows"))))
+			// ...then its first command leg (cleanup + MKDIR) creates the shell...
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueue(200, envelope(receiveResponse("", done("CMD-1", 0))))
+			.enqueue(200, envelope(signalResponse()))
+			// ...the digest probe reports an identical remote copy (transfer skipped)...
+			.enqueue(200, envelope(commandResponse("CMD-2")))
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(stream("stdout", "CMD-2", certutil.getBytes(StandardCharsets.UTF_8)), done("CMD-2", 0))
+				)
+			)
+			.enqueue(200, envelope(signalResponse()))
+			// ...and the -File invocation runs in the SAME shell.
+			.enqueue(200, envelope(commandResponse("CMD-3")))
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(
+						stream("stdout", "CMD-3", "x".repeat(4000).getBytes(StandardCharsets.UTF_8)),
+						done("CMD-3", 0)
+					)
+				)
+			)
+			.enqueue(200, envelope(signalResponse()));
+
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			final CommandResult result = client.powerShell(script).execute();
+			assertEquals("x".repeat(4000), result.stdout());
+			assertEquals(0, result.exitCode());
+		}
+
+		final String command = server
+			.decryptedRequests()
+			.stream()
+			.filter(r -> r.contains("-File"))
+			.findFirst()
+			.orElseThrow(() -> new AssertionError(String.join("\n---\n", server.decryptedRequests())));
+		// The invocation runs the content-addressed remote copy of the temporary script file.
+		assertTrue(
+			command.contains(
+				"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File " +
+					"&quot;C:\\Windows\\Temp\\winrm-upload-"
+			)
+				||
+				command.contains(
+					"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File " +
+						"\"C:\\Windows\\Temp\\winrm-upload-"
+				),
+			command
+		);
+		assertTrue(command.contains("winrm-powershell." + digest.substring(0, 12) + ".ps1"), command);
+		assertFalse(command.contains("-EncodedCommand"), command);
 	}
 
 	@Test

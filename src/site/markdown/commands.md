@@ -76,16 +76,14 @@ Points to know:
   terminating error; call `exit <n>` in the script for a specific code.
 * **Uploads** — `upload(...)` works as with any command: references to the uploaded files in the
   script are rewritten to the remote copies *before* the script is encoded.
-* **Script size** — the encoded invocation must fit in the remote shell's 8191-character command
-  line, which caps the script at roughly 3000 characters. Beyond that, `powerShell(...)` throws an
-  `IllegalArgumentException` and the script should travel as a file instead:
-
-  ```java
-  client.command("powershell.exe -NoProfile -ExecutionPolicy Bypass -File c:\\scripts\\collect.ps1")
-      .upload(Path.of("c:\\scripts\\collect.ps1"))
-      .execute();
-  ```
-
+* **Script size** — there is none to worry about. A script short enough rides the command line
+  encoded; a longer one (roughly 3000 characters and up, where the encoded invocation would no
+  longer fit the remote shell's 8191-character command line) is automatically transferred as a
+  temporary `.ps1` file — through the WinRM connection itself, exactly like `upload(...)` — and
+  run with `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File`. The remote
+  copy is [content-addressed](file-transfers.html), so re-running an identical script skips the
+  transfer; and like any request with uploads, the transfer commands are then what creates the
+  remote shell, so the shell-scoped `workingDirectory(...)` does not apply.
 * **Windows PowerShell** — the script runs in `powershell.exe` (Windows PowerShell 5.x, present on
   every supported Windows). To target PowerShell 7+, invoke `pwsh` yourself with `command(...)`.
 

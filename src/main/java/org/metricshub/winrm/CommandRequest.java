@@ -55,14 +55,36 @@ public final class CommandRequest {
 	/** The invocation an encoded PowerShell script is appended to. */
 	private static final String POWERSHELL_PREFIX = "powershell.exe -NoProfile -NonInteractive -EncodedCommand ";
 
+	/**
+	 * The invocation running a PowerShell script transferred as a file — the automatic fallback
+	 * for scripts too long to ride the command line encoded. {@code -ExecutionPolicy Bypass} is
+	 * needed here and not on the encoded form: the execution policy governs script <i>files</i>
+	 * only.
+	 */
+	private static final String POWERSHELL_FILE_PREFIX = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ";
+
+	/**
+	 * Local name of the fallback script file. The name is constant: the file is created in a
+	 * fresh temporary directory (no collisions), and the transfer content-addresses the remote
+	 * copy ({@code winrm-powershell.<digest>.ps1}) — so re-running an identical script finds the
+	 * remote copy already present and skips the transfer.
+	 */
+	private static final String POWERSHELL_FILE_NAME = "winrm-powershell.ps1";
+
+	/**
+	 * The UTF-8 byte order mark, prepended to the fallback script file: without it,
+	 * {@code powershell.exe -File} decodes the file with the ANSI code page and mangles every
+	 * non-ASCII character.
+	 */
+	private static final byte[] UTF8_BOM = { (byte) 0xEF, (byte) 0xBB, (byte) 0xBF };
+
 	/** cmd.exe rejects command lines longer than 8191 characters. */
 	private static final int MAX_COMMAND_LINE_LENGTH = 8191;
 
 	/**
 	 * The {@code CMD.EXE /C (...)} wrapper an uploaded request adds around the invocation. The
-	 * length check always reserves room for it, so a script accepted by
-	 * {@link WinRMClient#powerShell(String)} stays valid whether or not {@link #upload(Path...)}
-	 * is called afterward.
+	 * encoded-form length check always reserves room for it, so the encode-or-file decision does
+	 * not depend on whether {@link #upload(Path...)} is called.
 	 */
 	private static final int CMD_WRAPPER_LENGTH = "CMD.EXE /C ()".length();
 
@@ -102,8 +124,8 @@ public final class CommandRequest {
 	 *
 	 * @param client the client the command runs on
 	 * @param commandLine the command line to execute — or, when {@code powerShell} is set, the raw
-	 *        script text, encoded as {@code -EncodedCommand} when the command starts (after any
-	 *        {@link #upload(Path...)} path rewriting)
+	 *        script text, turned into a {@code powershell.exe} invocation when the command starts
+	 *        (after any {@link #upload(Path...)} path rewriting)
 	 * @param powerShell whether the text is a PowerShell script
 	 */
 	CommandRequest(final WinRMClient client, final String commandLine, final boolean powerShell) {
@@ -112,35 +134,52 @@ public final class CommandRequest {
 		this.commandLine = commandLine;
 		this.powerShell = powerShell;
 		this.timeout = client.defaultTimeout();
-		if (powerShell) {
-			// Fail on an over-long script now, at the call site — not when the command starts.
-			encodePowerShell(commandLine);
-		}
 	}
 
 	/**
 	 * Build the {@code powershell.exe -EncodedCommand} invocation delivering the given script
-	 * verbatim (base64 of its UTF-16LE bytes, the encoding {@code -EncodedCommand} expects).
+	 * verbatim (base64 of its UTF-16LE bytes, the encoding {@code -EncodedCommand} expects) — or
+	 * report that the script is too long to ride the command line and must travel as a file.
 	 *
 	 * @param script the PowerShell script
-	 * @return the invocation command line
-	 * @throws IllegalArgumentException when the invocation exceeds the remote shell's command-line limit
+	 * @return the invocation command line, or {@code null} when it would exceed the remote
+	 *         shell's command-line limit (room for the {@code CMD.EXE /C} wrapper included, so
+	 *         the decision does not depend on {@link #upload(Path...)})
 	 */
 	private static String encodePowerShell(final String script) {
 		final String encoded = POWERSHELL_PREFIX
 			+ Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
-		if (encoded.length() > MAX_COMMAND_LINE_LENGTH - CMD_WRAPPER_LENGTH) {
-			throw new IllegalArgumentException(
-				String.format(
-					"The encoded PowerShell invocation (%d characters, plus the CMD.EXE /C wrapper of an uploaded " +
-						"request) exceeds the remote shell's %d-character command-line limit: run the script from a " +
-						"file instead — command(\"powershell.exe -NoProfile -File <remote path>\").upload(<local path>).",
-					encoded.length(),
-					MAX_COMMAND_LINE_LENGTH
-				)
+		return encoded.length() > MAX_COMMAND_LINE_LENGTH - CMD_WRAPPER_LENGTH ? null : encoded;
+	}
+
+	/**
+	 * Run the fallback path for a script too long to ride the command line: write it (UTF-8 with
+	 * a BOM) to a local temporary file, transfer that file to the remote host exactly like an
+	 * {@link #upload(Path...)}, and return the {@code powershell.exe -File} invocation of the
+	 * remote copy. The local file is deleted before returning; the remote copy is
+	 * content-addressed, so re-running an identical script skips the transfer.
+	 */
+	private String powerShellFromFile(final String script, final long timeoutMillis, final long start)
+		throws IOException, TimeoutException, WindowsRemoteException {
+		final Path directory = Files.createTempDirectory("winrm-ps");
+		final Path file = directory.resolve(POWERSHELL_FILE_NAME);
+		try {
+			final byte[] body = script.getBytes(StandardCharsets.UTF_8);
+			final byte[] content = new byte[UTF8_BOM.length + body.length];
+			System.arraycopy(UTF8_BOM, 0, content, 0, UTF8_BOM.length);
+			System.arraycopy(body, 0, content, UTF8_BOM.length, body.length);
+			Files.write(file, content);
+			return ShellFileCopy.copyLocalFilesToRemote(
+				client.executor(),
+				POWERSHELL_FILE_PREFIX + "\"" + file + "\"",
+				List.of(file.toString()),
+				environment,
+				TimeoutHelper.getRemainingTime(timeoutMillis, start, "No time left to transfer the PowerShell script")
 			);
+		} finally {
+			Files.deleteIfExists(file);
+			Files.deleteIfExists(directory);
 		}
-		return encoded;
 	}
 
 	/**
@@ -558,29 +597,44 @@ public final class CommandRequest {
 		String actualCommand = commandLine;
 		String actualWorkingDirectory = workingDirectory;
 		Map<String, String> actualEnvironment = environment;
+		boolean transfersCreatedTheShell = false;
 
 		if (!uploads.isEmpty()) {
 			// Copy the files through the command shell and rewrite the command to reference the
 			// remote copies. The transfer commands are what actually creates the shell, so the
 			// shell-scoped environment must ride them — the real command then inherits it. The
 			// working directory is not carried over: with uploads it has never applied, and the
-			// transfer commands were built for the default directory.
+			// transfer commands were built for the default directory. A PowerShell script is
+			// rewritten here as plain text, BEFORE it is encoded below.
 			final List<String> localFiles = uploads.stream().map(Path::toString).collect(Collectors.toList());
-			final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
+			actualCommand = ShellFileCopy.copyLocalFilesToRemote(
 				client.executor(),
 				commandLine,
 				localFiles,
 				environment,
 				TimeoutHelper.getRemainingTime(timeoutMillis, start, "No time left to copy the local files")
 			);
-			// A PowerShell script is encoded only now, AFTER the rewriting: the local paths it
-			// references must be replaced while they are still plain text.
-			actualCommand = String.format("CMD.EXE /C (%s)", powerShell ? encodePowerShell(updatedCommand) : updatedCommand);
+			transfersCreatedTheShell = true;
+		}
+
+		if (powerShell) {
+			// actualCommand holds the (possibly rewritten) script text. A script short enough
+			// rides the command line encoded; a longer one travels as a temporary file and runs
+			// with -File — transparently, the caller never sees the command-line length limit.
+			final String encoded = encodePowerShell(actualCommand);
+			if (encoded != null) {
+				actualCommand = encoded;
+			} else {
+				actualCommand = powerShellFromFile(actualCommand, timeoutMillis, start);
+				transfersCreatedTheShell = true;
+			}
+		}
+
+		if (transfersCreatedTheShell) {
+			actualCommand = String.format("CMD.EXE /C (%s)", actualCommand);
 			actualWorkingDirectory = null;
 			// Already applied when the transfer commands created the shell.
 			actualEnvironment = null;
-		} else if (powerShell) {
-			actualCommand = encodePowerShell(commandLine);
 		}
 
 		final Charset actualCharset = charset != null ? charset : WindowsRemoteExecutor.SHELL_OUTPUT_CHARSET;
