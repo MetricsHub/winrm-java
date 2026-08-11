@@ -49,7 +49,9 @@ Since 2.0.0 the client has **zero runtime dependencies**. There is no longer an 
 JAX-WS / JAXB stack, no BouncyCastle, and no SMB stack (`smbj`) on the classpath — the client speaks
 WS-Management over the JDK's own HTTP and XML APIs, and copies files through the WinRM channel
 itself. If you upgraded from 1.x, see [Migrating from 1.x](migrating-from-1x.html) for the details
-and the behavior changes this implies.
+and the behavior changes this implies. Coming from [winrm4j](https://github.com/cloudsoft/winrm4j)?
+[Migrating from winrm4j](migrating-from-winrm4j.html) maps its API to this client one option at a
+time.
 
 ## Standalone command-line jar
 

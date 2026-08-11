@@ -65,6 +65,7 @@
 
 		<menu name="Reference">
 			<item name="Migrating from 1.x" href="migrating-from-1x.html" />
+			<item name="Migrating from winrm4j" href="migrating-from-winrm4j.html" />
 			<item name="Legacy API" href="legacy.html" />
 			<item name="Javadoc (API)" href="apidocs/index.html" />
 		</menu>
