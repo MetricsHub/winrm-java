@@ -65,10 +65,12 @@ public final class CommandRequest {
 	 * in the session scope exactly like {@code -EncodedCommand} does, and the execution policy —
 	 * which only governs script files — never applies. The one remaining observable difference is
 	 * {@code $MyInvocation}'s own metadata ({@code InvocationName}, {@code Line}), which reflects
-	 * this wrapper invocation for a transferred script.
+	 * this wrapper invocation for a transferred script. The file is read with a BOM-aware .NET
+	 * method rather than {@code Get-Content -Raw}, which PowerShell 2.0 (Windows Server 2008 R2)
+	 * does not have.
 	 */
 	private static final String POWERSHELL_FILE_INVOCATION = "powershell.exe -NoProfile -NonInteractive -Command " +
-		"\". ([ScriptBlock]::Create((Get-Content -Raw -LiteralPath '%s')))\"";
+		"\". ([ScriptBlock]::Create([System.IO.File]::ReadAllText('%s')))\"";
 
 	/**
 	 * Local name of the fallback script file. The name is constant: the file is created in a

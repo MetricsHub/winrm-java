@@ -481,7 +481,9 @@ class WinRMClientTest {
 		// block — not -File, so the script stays pathless exactly like the encoded form
 		// ($PSScriptRoot and $MyInvocation.MyCommand.Path are empty either way).
 		assertTrue(command.contains("powershell.exe -NoProfile -NonInteractive -Command"), command);
-		assertTrue(command.contains("Get-Content -Raw -LiteralPath 'C:\\Windows\\Temp\\winrm-upload-"), command);
+		// The file is read with a BOM-aware .NET method: Get-Content -Raw does not exist on
+		// PowerShell 2.0 hosts (Windows Server 2008 R2).
+		assertTrue(command.contains("[System.IO.File]::ReadAllText('C:\\Windows\\Temp\\winrm-upload-"), command);
 		assertTrue(command.contains("winrm-powershell." + digest.substring(0, 12) + ".ps1'"), command);
 		assertFalse(command.contains("-EncodedCommand"), command);
 		assertFalse(command.contains("-File "), command);
