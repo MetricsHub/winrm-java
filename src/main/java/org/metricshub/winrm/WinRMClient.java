@@ -287,6 +287,8 @@ public final class WinRMClient implements AutoCloseable {
 		private int consoleCodePage;
 		private SSLContext sslContext;
 		private Duration timeout = DEFAULT_TIMEOUT;
+		private int retries;
+		private Duration retryDelay = Duration.ZERO;
 
 		private Builder(final String hostname) {
 			Utils.checkNonBlank(hostname, "hostname");
@@ -442,6 +444,54 @@ public final class WinRMClient implements AutoCloseable {
 		}
 
 		/**
+		 * Retry transient connection failures. Default: no retry — any failure is reported
+		 * immediately.
+		 * <p>
+		 * The policy is deliberately narrow, to preserve <b>at-most-once execution</b> for
+		 * non-idempotent commands: a WSMan round trip is retried only when it failed to establish
+		 * and authenticate the connection — TCP connect, DNS resolution, the TLS handshake, or a
+		 * transport error during the authentication handshake — because there the request provably
+		 * never reached the server. A request that was actually sent (a command that may have
+		 * started, a query that may be executing) is never retried; neither are credential
+		 * rejections ({@link org.metricshub.winrm.exceptions.WinRMAuthenticationException}) or
+		 * WSMan faults ({@link org.metricshub.winrm.exceptions.WinRMFaultException}).
+		 * <p>
+		 * The policy is connection-scoped: it applies to every operation on the client, including
+		 * reconnections in the middle of one (WinRM connections are re-established transparently
+		 * when the server drops an idle one). Retries stay inside each operation's wall-clock
+		 * deadline — when the timeout elapses mid-pause, the operation fails with
+		 * {@link org.metricshub.winrm.exceptions.WinRMTimeoutException} exactly as it would without
+		 * a retry policy. For the streaming terminals (whose timeout is an inactivity timeout with
+		 * no overall deadline), each connection attempt is bounded by that timeout, so a retried
+		 * reconnection can extend the tolerated silence accordingly.
+		 *
+		 * <pre>{@code
+		 * WinRMClient client = WinRMClient.builder("server01")
+		 * 	.credentials("ACME\\admin", password)
+		 * 	.retries(2, Duration.ofSeconds(5)) // up to 2 retries, pausing 5 s before each
+		 * 	.build();
+		 * }</pre>
+		 *
+		 * @param retries how many times a failed connection attempt is retried (0 disables retrying)
+		 * @param delay the pause before each retry ({@link Duration#ZERO} retries immediately)
+		 * @return this builder
+		 * @throws IllegalArgumentException when {@code retries} is negative, or {@code delay} is
+		 *         null or negative
+		 */
+		public Builder retries(final int retries, final Duration delay) {
+			if (retries < 0) {
+				throw new IllegalArgumentException("retries must not be negative.");
+			}
+			Utils.checkNonNull(delay, "delay");
+			if (delay.isNegative()) {
+				throw new IllegalArgumentException("delay must not be negative.");
+			}
+			this.retries = retries;
+			this.retryDelay = delay;
+			return this;
+		}
+
+		/**
 		 * Set the console code page of the remote command shell. Default: 65001 (UTF-8), which makes
 		 * command output UTF-8 whatever the remote locale — the right choice for reading output and
 		 * for piping data to a program.
@@ -499,7 +549,9 @@ public final class WinRMClient implements AutoCloseable {
 					authentications,
 					sslContext,
 					trustAllCertificates,
-					consoleCodePage
+					consoleCodePage,
+					retries,
+					toMillis(retryDelay)
 				);
 				return new WinRMClient(executor, endpoint.getHostname(), endpoint.getNamespace(), timeout);
 			} catch (final WinRMException e) {

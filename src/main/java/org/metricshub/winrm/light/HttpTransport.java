@@ -277,6 +277,29 @@ final class HttpTransport implements AutoCloseable {
 		}
 	}
 
+	/**
+	 * Establish (or validate) the connection now instead of lazily on the next {@link #post}. Lets
+	 * the caller separate "could not reach the endpoint" — where nothing has been sent and a retry
+	 * is provably safe — from a failure of a request that may already be executing.
+	 *
+	 * @throws IOException when the connection cannot be established
+	 */
+	void connect() throws IOException {
+		ensureConnected();
+	}
+
+	/**
+	 * How many milliseconds remain of the active deadline-bounded poll ({@link #pollTimeout(int)}),
+	 * or {@link Long#MAX_VALUE} when no poll deadline is active. Lets a caller decide whether a
+	 * retry pause still fits inside the poll's hard bound.
+	 */
+	long remainingPollBudgetMillis() {
+		if (deadlineEpochMillis == 0 || deadlinePerLeg) {
+			return Long.MAX_VALUE;
+		}
+		return deadlineEpochMillis - Utils.getCurrentTimeMillis();
+	}
+
 	private void ensureConnected() throws IOException {
 		if (isConnected()) {
 			return;

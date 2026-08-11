@@ -116,4 +116,49 @@ public final class WinRMExecutorFactory {
 			consoleCodePage
 		);
 	}
+
+	/**
+	 * Create a {@link WindowsRemoteExecutor} with an opt-in retry policy for transient connection
+	 * failures. A round trip is retried only when it failed to establish and authenticate the
+	 * connection — i.e. when its request provably never reached the server — so at-most-once
+	 * execution semantics are preserved.
+	 *
+	 * @param winRMEndpoint endpoint with credentials (mandatory)
+	 * @param timeout timeout in milliseconds (must be &gt; 0)
+	 * @param ticketCache Kerberos ticket cache path (may be {@code null})
+	 * @param authentications requested authentication schemes (may be {@code null})
+	 * @param sslContext the {@link SSLContext} providing the HTTPS socket factory (hostname
+	 *        verification stays on); {@code null} uses the default configuration
+	 * @param trustAllCertificates when {@code true} (and no {@code sslContext} is given), trust every
+	 *        server certificate and skip hostname verification — insecure, testing only
+	 * @param consoleCodePage the console code page of the command shell; 0 keeps the default 65001
+	 * @param connectRetries how many times one round trip may re-attempt to connect and authenticate
+	 *        (must be &gt;= 0); 0 keeps the historical fail-fast behavior
+	 * @param retryDelay the pause in milliseconds before each retry (must be &gt;= 0)
+	 * @return an executor backed by {@link LightWinRMService}
+	 * @throws WinRMException for any problem creating the executor
+	 */
+	public static WindowsRemoteExecutor createInstance(
+		final WinRMEndpoint winRMEndpoint,
+		final long timeout,
+		final Path ticketCache,
+		final List<AuthenticationEnum> authentications,
+		final SSLContext sslContext,
+		final boolean trustAllCertificates,
+		final int consoleCodePage,
+		final int connectRetries,
+		final long retryDelay
+	) throws WinRMException {
+		return LightWinRMService.createInstance(
+			winRMEndpoint,
+			timeout,
+			ticketCache,
+			authentications,
+			sslContext,
+			trustAllCertificates,
+			consoleCodePage,
+			connectRetries,
+			retryDelay
+		);
+	}
 }

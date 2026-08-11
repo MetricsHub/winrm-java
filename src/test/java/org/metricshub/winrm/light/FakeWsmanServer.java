@@ -56,6 +56,9 @@ public final class FakeWsmanServer implements AutoCloseable {
 	/** One scripted HTTP response: status code and the plaintext SOAP body to encrypt and serve. */
 	static final class Scripted {
 
+		/** Sentinel status: close the connection after reading the request, without responding. */
+		static final int DROP = -1;
+
 		final int status;
 		final String soapBody;
 		final long delayMillis;
@@ -106,6 +109,7 @@ public final class FakeWsmanServer implements AutoCloseable {
 
 	private final Deque<Scripted> script = new ArrayDeque<>();
 	private final List<String> decryptedRequests = new CopyOnWriteArrayList<>();
+	private final java.util.concurrent.atomic.AtomicInteger connectionsToDrop = new java.util.concurrent.atomic.AtomicInteger();
 	private volatile boolean closed;
 	private volatile boolean chunkedResponses;
 
@@ -161,6 +165,33 @@ public final class FakeWsmanServer implements AutoCloseable {
 		synchronized (script) {
 			script.addLast(new Scripted(status, soapBody, delayMillis));
 		}
+		return this;
+	}
+
+	/**
+	 * Queue a scripted connection drop: after reading (and decrypting) the request, the connection
+	 * is closed without any response — simulating a transient network failure on a request that
+	 * DID reach the server.
+	 *
+	 * @return this server, for chaining
+	 */
+	public FakeWsmanServer enqueueDrop() {
+		synchronized (script) {
+			script.addLast(new Scripted(Scripted.DROP, null));
+		}
+		return this;
+	}
+
+	/**
+	 * Drop the next {@code count} incoming TCP connections as soon as they are accepted, before
+	 * reading anything — simulating a transient failure while the connection is being established
+	 * and authenticated, where the client's request provably never reached the server.
+	 *
+	 * @param count how many connections to drop
+	 * @return this server, for chaining
+	 */
+	public FakeWsmanServer dropNextConnections(final int count) {
+		connectionsToDrop.set(count);
 		return this;
 	}
 
@@ -270,6 +301,9 @@ public final class FakeWsmanServer implements AutoCloseable {
 		// NTLM state is bound to the TCP connection, exactly like a real WinRM host.
 		WinRMSession serverSession = null;
 		try (socket) {
+			if (connectionsToDrop.getAndUpdate(n -> n > 0 ? n - 1 : 0) > 0) {
+				return; // scripted connection drop: close without reading anything
+			}
 			socket.setTcpNoDelay(true);
 			final BufferedInputStream in = new BufferedInputStream(socket.getInputStream());
 			final OutputStream out = socket.getOutputStream();
@@ -308,14 +342,22 @@ public final class FakeWsmanServer implements AutoCloseable {
 					}
 					// fall through: the request that carried the Type 3 also carries the first sealed body
 				}
-				serveScripted(out, serverSession, request.body);
+				if (!serveScripted(out, serverSession, request.body)) {
+					return; // scripted mid-exchange drop: close without responding
+				}
 			}
 		} catch (final IOException | RuntimeException e) {
 			// connection torn down (client close, test shutdown) — nothing to do
 		}
 	}
 
-	private void serveScripted(final OutputStream out, final WinRMSession session, final byte[] sealedBody)
+	/**
+	 * Serve the next scripted response for one decrypted request.
+	 *
+	 * @return {@code true} to keep the connection alive, {@code false} when the script asked for a
+	 *         connection drop instead of a response
+	 */
+	private boolean serveScripted(final OutputStream out, final WinRMSession session, final byte[] sealedBody)
 		throws IOException {
 		final byte[] plaintext = NtlmCrypto.decrypt(session, sealedBody);
 		decryptedRequests.add(new String(plaintext, StandardCharsets.UTF_8));
@@ -323,6 +365,9 @@ public final class FakeWsmanServer implements AutoCloseable {
 		Scripted next;
 		synchronized (script) {
 			next = script.pollFirst();
+		}
+		if (next != null && next.status == Scripted.DROP) {
+			return false;
 		}
 		if (next == null) {
 			// Loud, decryptable failure so an over-consuming test fails on an assertion, not a hang.
@@ -338,11 +383,12 @@ public final class FakeWsmanServer implements AutoCloseable {
 				Thread.sleep(next.delayMillis);
 			} catch (final InterruptedException e) {
 				Thread.currentThread().interrupt();
-				return; // test shutdown
+				return false; // test shutdown
 			}
 		}
 		final byte[] sealed = NtlmCrypto.encryptAndSign(session, next.soapBody.getBytes(StandardCharsets.UTF_8));
 		respond(out, next.status, null, NtlmCrypto.ENCRYPTED_CONTENT_TYPE, sealed);
+		return true;
 	}
 
 	// --- NTLM server side -------------------------------------------------------

@@ -86,6 +86,20 @@ class WinRMClientBuilderTest {
 	}
 
 	@Test
+	void retriesMustBeNonNegativeWithANonNegativeDelay() {
+		assertThrows(IllegalArgumentException.class, () -> validBuilder().retries(-1, Duration.ofSeconds(5)));
+		assertThrows(IllegalArgumentException.class, () -> validBuilder().retries(1, null));
+		assertThrows(IllegalArgumentException.class, () -> validBuilder().retries(1, Duration.ofSeconds(-1)));
+		// 0 retries (the default) and a zero delay are both valid: build() must accept them.
+		try (WinRMClient client = validBuilder().retries(0, Duration.ZERO).build()) {
+			assertEquals("host", client.hostname());
+		}
+		try (WinRMClient client = validBuilder().retries(2, Duration.ofSeconds(5)).build()) {
+			assertEquals("host", client.hostname());
+		}
+	}
+
+	@Test
 	void authenticationMustNotBeEmpty() {
 		assertThrows(IllegalArgumentException.class, () -> validBuilder().authentication());
 		assertThrows(IllegalArgumentException.class, () -> validBuilder().authentication((AuthScheme) null));
