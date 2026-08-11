@@ -150,13 +150,16 @@ public final class WinRMClient implements AutoCloseable {
 	 * There is no practical script size limit. A script whose encoded invocation would not fit
 	 * the remote shell's command line (roughly 3000 characters of script) is automatically
 	 * transferred as a temporary {@code .ps1} file — through the WinRM connection itself, exactly
-	 * like {@link CommandRequest#upload(Path...)} — and its content run as a script block, which
-	 * keeps the two forms observably identical: {@code $PSScriptRoot} and
-	 * {@code $MyInvocation.MyCommand.Path} stay empty either way, and the host's execution policy
-	 * (which only governs script files) never applies. The remote copy is content-addressed, so
-	 * re-running an identical script skips the transfer. Like any request with uploads, the
-	 * transfer commands are then what creates the remote shell, so the shell-scoped
-	 * {@link CommandRequest#workingDirectory(String)} does not apply.
+	 * like {@link CommandRequest#upload(Path...)} — and its content run as a dot-sourced script
+	 * block, which keeps the script behaving like the encoded form: pathless
+	 * ({@code $PSScriptRoot} and {@code $MyInvocation.MyCommand.Path} stay empty either way),
+	 * top-level scope and {@code param(...)} intact, and out of reach of the host's execution
+	 * policy (which only governs script files). Only {@code $MyInvocation}'s own metadata
+	 * ({@code InvocationName}, {@code Line}) reflects the wrapper invocation for a transferred
+	 * script. The remote copy is content-addressed, so re-running an identical script skips the
+	 * transfer. Like any request with uploads, the transfer commands are then what creates the
+	 * remote shell, so the shell-scoped {@link CommandRequest#workingDirectory(String)} does not
+	 * apply.
 	 *
 	 * @param script the PowerShell script to execute, verbatim
 	 * @return the request, to configure and execute

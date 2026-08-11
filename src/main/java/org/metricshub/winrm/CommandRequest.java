@@ -58,14 +58,17 @@ public final class CommandRequest {
 	/**
 	 * The invocation running a PowerShell script transferred as a file — the automatic fallback
 	 * for scripts too long to ride the command line encoded ({@code %s} is the path of the remote
-	 * copy). The file's <i>content</i> is run as a script block rather than executed with
-	 * {@code -File}, so the fallback is observably identical to the encoded form: the script has
-	 * no backing file path ({@code $PSScriptRoot} and {@code $MyInvocation.MyCommand.Path} stay
-	 * empty in both forms), a top-level {@code param(...)} block keeps working, and the execution
-	 * policy — which only governs script files — never applies.
+	 * copy). The file's <i>content</i> is run as a <b>dot-sourced</b> script block rather than
+	 * executed with {@code -File}, keeping the script behaving like the encoded form: it stays
+	 * pathless ({@code $PSScriptRoot} and {@code $MyInvocation.MyCommand.Path} are empty in both
+	 * forms), a top-level {@code param(...)} block keeps working, dot-sourcing runs the top level
+	 * in the session scope exactly like {@code -EncodedCommand} does, and the execution policy —
+	 * which only governs script files — never applies. The one remaining observable difference is
+	 * {@code $MyInvocation}'s own metadata ({@code InvocationName}, {@code Line}), which reflects
+	 * this wrapper invocation for a transferred script.
 	 */
 	private static final String POWERSHELL_FILE_INVOCATION = "powershell.exe -NoProfile -NonInteractive -Command " +
-		"\"& ([ScriptBlock]::Create((Get-Content -Raw -LiteralPath '%s')))\"";
+		"\". ([ScriptBlock]::Create((Get-Content -Raw -LiteralPath '%s')))\"";
 
 	/**
 	 * Local name of the fallback script file. The name is constant: the file is created in a
