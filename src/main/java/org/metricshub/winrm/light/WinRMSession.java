@@ -47,7 +47,9 @@ final class WinRMSession {
 	private final String domain;
 	private final String workstation;
 	private final String username;
-	private final String password;
+	// Kept as char[] by reference (never copied into a String): the caller owns the single wipeable
+	// copy of the secret and may zero it after closing the client.
+	private final char[] password;
 
 	// volatile: the session outlives individual operations, and each operation runs on a fresh
 	// worker thread (Utils.execute spawns one per call), so state written during the handshake on
@@ -63,7 +65,7 @@ final class WinRMSession {
 	private final AtomicLong sequenceOutgoing = new AtomicLong(-1);
 	private final AtomicLong sequenceIncoming = new AtomicLong(-1);
 
-	WinRMSession(final String domain, final String workstation, final String username, final String password) {
+	WinRMSession(final String domain, final String workstation, final String username, final char[] password) {
 		this.domain = domain;
 		this.workstation = workstation;
 		this.username = username;
@@ -82,7 +84,7 @@ final class WinRMSession {
 		return username;
 	}
 
-	String getPassword() {
+	char[] getPassword() {
 		return password;
 	}
 

@@ -210,6 +210,53 @@ class WsmanProtocolTest {
 		assertTrue(requests.get(1).contains("uuid:CTX-1"), requests.get(1));
 	}
 
+	@Test
+	void ntlmAuthenticatesWithNonAsciiPassword() throws Exception {
+		// The client derives the NTLM hash straight from the caller's char[] — it never builds a
+		// String copy of the password (which could not be wiped). The fake server computes NTOWFv2
+		// from a String via String.getBytes, so a successful handshake proves the char[]-based
+		// UTF-16LE encoding is byte-identical — including outside ASCII (é, €, 好, and an emoji
+		// surrogate pair).
+		server.close();
+		final String password = "pässw0rd-€-好-😀";
+		server = new FakeWsmanServer(DOMAIN, USER, password);
+		server
+			.enqueue(
+				200,
+				envelope(
+					"<wsen:EnumerateResponse xmlns:wsen=\"" +
+						WSEN +
+						"\" xmlns:wsman=\"" +
+						WSMAN +
+						"\">" +
+						"<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" +
+						"<wsman:Items>" +
+						service("Spooler", "Running") +
+						"</wsman:Items>" +
+						"</wsen:EnumerateResponse>"
+				)
+			)
+			.enqueue(
+				200,
+				envelope(
+					"<wsen:PullResponse xmlns:wsen=\"" +
+						WSEN +
+						"\" xmlns:wsman=\"" +
+						WSMAN +
+						"\">" +
+						"<wsman:EndOfSequence/>" +
+						"</wsen:PullResponse>"
+				)
+			);
+
+		try (LightWinRMService service = client(password)) {
+			final List<Map<String, Object>> rows = service.executeWql("SELECT Name,State FROM Win32_Service", TIMEOUT);
+
+			assertEquals(1, rows.size());
+			assertEquals("Spooler", rows.get(0).get("Name"));
+		}
+	}
+
 	// --- Command shell lifecycle ------------------------------------------------
 
 	@Test

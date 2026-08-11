@@ -61,7 +61,9 @@ final class KerberosAuthScheme implements AuthScheme {
 
 	private final String servicePrincipalHost;
 	private final String username;
-	private final String password;
+	// Kept as char[] by reference (never copied into a String): the caller owns the single wipeable
+	// copy of the secret and may zero it after closing the client.
+	private final char[] password;
 	private final Path ticketCache;
 
 	private GSSContext context;
@@ -78,7 +80,7 @@ final class KerberosAuthScheme implements AuthScheme {
 	KerberosAuthScheme(
 		final String servicePrincipalHost,
 		final String username,
-		final String password,
+		final char[] password,
 		final Path ticketCache
 	) {
 		this.servicePrincipalHost = servicePrincipalHost;
@@ -157,7 +159,9 @@ final class KerberosAuthScheme implements AuthScheme {
 				if (callback instanceof NameCallback) {
 					((NameCallback) callback).setName(username);
 				} else if (callback instanceof PasswordCallback) {
-					((PasswordCallback) callback).setPassword(password == null ? null : password.toCharArray());
+					// PasswordCallback clones the array, so the caller's char[] stays the only
+					// long-lived copy of the secret outside the JAAS machinery.
+					((PasswordCallback) callback).setPassword(password);
 				}
 			}
 		};

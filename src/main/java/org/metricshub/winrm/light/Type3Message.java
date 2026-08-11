@@ -70,7 +70,7 @@ public class Type3Message extends NTLMMessage {
 		final String domain,
 		final String host,
 		final String user,
-		final String password,
+		final char[] password,
 		final byte[] nonce,
 		final int type2Flags,
 		final String target,
