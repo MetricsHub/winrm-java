@@ -12,8 +12,9 @@ The **WinRM Java Client** is a small library that talks to the Windows Remote Ma
 
 * run **WQL / WMI queries** such as `SELECT Name, State FROM Win32_Service` and read the rows back
   ([WQL Queries](wql.html)), and
-* **execute remote commands**, capturing standard output, standard error and the exit code —
-  optionally copying local script files to the host first ([Remote Commands](commands.html)).
+* **execute remote commands** — `cmd.exe` command lines or PowerShell scripts — capturing standard
+  output, standard error and the exit code, optionally copying local script files to the host
+  first ([Remote Commands](commands.html)).
 
 Both operations can also **stream**: WQL rows are consumed page by page as they arrive
 (`stream()`), and command output is consumed while the command is still running (`start()`,
@@ -101,6 +102,13 @@ Remote commands work the same way:
 ```java
 CommandResult result = client.command("ipconfig /all").execute();
 System.out.println(result.stdout());
+```
+
+And so do PowerShell scripts — delivered base64-encoded (`-EncodedCommand`), so they need no
+quoting or escaping at all:
+
+```java
+CommandResult ps = client.powerShell("Get-Service | Where-Object Status -eq 'Running'").execute();
 ```
 
 Failures are reported through the unchecked

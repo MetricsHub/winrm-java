@@ -127,6 +127,50 @@ public final class WinRMClient implements AutoCloseable {
 	}
 
 	/**
+	 * Prepare a PowerShell script execution. Nothing is sent until
+	 * {@link CommandRequest#execute()} is called.
+	 * <p>
+	 * The script travels base64-encoded ({@code powershell.exe -NoProfile -NonInteractive
+	 * -EncodedCommand ...}), so it needs <b>no quoting or escaping whatsoever</b>: quotes, pipes,
+	 * newlines, and {@code $variables} reach PowerShell exactly as written.
+	 *
+	 * <pre>{@code
+	 * CommandResult result = client.powerShell(
+	 * 	"Get-Service | Where-Object { $_.Status -eq 'Running' } | Select-Object -First 5 Name"
+	 * ).execute();
+	 * }</pre>
+	 *
+	 * The returned request is the same as for {@link #command(String)}: every option and both
+	 * terminals apply unchanged — including {@link CommandRequest#upload(Path...)}, whose path
+	 * rewriting happens on the script text <i>before</i> it is encoded, so a script referencing an
+	 * uploaded file runs against the remote copy. {@code powershell.exe} exits with 0 on success
+	 * and 1 when the script ends with a terminating error; call {@code exit <n>} in the script for
+	 * a specific exit code.
+	 * <p>
+	 * There is no practical script size limit. A script whose encoded invocation would not fit
+	 * the remote shell's command line (roughly 3000 characters of script) is automatically
+	 * transferred as a temporary {@code .ps1} file — through the WinRM connection itself, exactly
+	 * like {@link CommandRequest#upload(Path...)} — and its content run as a dot-sourced script
+	 * block, which keeps the script behaving like the encoded form: pathless
+	 * ({@code $PSScriptRoot} and {@code $MyInvocation.MyCommand.Path} stay empty either way),
+	 * top-level scope and {@code param(...)} intact, and out of reach of the host's execution
+	 * policy (which only governs script files). Only {@code $MyInvocation}'s own metadata
+	 * ({@code InvocationName}, {@code Line}) reflects the wrapper invocation for a transferred
+	 * script. The remote copy is content-addressed, so re-running an identical script skips the
+	 * transfer. Like any request with uploads, the transfer commands are then what creates the
+	 * remote shell, so the shell-scoped {@link CommandRequest#workingDirectory(String)} does not
+	 * apply.
+	 *
+	 * @param script the PowerShell script to execute, verbatim
+	 * @return the request, to configure and execute
+	 * @throws IllegalArgumentException when the script is blank
+	 */
+	public CommandRequest powerShell(final String script) {
+		Utils.checkNonBlank(script, "script");
+		return new CommandRequest(this, script, true);
+	}
+
+	/**
 	 * Copy a local file to an explicit path on the remote host, through the WinRM connection
 	 * itself (no SMB, no extra port). The transfer is digest-verified and skipped when the
 	 * destination already has identical content; the destination directory is created when

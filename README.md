@@ -91,6 +91,9 @@ try (WinRMClient client = WinRMClient.builder("server01.acme.com")
     CommandResult result = client.command("ipconfig /all").execute();
     System.out.println(result.stdout());
 
+    // PowerShell — delivered encoded (-EncodedCommand): no quoting or escaping needed
+    CommandResult ps = client.powerShell("Get-Service | Where-Object Status -eq 'Running'").execute();
+
     // Copy a file to the host (through the WinRM channel itself — no SMB)
     client.uploadFile(Path.of("collect.ps1"), "C:\\Windows\\Temp\\collect.ps1");
 }
