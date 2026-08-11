@@ -415,11 +415,12 @@ class WinRMClientTest {
 	void powerShellRunsALongScriptFromATransferredFile() throws Exception {
 		// 4000 characters encode to a ~10700-character invocation, beyond cmd.exe's 8191 limit:
 		// the script must travel as a temporary .ps1 file — transferred through the WinRM channel
-		// like an upload — and run with -File. The caller never sees any of this.
+		// like an upload — whose content is then run as a script block. The caller never sees any
+		// of this.
 		final String script = "Write-Output '" + "x".repeat(4000) + "'";
 
-		// The transferred file is the script encoded as UTF-8 with a BOM (powershell.exe -File
-		// would decode a BOM-less file with the ANSI code page).
+		// The transferred file is the script encoded as UTF-8 with a BOM (Windows PowerShell
+		// would read a BOM-less file with the ANSI code page).
 		final byte[] body = script.getBytes(StandardCharsets.UTF_8);
 		final byte[] content = new byte[3 + body.length];
 		content[0] = (byte) 0xEF;
@@ -473,24 +474,17 @@ class WinRMClientTest {
 		final String command = server
 			.decryptedRequests()
 			.stream()
-			.filter(r -> r.contains("-File"))
+			.filter(r -> r.contains("[ScriptBlock]::Create"))
 			.findFirst()
 			.orElseThrow(() -> new AssertionError(String.join("\n---\n", server.decryptedRequests())));
-		// The invocation runs the content-addressed remote copy of the temporary script file.
-		assertTrue(
-			command.contains(
-				"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File " +
-					"&quot;C:\\Windows\\Temp\\winrm-upload-"
-			)
-				||
-				command.contains(
-					"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File " +
-						"\"C:\\Windows\\Temp\\winrm-upload-"
-				),
-			command
-		);
-		assertTrue(command.contains("winrm-powershell." + digest.substring(0, 12) + ".ps1"), command);
+		// The invocation reads the content-addressed remote copy and runs its CONTENT as a script
+		// block — not -File, so the script stays pathless exactly like the encoded form
+		// ($PSScriptRoot and $MyInvocation.MyCommand.Path are empty either way).
+		assertTrue(command.contains("powershell.exe -NoProfile -NonInteractive -Command"), command);
+		assertTrue(command.contains("Get-Content -Raw -LiteralPath 'C:\\Windows\\Temp\\winrm-upload-"), command);
+		assertTrue(command.contains("winrm-powershell." + digest.substring(0, 12) + ".ps1'"), command);
 		assertFalse(command.contains("-EncodedCommand"), command);
+		assertFalse(command.contains("-File "), command);
 	}
 
 	@Test

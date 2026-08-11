@@ -80,10 +80,13 @@ Points to know:
   encoded; a longer one (roughly 3000 characters and up, where the encoded invocation would no
   longer fit the remote shell's 8191-character command line) is automatically transferred as a
   temporary `.ps1` file — through the WinRM connection itself, exactly like `upload(...)` — and
-  run with `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File`. The remote
-  copy is [content-addressed](file-transfers.html), so re-running an identical script skips the
-  transfer; and like any request with uploads, the transfer commands are then what creates the
-  remote shell, so the shell-scoped `workingDirectory(...)` does not apply.
+  its **content** run as a script block (`[ScriptBlock]::Create`), which keeps the two forms
+  observably identical: `$PSScriptRoot` and `$MyInvocation.MyCommand.Path` stay empty either way,
+  a top-level `param(...)` block keeps working, and the host's execution policy (which only
+  governs script files) never applies. The remote copy is
+  [content-addressed](file-transfers.html), so re-running an identical script skips the transfer;
+  and like any request with uploads, the transfer commands are then what creates the remote
+  shell, so the shell-scoped `workingDirectory(...)` does not apply.
 * **Windows PowerShell** — the script runs in `powershell.exe` (Windows PowerShell 5.x, present on
   every supported Windows). To target PowerShell 7+, invoke `pwsh` yourself with `command(...)`.
 

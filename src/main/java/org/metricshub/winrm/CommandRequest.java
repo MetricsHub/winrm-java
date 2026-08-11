@@ -57,11 +57,15 @@ public final class CommandRequest {
 
 	/**
 	 * The invocation running a PowerShell script transferred as a file — the automatic fallback
-	 * for scripts too long to ride the command line encoded. {@code -ExecutionPolicy Bypass} is
-	 * needed here and not on the encoded form: the execution policy governs script <i>files</i>
-	 * only.
+	 * for scripts too long to ride the command line encoded ({@code %s} is the path of the remote
+	 * copy). The file's <i>content</i> is run as a script block rather than executed with
+	 * {@code -File}, so the fallback is observably identical to the encoded form: the script has
+	 * no backing file path ({@code $PSScriptRoot} and {@code $MyInvocation.MyCommand.Path} stay
+	 * empty in both forms), a top-level {@code param(...)} block keeps working, and the execution
+	 * policy — which only governs script files — never applies.
 	 */
-	private static final String POWERSHELL_FILE_PREFIX = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ";
+	private static final String POWERSHELL_FILE_INVOCATION = "powershell.exe -NoProfile -NonInteractive -Command " +
+		"\"& ([ScriptBlock]::Create((Get-Content -Raw -LiteralPath '%s')))\"";
 
 	/**
 	 * Local name of the fallback script file. The name is constant: the file is created in a
@@ -72,9 +76,8 @@ public final class CommandRequest {
 	private static final String POWERSHELL_FILE_NAME = "winrm-powershell.ps1";
 
 	/**
-	 * The UTF-8 byte order mark, prepended to the fallback script file: without it,
-	 * {@code powershell.exe -File} decodes the file with the ANSI code page and mangles every
-	 * non-ASCII character.
+	 * The UTF-8 byte order mark, prepended to the fallback script file: without it, Windows
+	 * PowerShell reads the file with the ANSI code page and mangles every non-ASCII character.
 	 */
 	private static final byte[] UTF8_BOM = { (byte) 0xEF, (byte) 0xBB, (byte) 0xBF };
 
@@ -155,8 +158,8 @@ public final class CommandRequest {
 	/**
 	 * Run the fallback path for a script too long to ride the command line: write it (UTF-8 with
 	 * a BOM) to a local temporary file, transfer that file to the remote host exactly like an
-	 * {@link #upload(Path...)}, and return the {@code powershell.exe -File} invocation of the
-	 * remote copy. The local file is deleted before returning; the remote copy is
+	 * {@link #upload(Path...)}, and return the invocation running the remote copy's content as a
+	 * script block. The local file is deleted before returning; the remote copy is
 	 * content-addressed, so re-running an identical script skips the transfer.
 	 */
 	private String powerShellFromFile(final String script, final long timeoutMillis, final long start)
@@ -171,7 +174,7 @@ public final class CommandRequest {
 			Files.write(file, content);
 			return ShellFileCopy.copyLocalFilesToRemote(
 				client.executor(),
-				POWERSHELL_FILE_PREFIX + "\"" + file + "\"",
+				String.format(POWERSHELL_FILE_INVOCATION, file),
 				List.of(file.toString()),
 				environment,
 				TimeoutHelper.getRemainingTime(timeoutMillis, start, "No time left to transfer the PowerShell script")
