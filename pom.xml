@@ -267,7 +267,7 @@
 			<plugin>
 				<groupId>com.github.spotbugs</groupId>
 				<artifactId>spotbugs-maven-plugin</artifactId>
-				<version>4.10.3.0</version>
+				<version>4.10.4.0</version>
 				<executions>
 					<execution>
 						<phase>verify</phase>
@@ -359,7 +359,7 @@
 			<plugin>
 				<groupId>com.github.spotbugs</groupId>
 				<artifactId>spotbugs-maven-plugin</artifactId>
-				<version>4.10.3.0</version>
+				<version>4.10.4.0</version>
 			</plugin>
 
 			<!-- pmd: same version as the build gate above, so the report shows what the gate checked -->
