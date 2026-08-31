@@ -111,8 +111,9 @@ try (WinRMClient client = WinRMClient.builder("server.example.com")
 }
 ```
 
-The server must have Basic authentication enabled
-(`winrm set winrm/config/service @{AllowBasicAuth=true}`); see
+The server must have Basic authentication enabled on the WinRM service — the `Basic` setting under
+the service's `auth` section, `False` by default:
+`winrm set winrm/config/service/auth @{Basic=true}`; see
 [Preparing the Windows Host](preparing-the-host.html).
 
 ## Authentication failures

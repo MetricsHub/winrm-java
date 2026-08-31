@@ -134,10 +134,11 @@ the switch:
   final 0.12.x releases. Here, HTTP always uses NTLM message encryption — there is no unencrypted
   mode and nothing to configure, and hosts that require encryption (`AllowUnencrypted=false`, the
   Windows default) work out of the box.
-* **Basic is HTTPS-only.** winrm4j offers `AuthSchemes.BASIC`, which here maps to
-  `authentication(AuthScheme.BASIC)`. This client has no Basic message protection, so it requires
-  `https()` — the credential and payload travel inside the TLS tunnel. The host must have
-  `AllowBasicAuth` enabled on the WinRM service and be reachable over HTTPS
+* **Basic needs HTTPS, but the client does not enforce it.** winrm4j offers `AuthSchemes.BASIC`,
+  which here maps to `authentication(AuthScheme.BASIC)`. This client has no Basic message
+  protection: it accepts the scheme over both transports, so **use `https()` with it** — without
+  TLS, the credential and payload travel in the clear and the client will not stop you. The host
+  must have the `Basic` setting enabled on the WinRM service and be reachable over HTTPS
   ([Preparing the Windows Host](preparing-the-host.html)). NTLM remains the recommended scheme.
 * **Kerberos requires HTTPS.** winrm4j runs Kerberos over plain HTTP; this client refuses at
   `build()`, because it does not implement Kerberos message encryption — without TLS the payload

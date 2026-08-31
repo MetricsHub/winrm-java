@@ -2,6 +2,7 @@ package org.metricshub.winrm.light;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,12 +17,23 @@ class FallbackAuthSchemeTest {
 
 		private final String name;
 		private final int failFromCall; // fail on this 1-based authenticate() call onward; MAX_VALUE = never
+		private final String requestAuthorization; // non-null mimics a stateless scheme (e.g. Basic)
 		private boolean authenticated;
 		private int authenticateCalls;
 
 		FakeScheme(final String name, final int failFromCall) {
+			this(name, failFromCall, null);
+		}
+
+		FakeScheme(final String name, final int failFromCall, final String requestAuthorization) {
 			this.name = name;
 			this.failFromCall = failFromCall;
+			this.requestAuthorization = requestAuthorization;
+		}
+
+		@Override
+		public String requestAuthorization() {
+			return requestAuthorization;
 		}
 
 		@Override
@@ -117,5 +129,31 @@ class FallbackAuthSchemeTest {
 			List.of(new FakeScheme("kerberos", ALWAYS), new FakeScheme("ntlm", ALWAYS))
 		);
 		assertThrows(IllegalStateException.class, () -> fallback.authenticate(dummyTransport()));
+	}
+
+	@Test
+	void requestAuthorizationForwardsToTheActiveStatelessScheme() throws Exception {
+		// A stateless candidate (e.g. Basic) repeats its Authorization header on EVERY request, so
+		// the wrapper must forward it — the interface default of null would drop the header and
+		// every request would 401. Here Basic is the first (active) candidate of a fallback list.
+		final FakeScheme basic = new FakeScheme("basic", NEVER, "Basic dXNlcjpwYXNz");
+		final FakeScheme ntlm = new FakeScheme("ntlm", NEVER);
+		final FallbackAuthScheme fallback = new FallbackAuthScheme(List.of(basic, ntlm));
+
+		fallback.authenticate(dummyTransport()); // Basic wins the fallback and becomes active
+		assertEquals("Basic dXNlcjpwYXNz", fallback.requestAuthorization());
+	}
+
+	@Test
+	void requestAuthorizationIsNullWhileUnauthenticated() throws Exception {
+		// Before any handshake there is no active scheme, and the header must be null (the
+		// client then runs the handshake, which for Basic marks the connection authenticated).
+		final FallbackAuthScheme fallback = new FallbackAuthScheme(
+			List.of(new FakeScheme("basic", NEVER, "Basic dXNlcjpwYXNz"))
+		);
+		assertNull(fallback.requestAuthorization());
+
+		fallback.authenticate(dummyTransport());
+		assertEquals("Basic dXNlcjpwYXNz", fallback.requestAuthorization());
 	}
 }

@@ -11,11 +11,11 @@ Kerberos:
 
 * `WinRMClient.Builder.authentication(AuthScheme.BASIC)` and the CLI's `--basic` option select it.
 * Basic is stateless: the credential rides the `Authorization` header of **every** request, and
-  there is no message protection — the payload travels as plaintext SOAP. It therefore requires
-  **HTTPS** in practice, where TLS protects the credential and the payload (Basic over plain HTTP
-  is possible but must never be used, since everything is sent in the clear).
+  there is no message protection — the payload travels as plaintext SOAP. The scheme is accepted
+  over both transports, but it must be used over **HTTPS** in practice, where TLS protects the
+  credential and the payload (over plain HTTP both travel in the clear).
 * A domain-qualified user name (`DOMAIN\user`) keeps its domain prefix on the wire; the server
-  must have `AllowBasicAuth` enabled on the WinRM service.
+  must have the `Basic` setting enabled on the WinRM service (`winrm/config/service/auth`).
 * `BASIC` joins `AuthenticationEnum` (legacy API) and participates in the ordered-fallback list
   like the other schemes.
 

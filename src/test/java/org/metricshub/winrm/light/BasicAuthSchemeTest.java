@@ -3,6 +3,7 @@ package org.metricshub.winrm.light;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
@@ -39,16 +40,28 @@ class BasicAuthSchemeTest {
 	}
 
 	@Test
-	void resetReturnsToUnauthenticatedState() throws Exception {
-		final BasicAuthScheme scheme = new BasicAuthScheme("user", "password".toCharArray());
+	void resetErasesTheDerivedCredential() throws Exception {
+		// close() always runs reset(), and the Base64 value is a reversible copy of the credential,
+		// so the reset must leave no live copy of the password in the scheme.
+		final char[] password = "password".toCharArray();
+		final BasicAuthScheme scheme = new BasicAuthScheme("user", password);
 		scheme.authenticate(new HttpTransport("localhost", 1, 1000));
 		assertTrue(scheme.isAuthenticated());
+		assertEquals(
+			"Basic " + Base64.getEncoder().encodeToString(
+				"user:password".getBytes(
+					StandardCharsets.UTF_8
+				)
+			),
+			scheme.requestAuthorization()
+		);
 
 		scheme.reset();
 		assertFalse(scheme.isAuthenticated());
-		// The credential header is still available: Basic re-sends it on the next request, so reset
-		// only clears the authenticated flag, not the derived header.
-		assertTrue(scheme.requestAuthorization().startsWith("Basic "));
+		// With the caller's password wiped, the erased credential cannot be re-derived — the next
+		// request must fail loudly rather than silently send a header of zeros.
+		java.util.Arrays.fill(password, '\0');
+		assertThrows(Exception.class, scheme::requestAuthorization);
 	}
 
 	@Test
@@ -62,14 +75,28 @@ class BasicAuthSchemeTest {
 	}
 
 	@Test
-	void passwordIsNeverRetainedAfterConstruction() {
-		// The scheme must encode the credential at construction and not hold the caller's char[]:
-		// wiping the array afterward must not change the (already-derived) header.
+	void thePasswordArrayIsNotCopiedIntoAnImmutableString() {
+		// The scheme keeps the caller's char[] only as a reference (like the NTLM scheme) and
+		// derives the header on demand, so the caller remains the single owner of the secret and
+		// can wipe it: a header derived before the wipe still works, and the scheme never builds a
+		// String copy of the password.
 		final char[] password = "s3cret".toCharArray();
 		final BasicAuthScheme scheme = new BasicAuthScheme("user", password);
 		final String header = scheme.requestAuthorization();
+		assertEquals(
+			"Basic " + Base64.getEncoder().encodeToString(
+				"user:s3cret".getBytes(
+					StandardCharsets.UTF_8
+				)
+			),
+			header
+		);
 
 		java.util.Arrays.fill(password, '\0');
+		// The already-derived (and not yet reset) header is still servable...
 		assertEquals(header, scheme.requestAuthorization());
+		// ...and after reset() the wiped array cannot be re-derived — loud failure, no zero header.
+		scheme.reset();
+		assertThrows(Exception.class, scheme::requestAuthorization);
 	}
 }

@@ -9,6 +9,7 @@ import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.KERBER
 import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.NTLM;
 import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.getValueOf;
 
+import java.util.Locale;
 import org.junit.jupiter.api.Test;
 
 class AuthenticationEnumTest {
@@ -27,5 +28,21 @@ class AuthenticationEnumTest {
 		assertEquals(of(BASIC), getValueOf(" basic "));
 		assertEquals(of(BASIC), getValueOf(" Basic "));
 		assertEquals(of(BASIC), getValueOf(" BASIC "));
+	}
+
+	@Test
+	void testGetValueOfIsInsensitiveToTheDefaultLocale() {
+		// With the default locale set to Turkish, the locale-sensitive toUpperCase() mangles "basic"
+		// into "BASİC" (dotted capital I), which does not match any enum name. The lookup must
+		// resolve regardless of the JVM default locale.
+		final Locale original = Locale.getDefault();
+		Locale.setDefault(new Locale("tr"));
+		try {
+			assertEquals(of(BASIC), getValueOf("basic"));
+			assertEquals(of(KERBEROS), getValueOf("kerberos"));
+			assertEquals(of(NTLM), getValueOf("ntlm"));
+		} finally {
+			Locale.setDefault(original);
+		}
 	}
 }

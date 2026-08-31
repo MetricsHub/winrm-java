@@ -76,6 +76,13 @@ final class FallbackAuthScheme implements AuthScheme {
 	}
 
 	@Override
+	public String requestAuthorization() {
+		// A stateless active candidate (Basic) repeats its header on EVERY request, so the wrapper
+		// must forward it; the interface default of null would drop the header entirely.
+		return active != null ? active.requestAuthorization() : null;
+	}
+
+	@Override
 	public boolean isAuthenticated() {
 		return active != null && active.isAuthenticated();
 	}

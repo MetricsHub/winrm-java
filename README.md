@@ -54,9 +54,11 @@ WinRM must be enabled on the targeted Windows host, and the account must have su
   Non-administrator accounts need an explicit grant on the WinRM listener (`RootSDDL`), plus — only
   if they run WQL queries — WMI grants (`WinRMRemoteWMIUsers__` and namespace rights). An account
   that only runs commands never reaches WMI and needs nothing there.
-* `AllowUnencrypted`, `Basic`, `CredSSP` and `TrustedHosts` do **not** need to be changed: over
-  plain HTTP the payload is protected by NTLM message encryption, and `TrustedHosts` is a
-  Windows-client setting that a Java client never reads.
+* `AllowUnencrypted`, `CredSSP` and `TrustedHosts` do **not** need to be changed: over plain HTTP
+  the payload is protected by NTLM message encryption, and `TrustedHosts` is a Windows-client
+  setting that a Java client never reads. The one exception is the service's `Basic` setting, which
+  only users of the HTTP Basic scheme must enable
+  ([Preparing the Windows Host](https://metricshub.org/winrm-java/preparing-the-host.html)).
 
 The full prerequisites — enabling WinRM over HTTP or HTTPS, Group Policy, firewall rules, the
 privileges each operation requires, configuring a non-administrator account, host quotas, and a
