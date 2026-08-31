@@ -1,12 +1,12 @@
-keywords: authentication, ntlm, kerberos, spnego, domain, realm, kdc, krb5, ticket cache
-description: Authenticate to WinRM with NTLM or Kerberos (SPNEGO), including domain accounts, ordered fallback, and Kerberos configuration.
+keywords: authentication, ntlm, kerberos, spnego, basic, domain, realm, kdc, krb5, ticket cache
+description: Authenticate to WinRM with NTLM, Kerberos (SPNEGO), or HTTP Basic, including domain accounts, ordered fallback, and Kerberos configuration.
 
 # Authentication
 
 <!-- MACRO{toc|fromDepth=2|toDepth=3|id=toc} -->
 
-The client authenticates with either **NTLM** or **Kerberos (SPNEGO)**. The scheme is chosen with
-`authentication(...)` on the [`WinRMClient`](apidocs/org/metricshub/winrm/WinRMClient.html)
+The client authenticates with **NTLM**, **Kerberos (SPNEGO)**, or **HTTP Basic**. The scheme is
+chosen with `authentication(...)` on the [`WinRMClient`](apidocs/org/metricshub/winrm/WinRMClient.html)
 builder, which takes one or more [`AuthScheme`](apidocs/org/metricshub/winrm/AuthScheme.html)
 values:
 
@@ -17,6 +17,7 @@ WinRMClient.builder("server.example.com")
     .credentials("DOMAIN\\Administrator", password)
     .authentication(AuthScheme.NTLM)                       // NTLM only (also the default)
     // .authentication(AuthScheme.KERBEROS)                // Kerberos only
+    // .authentication(AuthScheme.BASIC)                   // HTTP Basic only
     // .authentication(AuthScheme.KERBEROS, AuthScheme.NTLM) // ordered fallback
     .build();
 ```
@@ -89,6 +90,31 @@ java -Djava.security.krb5.realm=EXAMPLE.COM \
 The optional `ticketCache(Path)` builder option points at a Kerberos ticket cache to use for the
 connection; without it, Kerberos logs in with the user name and password.
 
+## Basic
+
+HTTP Basic sends the credential in the `Authorization` header of **every** request — there is no
+handshake and no message protection, so the payload travels as plaintext SOAP. It works over both
+transports, but over plain HTTP the credential and the data are sent **in the clear**: use Basic
+over HTTPS only, where TLS protects both.
+
+The credential is the user name exactly as given to `credentials(...)`. A domain-qualified name
+(`DOMAIN\user`) keeps its domain prefix on the wire, which is how a domain controller locates the
+account; a bare name is used as-is.
+
+```java
+try (WinRMClient client = WinRMClient.builder("server.example.com")
+        .https()
+        .credentials("DOMAIN\\Administrator", password)
+        .authentication(AuthScheme.BASIC)
+        .build()) {
+    ...
+}
+```
+
+The server must have Basic authentication enabled
+(`winrm set winrm/config/service @{AllowBasicAuth=true}`); see
+[Preparing the Windows Host](preparing-the-host.html).
+
 ## Authentication failures
 
 A rejected credential (after every scheme of the fallback list was tried) surfaces as a
@@ -97,8 +123,8 @@ whose message has the stable form `Authentication error on <endpoint> with user 
 
 ## Choosing the scheme on the command line
 
-The standalone jar selects the scheme with `--ntlm` (the default) or `--kerberos`. The two are
-mutually exclusive, and `--kerberos` requires `--https`:
+The standalone jar selects the scheme with `--ntlm` (the default), `--kerberos`, or `--basic`. The
+three are mutually exclusive, and `--kerberos` requires `--https`:
 
 ```bash
 java -jar ${project.artifactId}-${project.version}-standalone.jar \

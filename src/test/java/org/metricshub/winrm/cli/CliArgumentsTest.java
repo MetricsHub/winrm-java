@@ -86,6 +86,26 @@ class CliArgumentsTest {
 	}
 
 	@Test
+	void parsesBasicOverHttp() throws Exception {
+		try (
+			CliArguments parsed = CliArguments.parse(
+				new String[]
+				{
+						"--hostname=host.example.net",
+						"--username=user@example.net",
+						"--password=secret",
+						"--basic",
+						"command",
+						"whoami"
+				}
+			)) {
+			// Basic is not HTTPS-only (unlike Kerberos): a plain HTTP endpoint is valid.
+			assertEquals(WinRMHttpProtocolEnum.HTTP, parsed.protocol());
+			assertEquals(List.of(AuthenticationEnum.BASIC), parsed.authentications());
+		}
+	}
+
+	@Test
 	void infersKerberosRealmFromKdcDnsSuffix() throws Exception {
 		try (
 			CliArguments parsed = CliArguments.parse(
@@ -252,6 +272,14 @@ class CliArgumentsTest {
 				{
 						"--ntlm and --kerberos are mutually exclusive",
 						concat(base, "--https", "--ntlm", "--kerberos", "command", "whoami")
+				},
+				{
+						"--ntlm and --basic are mutually exclusive",
+						concat(base, "--ntlm", "--basic", "command", "whoami")
+				},
+				{
+						"--kerberos and --basic are mutually exclusive",
+						concat(base, "--https", "--kerberos", "--basic", "command", "whoami")
 				},
 				{ "--kerberos requires --https", concat(base, "--kerberos", "command", "whoami") },
 				{

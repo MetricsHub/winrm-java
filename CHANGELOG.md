@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased] — 2.0.0
 
+### Added — HTTP Basic authentication
+
+The client now supports **HTTP Basic** as an authentication scheme, in addition to NTLM and
+Kerberos:
+
+* `WinRMClient.Builder.authentication(AuthScheme.BASIC)` and the CLI's `--basic` option select it.
+* Basic is stateless: the credential rides the `Authorization` header of **every** request, and
+  there is no message protection — the payload travels as plaintext SOAP. It therefore requires
+  **HTTPS** in practice, where TLS protects the credential and the payload (Basic over plain HTTP
+  is possible but must never be used, since everything is sent in the clear).
+* A domain-qualified user name (`DOMAIN\user`) keeps its domain prefix on the wire; the server
+  must have `AllowBasicAuth` enabled on the WinRM service.
+* `BASIC` joins `AuthenticationEnum` (legacy API) and participates in the ordered-fallback list
+  like the other schemes.
+
 ### ⚠️ Breaking — SMB file copy replaced by a transfer through the WinRM channel
 
 Files passed to `WinRMCommandExecutor.execute(...)` in `localFileToCopyList` are no longer copied

@@ -23,16 +23,19 @@ when it is already on, how to turn it on, and how to get the privileges right.
 | A listener | HTTP on port **5985**, or HTTPS on port **5986**. See [TLS / HTTPS](tls.html). |
 | Firewall open on that port | Inbound, from the machine running the client. |
 | `Negotiate` authentication enabled on the service | **`True` by default.** This is what carries NTLM; `Kerberos` (also `True` by default) carries Kerberos. |
+| `AllowBasicAuth` enabled on the service | **Only for HTTP Basic** (not for NTLM or Kerberos). See below. |
 | An account with the right privileges | See [Privileges](#Privileges) below. |
 
 Just as important, a few settings that other WinRM guides tell you to change are **not** needed
 here:
 
-* **`AllowUnencrypted` stays `False`.** Over plain HTTP the client protects the payload with
-  **NTLM message encryption**, so the service's default refusal of unencrypted traffic is
-  satisfied. If a guide tells you to set `AllowUnencrypted=true`, that advice is for clients that
-  use Basic authentication — not this one.
-* **`Basic` and `CredSSP` stay `False`.** The client authenticates with NTLM or Kerberos only
+* **`AllowUnencrypted` stays `False` for NTLM and Kerberos.** Over plain HTTP the client protects
+  the payload with **NTLM message encryption**, so the service's default refusal of unencrypted
+  traffic is satisfied. (Exception: HTTP Basic has no message protection, so Basic requires
+  HTTPS, where TLS provides the confidentiality — see
+  [Authentication](authentication.html).)
+* **`Basic` and `CredSSP` stay `False` unless you use Basic.** NTLM and Kerberos need neither. To
+  use HTTP Basic, enable `AllowBasicAuth` on the service and connect over HTTPS
   ([Authentication](authentication.html)).
 * **`TrustedHosts` is irrelevant.** That is a setting on the *Windows* WinRM **client**, consulted
   by the `winrs` command-line tool. A Java client never reads it, so you do not need to add anything

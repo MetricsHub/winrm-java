@@ -1106,9 +1106,10 @@ final class WsmanClient implements AutoCloseable {
 					continue;
 				}
 			}
-			// The handshake's Authorization accompanies the first real request; later requests on the
-			// already-authenticated connection carry no Authorization header.
-			final String authorization = pendingAuthorization;
+			// The handshake's Authorization accompanies the first real request; stateless schemes
+			// (Basic) instead repeat their header on EVERY request, and NTLM/Kerberos need none after
+			// the first.
+			final String authorization = pendingAuthorization != null ? pendingAuthorization : auth.requestAuthorization();
 			pendingAuthorization = null;
 
 			final HttpTransport.Response resp = transport.post(

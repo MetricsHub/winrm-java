@@ -52,9 +52,10 @@ import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
  * {@code ServiceLoader} poisoning (it uses the JDK-default XML factories).
  * <p>
  * Supports NTLM over HTTP (with message encryption) and over HTTPS (plaintext SOAP inside TLS,
- * validating the server certificate by default; see {@link LightTls}), and Kerberos over HTTPS
- * (SPNEGO via the JDK GSS-API; see {@link KerberosAuthScheme}). A multi-scheme request such as
- * {@code [KERBEROS, NTLM]} is tried in order with fallback.
+ * validating the server certificate by default; see {@link LightTls}), Kerberos over HTTPS (SPNEGO
+ * via the JDK GSS-API; see {@link KerberosAuthScheme}), and HTTP Basic (the credential rides the
+ * {@code Authorization} header of every request; see {@link BasicAuthScheme}). A multi-scheme
+ * request such as {@code [KERBEROS, NTLM]} is tried in order with fallback.
  */
 public final class LightWinRMService implements WindowsRemoteExecutor {
 
@@ -74,7 +75,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	 * @param timeout timeout in milliseconds (must be &gt; 0)
 	 * @param ticketCache Kerberos ticket cache path (used by the Kerberos scheme; {@code null} logs
 	 *        in with the password)
-	 * @param authentications requested authentication schemes, tried in order (NTLM and/or Kerberos);
+	 * @param authentications requested authentication schemes, tried in order (NTLM, Kerberos, and/or Basic);
 	 *        {@code null}/empty means NTLM only
 	 * @return a new {@code LightWinRMService}
 	 * @throws WinRMException on invalid arguments or an unsupported authentication request
@@ -96,7 +97,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	 * @param timeout timeout in milliseconds (must be &gt; 0)
 	 * @param ticketCache Kerberos ticket cache path (used by the Kerberos scheme; {@code null} logs
 	 *        in with the password)
-	 * @param authentications requested authentication schemes, tried in order (NTLM and/or Kerberos);
+	 * @param authentications requested authentication schemes, tried in order (NTLM, Kerberos, and/or Basic);
 	 *        {@code null}/empty means NTLM only
 	 * @param sslContext the {@link SSLContext} providing the HTTPS socket factory (hostname
 	 *        verification stays on); {@code null} uses the default configuration
@@ -123,7 +124,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	 * @param timeout timeout in milliseconds (must be &gt; 0)
 	 * @param ticketCache Kerberos ticket cache path (used by the Kerberos scheme; {@code null} logs
 	 *        in with the password)
-	 * @param authentications requested authentication schemes, tried in order (NTLM and/or Kerberos);
+	 * @param authentications requested authentication schemes, tried in order (NTLM, Kerberos, and/or Basic);
 	 *        {@code null}/empty means NTLM only
 	 * @param sslContext the {@link SSLContext} providing the HTTPS socket factory (hostname
 	 *        verification stays on); {@code null} uses the default configuration
@@ -167,7 +168,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	 * @param timeout timeout in milliseconds (must be &gt; 0)
 	 * @param ticketCache Kerberos ticket cache path (used by the Kerberos scheme; {@code null} logs
 	 *        in with the password)
-	 * @param authentications requested authentication schemes, tried in order (NTLM and/or Kerberos);
+	 * @param authentications requested authentication schemes, tried in order (NTLM, Kerberos, and/or Basic);
 	 *        {@code null}/empty means NTLM only
 	 * @param sslContext the {@link SSLContext} providing the HTTPS socket factory (hostname
 	 *        verification stays on); {@code null} uses the default configuration
@@ -275,9 +276,16 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 					schemes.add(new KerberosAuthScheme(winRMEndpoint.getHostname(), username, password, ticketCache));
 				}
 				// else: Kerberos is unavailable over plain HTTP — leave it out of the candidate list.
+			} else if (auth == AuthenticationEnum.BASIC) {
+				// Basic is stateless and rides the Authorization header of every request, so it works
+				// over both transports. The credential is the caller's username as given: a
+				// domain-qualified name keeps its domain prefix, which is how the server locates it.
+				schemes.add(new BasicAuthScheme(winRMEndpoint.getRawUsername(), password));
 			} else {
 				throw new WinRMException(
-					"The light WinRM backend supports only NTLM and Kerberos (requested: " + requested + ")."
+					"The light WinRM backend supports only NTLM, Kerberos, and Basic (requested: " +
+						requested +
+						")."
 				);
 			}
 		}

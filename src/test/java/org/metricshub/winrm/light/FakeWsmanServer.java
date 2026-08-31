@@ -113,6 +113,13 @@ public final class FakeWsmanServer implements AutoCloseable {
 	private volatile boolean closed;
 	private volatile boolean chunkedResponses;
 
+	// HTTP Basic mode: instead of the NTLM handshake, each request must carry the expected
+	// Authorization header, and scripted bodies are served as PLAINTEXT SOAP (Basic has no message
+	// protection — the payload is never encrypted by the client).
+	private boolean basicMode;
+	private String expectedBasicHeader;
+	private final List<String> requestAuthorizations = new CopyOnWriteArrayList<>();
+
 	/**
 	 * Start the fake server on an ephemeral local port.
 	 *
@@ -206,6 +213,31 @@ public final class FakeWsmanServer implements AutoCloseable {
 	public FakeWsmanServer withChunkedResponses() {
 		chunkedResponses = true;
 		return this;
+	}
+
+	/**
+	 * Enable HTTP Basic mode: every request must carry {@code expectedAuthorization} in its
+	 * {@code Authorization} header (401 otherwise), and the scripted bodies are served as plaintext
+	 * SOAP — Basic has no message protection, so the client never encrypts them.
+	 *
+	 * @param expectedAuthorization the exact {@code Authorization} header value to expect (e.g.
+	 *        {@code Basic <base64(user:pass)>})
+	 * @return this server, for chaining
+	 */
+	public FakeWsmanServer withBasicAuth(final String expectedAuthorization) {
+		basicMode = true;
+		expectedBasicHeader = expectedAuthorization;
+		return this;
+	}
+
+	/**
+	 * The {@code Authorization} header values received so far, in request order ({@code null}
+	 * entries for requests that carried none).
+	 *
+	 * @return a copy of the received authorization header values
+	 */
+	public List<String> requestAuthorizations() {
+		return new ArrayList<>(requestAuthorizations);
 	}
 
 	/**
@@ -313,6 +345,19 @@ public final class FakeWsmanServer implements AutoCloseable {
 					return; // client closed the connection
 				}
 				final String authorization = request.header("authorization");
+				requestAuthorizations.add(authorization);
+				if (basicMode) {
+					// HTTP Basic: the credential must ride the Authorization header of EVERY request,
+					// and there is no message protection — serve plaintext SOAP.
+					if (authorization == null || !authorization.equals(expectedBasicHeader)) {
+						respond(out, 401, "WWW-Authenticate: Basic realm=\"winrm\"", null, null);
+						continue;
+					}
+					if (!serveScriptedBasic(out, request.body)) {
+						return; // scripted mid-exchange drop
+					}
+					continue;
+				}
 				if (serverSession == null || authorization != null) {
 					final byte[] token = negotiateToken(authorization);
 					if (token == null) {
@@ -388,6 +433,49 @@ public final class FakeWsmanServer implements AutoCloseable {
 		}
 		final byte[] sealed = NtlmCrypto.encryptAndSign(session, next.soapBody.getBytes(StandardCharsets.UTF_8));
 		respond(out, next.status, null, NtlmCrypto.ENCRYPTED_CONTENT_TYPE, sealed);
+		return true;
+	}
+
+	/**
+	 * Serve the next scripted response in HTTP Basic mode: the request body is already plaintext
+	 * SOAP (no message protection) and the response is served as plaintext SOAP too.
+	 *
+	 * @return {@code true} to keep the connection alive, {@code false} when the script asked for a
+	 *         connection drop instead of a response
+	 */
+	private boolean serveScriptedBasic(final OutputStream out, final byte[] plaintextBody) throws IOException {
+		decryptedRequests.add(new String(plaintextBody, StandardCharsets.UTF_8));
+
+		Scripted next;
+		synchronized (script) {
+			next = script.pollFirst();
+		}
+		if (next != null && next.status == Scripted.DROP) {
+			return false;
+		}
+		if (next == null) {
+			next = new Scripted(
+				500,
+				"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\"><s:Body><s:Fault>" +
+					"<s:Reason><s:Text xml:lang=\"en-US\">FakeWsmanServer: no scripted response left</s:Text></s:Reason>" +
+					"</s:Fault></s:Body></s:Envelope>"
+			);
+		}
+		if (next.delayMillis > 0) {
+			try {
+				Thread.sleep(next.delayMillis);
+			} catch (final InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return false; // test shutdown
+			}
+		}
+		respond(
+			out,
+			next.status,
+			null,
+			"application/soap+xml;charset=UTF-8",
+			next.soapBody.getBytes(StandardCharsets.UTF_8)
+		);
 		return true;
 	}
 

@@ -28,7 +28,8 @@ import java.util.stream.Stream;
 
 public enum AuthenticationEnum {
 	NTLM,
-	KERBEROS;
+	KERBEROS,
+	BASIC;
 
 	private static final Map<String, AuthenticationEnum> VALUES_OF = Stream
 		.of(values())

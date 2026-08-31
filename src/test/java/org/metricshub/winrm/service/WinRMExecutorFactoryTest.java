@@ -94,6 +94,45 @@ class WinRMExecutorFactoryTest {
 	}
 
 	@Test
+	void basicAcceptedOverHttpAndHttps() throws Exception {
+		// Basic is stateless and rides the Authorization header, so it is supported over both
+		// transports. Constructing the executor opens no connection, so this stays offline.
+		try (
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTP),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.BASIC)
+			)) {
+			assertInstanceOf(LightWinRMService.class, executor);
+		}
+		try (
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTPS),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.BASIC)
+			)) {
+			assertInstanceOf(LightWinRMService.class, executor);
+		}
+	}
+
+	@Test
+	void basicFallsBackWithOtherSchemesOverHttp() throws Exception {
+		// Ordered fallback: [BASIC, NTLM] over HTTP is a valid candidate list (both are supported
+		// over HTTP), so it constructs successfully.
+		try (
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTP),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.BASIC, AuthenticationEnum.NTLM)
+			)) {
+			assertInstanceOf(LightWinRMService.class, executor);
+		}
+	}
+
+	@Test
 	void closedLightExecutorRejectsOperations() throws Exception {
 		// close() must release the executor for good: a later operation is rejected, not silently served
 		// by a fresh reconnect/handshake.

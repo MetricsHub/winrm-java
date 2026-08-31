@@ -34,6 +34,7 @@ import static org.metricshub.winrm.light.FakeWsmanResponses.signalResponse;
 import static org.metricshub.winrm.light.FakeWsmanResponses.stream;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -442,6 +443,103 @@ class WsmanProtocolTest {
 				() -> service.executeWql("SELECT Name FROM Win32_Service", TIMEOUT)
 			);
 			// Exact CXF-parity message (issue #106): operators and callers match on this format.
+			assertEquals(
+				"Authentication error on http://127.0.0.1:" + server.port() + "/wsman with user name \"FAKE\\user\"",
+				e.getMessage()
+			);
+		}
+	}
+
+	// --- HTTP Basic ---------------------------------------------------------------
+
+	@Test
+	void basicAuthenticatesEveryRequestOverPlaintextHttp() throws Exception {
+		// HTTP Basic is stateless: the Authorization header must repeat on EVERY request, and the
+		// payload is plaintext SOAP (no message protection). The fake server enforces the header and
+		// serves plaintext responses, so a successful round trip proves both.
+		final String expectedHeader = "Basic " + Base64.getEncoder().encodeToString(
+			(DOMAIN + "\\" + USER + ":" + PASSWORD).getBytes(StandardCharsets.UTF_8)
+		);
+		server.withBasicAuth(expectedHeader);
+		server
+			.enqueue(
+				200,
+				envelope(
+					"<wsen:EnumerateResponse xmlns:wsen=\"" +
+						WSEN +
+						"\" xmlns:wsman=\"" +
+						WSMAN +
+						"\">" +
+						"<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" +
+						"<wsman:Items>" +
+						service("Spooler", "Running") +
+						"</wsman:Items>" +
+						"</wsen:EnumerateResponse>"
+				)
+			)
+			.enqueue(
+				200,
+				envelope(
+					"<wsen:PullResponse xmlns:wsen=\"" +
+						WSEN +
+						"\" xmlns:wsman=\"" +
+						WSMAN +
+						"\">" +
+						"<wsman:Items>" +
+						service("WinRM", "Running") +
+						"</wsman:Items>" +
+						"<wsman:EndOfSequence/>" +
+						"</wsen:PullResponse>"
+				)
+			);
+
+		final WinRMEndpoint endpoint = new WinRMEndpoint(
+			WinRMHttpProtocolEnum.HTTP,
+			"127.0.0.1",
+			server.port(),
+			DOMAIN + "\\" + USER,
+			PASSWORD.toCharArray(),
+			null
+		);
+		try (
+			LightWinRMService service = LightWinRMService
+				.createInstance(endpoint, TIMEOUT, null, List.of(AuthenticationEnum.BASIC))) {
+			final List<Map<String, Object>> rows = service.executeWql("SELECT Name,State FROM Win32_Service", TIMEOUT);
+
+			assertEquals(2, rows.size());
+			assertEquals("Spooler", rows.get(0).get("Name"));
+			assertEquals("WinRM", rows.get(1).get("Name"));
+		}
+
+		// The header must have been repeated on BOTH the Enumerate and the Pull (stateless Basic).
+		final List<String> authorizations = server.requestAuthorizations();
+		assertEquals(2, authorizations.size(), () -> String.join("\n", authorizations));
+		assertEquals(expectedHeader, authorizations.get(0));
+		assertEquals(expectedHeader, authorizations.get(1));
+	}
+
+	@Test
+	void basicWithWrongCredentialSurfacesTheCxfAuthenticationErrorMessage() throws Exception {
+		// The server expects a different Basic credential than the client presents, so it rejects the
+		// request with 401; the client must surface the standard (CXF-parity) authentication error.
+		server.withBasicAuth("Basic " + Base64.getEncoder().encodeToString("user:wrong".getBytes(StandardCharsets.UTF_8)));
+		server.enqueue(200, envelope("<wsen:PullResponse xmlns:wsen=\"" + WSEN + "\"></wsen:PullResponse>"));
+
+		final WinRMEndpoint endpoint = new WinRMEndpoint(
+			WinRMHttpProtocolEnum.HTTP,
+			"127.0.0.1",
+			server.port(),
+			DOMAIN + "\\" + USER,
+			PASSWORD.toCharArray(),
+			null
+		);
+		try (
+			LightWinRMService service = LightWinRMService
+				.createInstance(endpoint, TIMEOUT, null, List.of(AuthenticationEnum.BASIC))) {
+			final WinRMException e = assertThrows(
+				WinRMException.class,
+				() -> service.executeWql("SELECT Name FROM Win32_Service", TIMEOUT)
+			);
 			assertEquals(
 				"Authentication error on http://127.0.0.1:" + server.port() + "/wsman with user name \"FAKE\\user\"",
 				e.getMessage()

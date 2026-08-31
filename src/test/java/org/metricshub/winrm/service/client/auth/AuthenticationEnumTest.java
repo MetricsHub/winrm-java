@@ -4,6 +4,7 @@ import static java.util.Optional.empty;
 import static java.util.Optional.of;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.metricshub.winrm.Utils.EMPTY;
+import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.BASIC;
 import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.KERBEROS;
 import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.NTLM;
 import static org.metricshub.winrm.service.client.auth.AuthenticationEnum.getValueOf;
@@ -23,5 +24,8 @@ class AuthenticationEnumTest {
 		assertEquals(of(KERBEROS), getValueOf(" kerberos "));
 		assertEquals(of(KERBEROS), getValueOf(" Kerberos "));
 		assertEquals(of(KERBEROS), getValueOf(" KERBEROS "));
+		assertEquals(of(BASIC), getValueOf(" basic "));
+		assertEquals(of(BASIC), getValueOf(" Basic "));
+		assertEquals(of(BASIC), getValueOf(" BASIC "));
 	}
 }

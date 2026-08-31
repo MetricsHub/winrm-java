@@ -53,9 +53,8 @@ import org.ietf.jgss.Oid;
  * the {@code java.security.krb5.*} system properties), exactly as the CXF path did — the library
  * sets none itself.
  */
-final class KerberosAuthScheme implements AuthScheme {
+final class KerberosAuthScheme extends PlaintextSoapAuthScheme {
 
-	private static final String SOAP_CONTENT_TYPE = "application/soap+xml;charset=UTF-8";
 	// SPNEGO mechanism OID — the "Negotiate" scheme Windows http.sys expects.
 	private static final String SPNEGO_OID = "1.3.6.1.5.5.2";
 
@@ -67,7 +66,6 @@ final class KerberosAuthScheme implements AuthScheme {
 	private final Path ticketCache;
 
 	private GSSContext context;
-	private boolean authenticated;
 
 	/**
 	 * @param servicePrincipalHost the host whose {@code HTTP/<host>} SPN to target — must be the FQDN
@@ -113,11 +111,6 @@ final class KerberosAuthScheme implements AuthScheme {
 	}
 
 	@Override
-	public boolean isAuthenticated() {
-		return authenticated;
-	}
-
-	@Override
 	public void reset() {
 		if (context != null) {
 			try {
@@ -128,22 +121,6 @@ final class KerberosAuthScheme implements AuthScheme {
 			context = null;
 		}
 		authenticated = false;
-	}
-
-	@Override
-	public byte[] wrap(final byte[] soapUtf8) {
-		// HTTPS only: TLS provides confidentiality, so the SOAP travels plaintext.
-		return soapUtf8;
-	}
-
-	@Override
-	public String wrapContentType() {
-		return SOAP_CONTENT_TYPE;
-	}
-
-	@Override
-	public byte[] unwrap(final HttpTransport.Response response) {
-		return response.body;
 	}
 
 	/** Obtain a Kerberos {@link Subject} (holding the TGT) via a programmatic JAAS login. */

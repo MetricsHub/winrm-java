@@ -397,7 +397,11 @@ public final class WinRmCli {
 			builder.authentication(
 				authentications
 					.stream()
-					.map(scheme -> scheme == AuthenticationEnum.KERBEROS ? AuthScheme.KERBEROS : AuthScheme.NTLM)
+					.map(
+						scheme -> scheme == AuthenticationEnum.KERBEROS
+							? AuthScheme.KERBEROS
+							: scheme == AuthenticationEnum.BASIC ? AuthScheme.BASIC : AuthScheme.NTLM
+					)
 					.toArray(AuthScheme[]::new)
 			);
 		}
@@ -506,6 +510,7 @@ public final class WinRmCli {
 			"      --https-permissive      Trust any HTTPS certificate and hostname (insecure)\n" +
 			"      --ntlm                  Use NTLM authentication (default)\n" +
 			"      --kerberos              Use Kerberos authentication (requires HTTPS)\n" +
+			"      --basic                 Use HTTP Basic authentication (use HTTPS to protect the credential)\n" +
 			"      --kerberos-kdc <host>   Set the Kerberos KDC; infer realm from its DNS suffix\n" +
 			"      --kerberos-realm <realm> Override the realm inferred from --kerberos-kdc\n" +
 			"      --help                  Show this help\n" +

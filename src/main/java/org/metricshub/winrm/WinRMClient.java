@@ -375,7 +375,7 @@ public final class WinRMClient implements AutoCloseable {
 		 * Set the authentication schemes, tried in the given order until one succeeds. Default:
 		 * NTLM only. Kerberos requires HTTPS.
 		 *
-		 * @param schemes the schemes in fallback order, e.g. {@code KERBEROS, NTLM}
+		 * @param schemes the schemes in fallback order, e.g. {@code KERBEROS, NTLM} or {@code BASIC}
 		 * @return this builder
 		 */
 		public Builder authentication(final AuthScheme... schemes) {
@@ -535,9 +535,17 @@ public final class WinRMClient implements AutoCloseable {
 			if (authentication != null) {
 				authentications = new ArrayList<>(authentication.size());
 				for (final AuthScheme scheme : authentication) {
-					authentications.add(
-						scheme == AuthScheme.KERBEROS ? AuthenticationEnum.KERBEROS : AuthenticationEnum.NTLM
-					);
+					switch (scheme) {
+					case KERBEROS:
+						authentications.add(AuthenticationEnum.KERBEROS);
+						break;
+					case BASIC:
+						authentications.add(AuthenticationEnum.BASIC);
+						break;
+					default:
+						authentications.add(AuthenticationEnum.NTLM);
+						break;
+					}
 				}
 			}
 
