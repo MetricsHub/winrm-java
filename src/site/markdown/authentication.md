@@ -114,7 +114,10 @@ try (WinRMClient client = WinRMClient.builder("server.example.com")
 The server must have Basic authentication enabled on the WinRM service — the `Basic` setting under
 the service's `auth` section, `False` by default:
 `winrm set winrm/config/service/auth @{Basic=true}`; see
-[Preparing the Windows Host](preparing-the-host.html).
+[Preparing the Windows Host](preparing-the-host.html). Over HTTPS that is all that is needed, since
+TLS provides the confidentiality. Over plain HTTP — which, as noted, should not be used — the
+service would additionally have to set `AllowUnencrypted=true` (otherwise it refuses the unprotected
+SOAP), which is exactly what the HTTPS recommendation exists to avoid.
 
 ## Authentication failures
 

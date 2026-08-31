@@ -31,9 +31,10 @@ here:
 
 * **`AllowUnencrypted` stays `False` for NTLM and Kerberos.** Over plain HTTP the client protects
   the payload with **NTLM message encryption**, so the service's default refusal of unencrypted
-  traffic is satisfied. (Exception: HTTP Basic has no message protection, so Basic requires
-  HTTPS, where TLS provides the confidentiality — see
-  [Authentication](authentication.html).)
+  traffic is satisfied. (Exception: HTTP Basic has no message protection, so it belongs on HTTPS,
+  where TLS provides the confidentiality and no extra setting is needed. If — contrary to that —
+  you run Basic over plain HTTP, the service must also set `AllowUnencrypted=true`, since otherwise
+  it refuses the unprotected SOAP — see [Authentication](authentication.html).)
 * **The service's `Basic` and `CredSSP` settings stay `False` unless you use HTTP Basic.** NTLM
   and Kerberos need neither. To use HTTP Basic, enable the `Basic` setting under the service's
   `auth` section — `winrm set winrm/config/service/auth @{Basic=true}` — and connect over HTTPS

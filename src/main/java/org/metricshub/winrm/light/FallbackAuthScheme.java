@@ -89,10 +89,12 @@ final class FallbackAuthScheme implements AuthScheme {
 
 	@Override
 	public void reset() {
-		// A dropped connection: clear the active scheme's session but keep it selected so the next
-		// authenticate() re-handshakes with the same (already-accepted) scheme.
-		if (active != null) {
-			active.reset();
+		// Clear EVERY candidate's session state, not just the active one: a dropped connection or
+		// close() must erase the derived, reversible secrets of every scheme — including a Basic
+		// credential held by a scheme that never became active — while startIndex keeps the fallback
+		// order intact, so the next authenticate() still retries the last-accepted scheme first.
+		for (final AuthScheme candidate : candidates) {
+			candidate.reset();
 		}
 	}
 

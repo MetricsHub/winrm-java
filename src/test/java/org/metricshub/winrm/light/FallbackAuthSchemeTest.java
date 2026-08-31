@@ -20,6 +20,7 @@ class FallbackAuthSchemeTest {
 		private final String requestAuthorization; // non-null mimics a stateless scheme (e.g. Basic)
 		private boolean authenticated;
 		private int authenticateCalls;
+		private int resetCalls;
 
 		FakeScheme(final String name, final int failFromCall) {
 			this(name, failFromCall, null);
@@ -55,11 +56,16 @@ class FallbackAuthSchemeTest {
 		@Override
 		public void reset() {
 			authenticated = false;
+			resetCalls++;
 		}
 
 		@Override
 		public byte[] wrap(final byte[] soapUtf8) {
 			return soapUtf8;
+		}
+
+		int resets() {
+			return resetCalls;
 		}
 
 		@Override
@@ -155,5 +161,26 @@ class FallbackAuthSchemeTest {
 
 		fallback.authenticate(dummyTransport());
 		assertEquals("Basic dXNlcjpwYXNz", fallback.requestAuthorization());
+	}
+
+	@Test
+	void resetClearsEveryCandidateNotJustTheActiveOne() throws Exception {
+		// close() and a dropped connection must erase the derived, reversible secrets of EVERY
+		// scheme in the list — including a stateless one (Basic) that never became active. The
+		// fallback order must survive: the next authenticate() still retries the first scheme.
+		final FakeScheme ntlm = new FakeScheme("ntlm", NEVER);
+		final FakeScheme basic = new FakeScheme("basic", NEVER, "Basic dXNlcjpwYXNz");
+		final FallbackAuthScheme fallback = new FallbackAuthScheme(List.of(ntlm, basic));
+
+		fallback.authenticate(dummyTransport()); // ntlm becomes active, basic stays inactive
+		fallback.reset();
+
+		assertEquals(1, ntlm.resets());
+		assertEquals(1, basic.resets()); // the inactive candidate is erased too
+
+		// The fallback order is intact: the same (first) scheme is retried on re-authentication.
+		assertEquals("Negotiate ntlm", fallback.authenticate(dummyTransport()));
+		assertEquals(2, ntlm.authenticateCalls); // initial handshake + retry after the reset
+		assertEquals(0, basic.authenticateCalls);
 	}
 }

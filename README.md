@@ -8,7 +8,7 @@
 See **[Project Documentation](https://metricshub.org/winrm-java)** and the [Javadoc](https://metricshub.org/winrm-java/apidocs) for more information on how to use this library in your code.
 
 The Windows Remote Management (WinRM) Java Client is a library that enables to:
-* Connect to a remote Windows server using one of the two authentication types (NTLM, KERBEROS)
+* Connect to a remote Windows server using one of three authentication types (NTLM, Kerberos, or Basic)
 * Execute WMI Query Language (WQL) queries which uses HTTP/HTTPS protocols.
 
 > ## ⚠️ Upgrading from 1.x
@@ -203,7 +203,8 @@ The pre-existing static helpers (`WinRMWqlExecutor.executeWql(...)`,
 The client has **zero runtime dependencies** (no Apache CXF / JAX-WS / JAXB, no BouncyCastle, no
 SLF4J — problems are reported through exceptions only) and is immune by construction to JAXP
 `ServiceLoader` conflicts (it uses the JDK-default XML factories). It supports **NTLM over HTTP
-(with message encryption) and HTTPS** and **Kerberos (SPNEGO) over HTTPS**.
+(with message encryption) and HTTPS**, **Kerberos (SPNEGO) over HTTPS**, and **HTTP Basic over
+HTTPS**.
 
 Files passed to `upload(...)` (or `localFileToCopyList` in the legacy API) are copied to the
 remote host **through the WinRM channel itself** (chunked base64 through the command shell,
