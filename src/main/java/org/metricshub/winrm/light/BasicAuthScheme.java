@@ -39,20 +39,25 @@ import java.util.Base64;
  * {@code String}), exactly like the NTLM scheme, so the caller remains the single owner of the
  * secret and can wipe it after {@code close()}. The derived {@code Authorization} header is held
  * as a wipeable {@code byte[]}, because Base64 is reversible: it is erased on
- * {@link #reset()} — which {@code close()} always runs — and re-derived from the caller's still
- * live array if the connection is (re)established before the caller wipes it.
+ * {@link #reset()}. {@code close()} erases it directly when it can acquire the connection permit;
+ * when an in-flight operation or streaming handle still holds the permit (a timed-out worker, for
+ * example) the last operation to release the connection erases it instead, so the credential
+ * cannot survive the close either way.
  */
 final class BasicAuthScheme extends PlaintextSoapAuthScheme {
 
 	// The full "Basic <base64>" header, held wipeable: it is a reversible copy of the credential,
-	// so it must not outlive the caller's own password array (erased in reset()).
-	private byte[] authorization;
+	// so it must not outlive the caller's own password array (erased in reset()). volatile: reset()
+	// can be called from another thread (close() or a worker releasing the connection) while a
+	// worker is reading the header.
+	private volatile byte[] authorization;
 	private final String username;
 	private final char[] password;
 
 	/**
-	 * @param username the account name exactly as the caller gave it (a domain-qualified name
-	 *        keeps its domain prefix, which is how the server locates the account)
+	 * @param username the account name (whitespace already stripped by the endpoint; a
+	 *        domain-qualified name keeps its domain prefix, which is how the server locates the
+	 *        account)
 	 * @param password the account password, kept as {@code char[]} so the caller owns the single
 	 *        wipeable copy of the secret
 	 */
@@ -122,11 +127,17 @@ final class BasicAuthScheme extends PlaintextSoapAuthScheme {
 
 	@Override
 	public void reset() {
-		// close() always reaches here, and the Base64 value is a reversible copy of the credential:
-		// erase it so wiping the caller's char[] afterward leaves no live copy of the password.
+		// Erase the Base64 credential — a reversible copy of the password — so that wiping the
+		// caller's char[] afterward leaves no live copy of the password. Called by close() when the
+		// connection permit is acquirable, and by WsmanClient when the last in-flight operation
+		// releases the connection after close() could not acquire the permit (a timed-out worker).
+		// The two callers are different threads with no shared lock, so this must be re-entrant and
+		// idempotent: capture the reference in a local so a concurrent reset() cannot null the field
+		// between the null-check and the fill (filling a twice-erased array is harmless).
 		authenticated = false;
-		if (authorization != null) {
-			Arrays.fill(authorization, (byte) 0);
+		final byte[] header = authorization;
+		if (header != null) {
+			Arrays.fill(header, (byte) 0);
 			authorization = null;
 		}
 	}

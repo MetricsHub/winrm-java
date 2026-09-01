@@ -74,11 +74,14 @@ public class WinRMEndpoint {
 
 		this.hostname = hostname.replaceAll("\\s", Utils.EMPTY);
 		this.password = password;
-		rawUsername = username;
 
 		this.namespace = buildNamespace(namespace);
 
 		final String user = username.replaceAll("\\s", Utils.EMPTY);
+		// Store the whitespace-stripped account for protocols that do not distinguish domain and
+		// username (Basic, where the whole string is the account), consistent with the normalized
+		// domain/username pair used by the other protocols; then split it into the pair for them.
+		rawUsername = user;
 		if (user.contains("\\")) {
 			final String[] array = user.split("\\\\");
 			domain = array[0];
@@ -110,7 +113,12 @@ public class WinRMEndpoint {
 		return domain;
 	}
 
-	/** get the username as indicated in the constructor (could be in domain\\user form) */
+	/**
+	 * Get the username, whitespace-stripped, in the form it was given in the constructor (could be
+	 * in domain\\user form). The whitespace is stripped exactly like the rest of the account parts,
+	 * so a protocol that uses this value (Basic) sends the same normalized account as the protocols
+	 * that use the {@link #getDomain()}/{@link #getUsername()} pair.
+	 */
 	public String getRawUsername() {
 		return rawUsername;
 	}

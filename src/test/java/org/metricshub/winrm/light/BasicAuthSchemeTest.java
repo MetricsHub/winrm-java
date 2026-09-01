@@ -65,6 +65,17 @@ class BasicAuthSchemeTest {
 	}
 
 	@Test
+	void resetIsIdempotentAndSafeToCallTwice() {
+		// close() and the last in-flight operation can both run the wipe on different threads, so
+		// reset() must be re-entrant: a second call (finding the already-erased field) must be a no-op.
+		final BasicAuthScheme scheme = new BasicAuthScheme("user", "password".toCharArray());
+		scheme.reset();
+		scheme.reset();
+		assertFalse(scheme.isAuthenticated());
+		assertThrows(IllegalStateException.class, scheme::requestAuthorization);
+	}
+
+	@Test
 	void wrapAndUnwrapArePlaintextPassThrough() {
 		final BasicAuthScheme scheme = new BasicAuthScheme("user", "password".toCharArray());
 		final byte[] soap = "<soap/>".getBytes(StandardCharsets.UTF_8);

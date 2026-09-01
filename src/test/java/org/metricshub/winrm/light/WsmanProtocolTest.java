@@ -547,7 +547,58 @@ class WsmanProtocolTest {
 		}
 	}
 
+	@Test
+	void basicSendsTheWhitespaceNormalizedAccountOnTheWire() throws Exception {
+		// The endpoint strips whitespace from the account parts (domain / user) for the
+		// domain-splitting protocols; Basic must send the SAME normalized account (the whole
+		// whitespace-stripped username, still domain-qualified) rather than the padded string.
+		server.withBasicAuth(expectedNormalizedHeader());
+		server.enqueue(
+			200,
+			envelope(
+				"<wsen:EnumerateResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN
+					+ "\"><wsen:EnumerationContext>uuid:1</wsen:EnumerationContext></wsen:EnumerateResponse>"
+			)
+		);
+		server.enqueue(
+			200,
+			envelope(
+				"<wsen:PullResponse xmlns:wsen=\"" + WSEN + "\"><wsman:EndOfSequence xmlns:wsman=\"" + WSMAN
+					+ "\"/></wsen:PullResponse>"
+			)
+		);
+
+		// The caller passes the account heavily padded with whitespace, exactly the form that
+		// previously leaked through unnormalized: the endpoint must strip it to the plain account.
+		final WinRMEndpoint endpoint = new WinRMEndpoint(
+			WinRMHttpProtocolEnum.HTTP,
+			"127.0.0.1",
+			server.port(),
+			" \t\r\n " + DOMAIN + " \t\r\n \\ \t\r\n " + USER + " \t\r\n ",
+			PASSWORD.toCharArray(),
+			null
+		);
+		// The endpoint's own normalization is what the wire credential must match.
+		assertEquals(DOMAIN + "\\" + USER, endpoint.getRawUsername());
+		try (
+			LightWinRMService service = LightWinRMService
+				.createInstance(endpoint, TIMEOUT, null, List.of(AuthenticationEnum.BASIC))) {
+			final List<Map<String, Object>> rows = service.executeWql("SELECT Name FROM Win32_Service", TIMEOUT);
+			assertEquals(0, rows.size());
+		}
+
+		// The server would have 401'd on any non-normalized header, so a successful round trip
+		// proves the client sent the normalized account, exactly as the other protocols do.
+		assertEquals(expectedNormalizedHeader(), server.requestAuthorizations().get(0));
+	}
+
 	// --- response body builders -----------------------------------------------------
+
+	private static String expectedNormalizedHeader() {
+		return "Basic " + Base64.getEncoder().encodeToString(
+			(DOMAIN + "\\" + USER + ":" + PASSWORD).getBytes(StandardCharsets.UTF_8)
+		);
+	}
 
 	private static String service(final String name, final String state) {
 		return instance("Win32_Service", "Name", name, "State", state);

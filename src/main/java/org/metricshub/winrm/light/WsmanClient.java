@@ -132,8 +132,38 @@ final class WsmanClient implements AutoCloseable {
 	private void lockAbortably() throws InterruptedException {
 		connectionPermit.acquire();
 		if (Thread.interrupted()) {
-			connectionPermit.release();
+			releaseConnection();
 			throw new InterruptedException("Operation abandoned: cancelled while waiting for the connection.");
+		}
+	}
+
+	/**
+	 * Release the connection permit, disposing the authentication state when the client has been
+	 * closed. {@link #close()} only disposes the state when it can acquire the permit itself; when it
+	 * races an operation that still holds it (a timed-out worker blocked on a socket read, an open
+	 * streaming handle) close skips the dispose and relies on the LAST operation to release the
+	 * permit here. The connection is a serial channel (one permit), so the releasing operation is
+	 * the last one in flight: nothing else is mid-read, and resetting the scheme is race-free. This
+	 * is what erases the connection-bound secrets the instant the connection is gone — the Basic
+	 * credential in particular, which is a reversible copy of the password — rather than leaving
+	 * them in a closed client that stays referenced.
+	 */
+	private void releaseConnection() {
+		// Wipe while still holding the permit: the connection is a serial channel (one permit), so
+		// this operation is the last one in flight and no other operation is reading or writing the
+		// auth state — the wipe is race-free. This covers the common case where close() has already
+		// run (transport closed, permit unacquirable by close, so close's own reset was skipped).
+		if (closed) {
+			auth.reset();
+		}
+		connectionPermit.release();
+		// Best-effort final sweep. close() may set 'closed' and fail its tryAcquire AFTER the check
+		// above but BEFORE this release: then close's own reset was skipped (it never got the permit)
+		// and the check above missed it. Resetting here, without the permit, is safe unconditionally:
+		// reset() only writes fixed reset values to its volatile fields and is idempotent, so even a
+		// concurrent reset (from close(), or from a worker that already released earlier) is harmless.
+		if (closed) {
+			auth.reset();
 		}
 	}
 
@@ -291,7 +321,7 @@ final class WsmanClient implements AutoCloseable {
 			return enumeration;
 		} finally {
 			if (!opened) {
-				connectionPermit.release();
+				releaseConnection();
 			}
 		}
 	}
@@ -370,7 +400,7 @@ final class WsmanClient implements AutoCloseable {
 			while (cursor >= page.size()) {
 				if (endOfSequence) {
 					finished = true;
-					connectionPermit.release();
+					releaseConnection();
 					return null;
 				}
 				// Stop pulling once the caller has been told the operation timed out.
@@ -409,7 +439,7 @@ final class WsmanClient implements AutoCloseable {
 					}
 				}
 			} finally {
-				connectionPermit.release();
+				releaseConnection();
 			}
 		}
 	}
@@ -544,7 +574,7 @@ final class WsmanClient implements AutoCloseable {
 			return new RemoteCommand(commandId, operationTimeoutMs, failOnQuietTimeout);
 		} finally {
 			if (!opened) {
-				connectionPermit.release();
+				releaseConnection();
 			}
 		}
 	}
@@ -846,7 +876,7 @@ final class WsmanClient implements AutoCloseable {
 					}
 				}
 			} finally {
-				connectionPermit.release();
+				releaseConnection();
 			}
 		}
 
@@ -864,7 +894,7 @@ final class WsmanClient implements AutoCloseable {
 					terminateCompleted(budgetMs);
 				}
 			} finally {
-				connectionPermit.release();
+				releaseConnection();
 			}
 		}
 

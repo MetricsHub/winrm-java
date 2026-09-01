@@ -112,9 +112,15 @@ final class KerberosAuthScheme extends PlaintextSoapAuthScheme {
 
 	@Override
 	public void reset() {
-		if (context != null) {
+		// The wipe can come from two threads at once (close() and the last in-flight operation
+		// releasing the connection) with no shared lock, so claim the context in a local before
+		// disposing: a concurrent reset() that nulls the field cannot make this one dispose a
+		// half-disposed GSSContext. Disposing the same context twice is the hazard, not the double
+		// null-store, so the local (not the field) is what guards it.
+		final GSSContext ctx = context;
+		if (ctx != null) {
 			try {
-				context.dispose();
+				ctx.dispose();
 			} catch (final GSSException ignored) {
 				// disposing a dead context is best-effort
 			}
