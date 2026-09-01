@@ -278,10 +278,12 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 				// else: Kerberos is unavailable over plain HTTP — leave it out of the candidate list.
 			} else if (auth == AuthenticationEnum.BASIC) {
 				// Basic is stateless and rides the Authorization header of every request, so it works
-				// over both transports. The credential is the (whitespace-stripped) raw username: a
-				// domain-qualified name keeps its domain prefix, which is how the server locates the
-				// account — the same normalized account the NTLM/Kerberos candidates use.
-				schemes.add(new BasicAuthScheme(winRMEndpoint.getRawUsername(), password));
+				// over both transports. Rebuild the account from the whitespace-normalized
+				// domain/username parts (the same account NTLM/Kerberos use), domain-qualified when
+				// the endpoint was given one — the endpoint's raw username is kept verbatim for
+				// public-API stability and is intentionally NOT used here.
+				final String basicAccount = domain != null ? domain + "\\" + username : username;
+				schemes.add(new BasicAuthScheme(basicAccount, password));
 			} else {
 				throw new WinRMException(
 					"The light WinRM backend supports only NTLM, Kerberos, and Basic (requested: " +

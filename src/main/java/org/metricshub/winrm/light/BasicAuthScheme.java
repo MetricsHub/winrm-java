@@ -55,9 +55,10 @@ final class BasicAuthScheme extends PlaintextSoapAuthScheme {
 	private final char[] password;
 
 	/**
-	 * @param username the account name (whitespace already stripped by the endpoint; a
-	 *        domain-qualified name keeps its domain prefix, which is how the server locates the
-	 *        account)
+	 * @param username the account name (a domain-qualified name keeps its domain prefix, which is
+	 *        how the server locates the account). The caller passes an already whitespace-stripped
+	 *        account (the service rebuilds it from the endpoint's normalized domain/username parts),
+	 *        so it is used verbatim here.
 	 * @param password the account password, kept as {@code char[]} so the caller owns the single
 	 *        wipeable copy of the secret
 	 */

@@ -578,8 +578,9 @@ class WsmanProtocolTest {
 			PASSWORD.toCharArray(),
 			null
 		);
-		// The endpoint's own normalization is what the wire credential must match.
-		assertEquals(DOMAIN + "\\" + USER, endpoint.getRawUsername());
+		// The endpoint keeps the raw username verbatim (stable public API), but the wire credential
+		// must be the normalized account the service rebuilds from domain/username.
+		assertEquals(" \t\r\n " + DOMAIN + " \t\r\n \\ \t\r\n " + USER + " \t\r\n ", endpoint.getRawUsername());
 		try (
 			LightWinRMService service = LightWinRMService
 				.createInstance(endpoint, TIMEOUT, null, List.of(AuthenticationEnum.BASIC))) {

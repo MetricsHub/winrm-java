@@ -44,9 +44,9 @@ class WinRMEndpointTest {
 			assertEquals("http://host:5985/wsman", winRMEndpoint.getEndpoint());
 			assertEquals("domain", winRMEndpoint.getDomain());
 			assertEquals(USER, winRMEndpoint.getUsername());
-			// The raw account is whitespace-stripped too, so a protocol that uses it (Basic)
-			// sends the same normalized account as the domain/username pair above.
-			assertEquals("domain\\user", winRMEndpoint.getRawUsername());
+			// The raw username is preserved VERBATIM (whitespace included) — it is the stable public
+			// API used by equals()/hashCode(); the domain/username pair above is the normalized form.
+			assertEquals(" \t\r\n domain \t\r\n \\ \t\r\n user \t\r\n ", winRMEndpoint.getRawUsername());
 			assertArrayEquals(PASSWORD, winRMEndpoint.getPassword());
 			assertEquals("ROOT/CIMV2", winRMEndpoint.getNamespace());
 			assertEquals(HTTP, winRMEndpoint.getProtocol());
