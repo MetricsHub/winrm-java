@@ -246,9 +246,11 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	 * Resolve the requested authentication schemes into a single {@link AuthScheme}, honoring the
 	 * caller's order. {@code null}/empty means NTLM only. A single scheme is used directly; several
 	 * become an ordered {@link FallbackAuthScheme} (e.g. Kerberos then NTLM). Kerberos requires HTTPS
-	 * (no message encryption over plain HTTP, matching the CXF backend), so it is dropped from the
-	 * candidate list over HTTP — a fallback list then uses its remaining schemes, and a Kerberos-only
-	 * request over HTTP fails toward the escape hatch.
+	 * (no message encryption over plain HTTP, matching the CXF backend) and is rejected FAIL-CLOSED
+	 * for EVERY list that contains it over HTTP — not just a Kerberos-only request: silently dropping
+	 * it from a fallback list (e.g. {@code [KERBEROS, NTLM]}) would downgrade the client to another
+	 * scheme without the caller's consent, contradicting the builder's "Kerberos requested over HTTP
+	 * is rejected" contract.
 	 */
 	private static AuthScheme resolveAuthScheme(
 		final WinRMEndpoint winRMEndpoint,
@@ -274,8 +276,15 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 				if (https) {
 					// The SPN is HTTP/<hostname>, so the caller must connect by the FQDN the KDC knows.
 					schemes.add(new KerberosAuthScheme(winRMEndpoint.getHostname(), username, password, ticketCache));
+				} else {
+					// Fail closed: Kerberos cannot be protected over plain HTTP, so reject it for any
+					// list rather than silently downgrading to the remaining schemes.
+					throw new WinRMException(
+						"Kerberos over WinRM requires HTTPS (endpoint was " +
+							winRMEndpoint.getEndpoint() +
+							"): there is no Kerberos message encryption over plain HTTP. Use https()."
+					);
 				}
-				// else: Kerberos is unavailable over plain HTTP — leave it out of the candidate list.
 			} else if (auth == AuthenticationEnum.BASIC) {
 				// Basic is stateless and rides the Authorization header of every request, so it works
 				// over both transports. Rebuild the account from the whitespace-normalized
@@ -293,14 +302,6 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			}
 		}
 
-		if (schemes.isEmpty()) {
-			// e.g. Kerberos requested over plain HTTP with no other scheme to fall back to.
-			throw new WinRMException(
-				"Kerberos over WinRM requires HTTPS (endpoint was " +
-					winRMEndpoint.getEndpoint() +
-					"): there is no Kerberos message encryption over plain HTTP. Use HTTPS, or add NTLM to the authentication list."
-			);
-		}
 		return schemes.size() == 1 ? schemes.get(0) : new FallbackAuthScheme(schemes);
 	}
 

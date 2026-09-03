@@ -311,8 +311,10 @@ public final class WinRMClient implements AutoCloseable {
 		 * Connect over HTTP (port 5985 unless {@link #port(int)} is set) — the default. With NTLM
 		 * (the default scheme) the SOAP messages are NTLM-encrypted on the wire, so plaintext HTTP
 		 * is still protected. Other schemes change that guarantee: HTTP Basic sends both the
-		 * credential and the SOAP in cleartext, so use {@link #https()} with Basic (Kerberos over
-		 * plain HTTP is rejected, since it cannot be protected).
+		 * credential and the SOAP in cleartext, so use {@link #https()} with Basic. Kerberos
+		 * requires HTTPS; it is rejected fail-closed at {@link #build()} for ANY scheme list that
+		 * contains it — including an ordered fallback such as {@code (KERBEROS, NTLM)} — rather
+		 * than being silently dropped and downgraded to another scheme.
 		 *
 		 * @return this builder
 		 */
