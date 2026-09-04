@@ -104,14 +104,28 @@ final class KerberosAuthScheme extends PlaintextSoapAuthScheme {
 				// NT_HOSTBASED_SERVICE "HTTP@host" maps to the SPN HTTP/host.
 				final GSSName serverName = manager.createName("HTTP@" + servicePrincipalHost, GSSName.NT_HOSTBASED_SERVICE);
 				final GSSContext newContext = manager.createContext(serverName, spnego, null, GSSContext.DEFAULT_LIFETIME);
-				newContext.requestMutualAuth(true);
-				newContext.requestCredDeleg(false);
-				// The AP-REQ is complete after the first call; the KDC issued the service ticket using the
-				// Subject's TGT. The server validates it on the first real request (and, over HTTPS, TLS
-				// already authenticates the server, so we do not need to process a mutual-auth reply token).
-				final byte[] token = newContext.initSecContext(new byte[0], 0, 0);
-				context.set(newContext);
-				return token;
+				try {
+					newContext.requestMutualAuth(true);
+					newContext.requestCredDeleg(false);
+					// The AP-REQ is complete after the first call; the KDC issued the service ticket using the
+					// Subject's TGT. The server validates it on the first real request (and, over HTTPS, TLS
+					// already authenticates the server, so we do not need to process a mutual-auth reply token).
+					final byte[] token = newContext.initSecContext(new byte[0], 0, 0);
+					// Publish only on success: a failed setup (below) must not leave a half-initialized
+					// context in `context`, and the success path is disposed by the normal reset()/close().
+					context.set(newContext);
+					return token;
+				} catch (final Exception e) {
+					// Dispose the context on any failure before it is published to `context`: otherwise no
+					// reset()/close() could ever reach it, and each failed attempt (e.g. an unavailable
+					// service principal or KDC) would leak implementation/native GSS resources.
+					try {
+						newContext.dispose();
+					} catch (final GSSException ignored) {
+						// disposing an already-failed context is best-effort
+					}
+					throw e;
+				}
 			}
 		);
 		authenticated = true;

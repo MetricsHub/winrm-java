@@ -116,8 +116,13 @@ public final class FakeWsmanServer implements AutoCloseable {
 	// HTTP Basic mode: instead of the NTLM handshake, each request must carry the expected
 	// Authorization header, and scripted bodies are served as PLAINTEXT SOAP (Basic has no message
 	// protection — the payload is never encrypted by the client).
-	private boolean basicMode;
-	private String expectedBasicHeader;
+	// Both are volatile: withBasicAuth() writes them on the test thread, while handleConnection()
+	// reads them on a separately spawned server thread, and the server thread must observe the
+	// expected header before (or together with) the mode flag. withBasicAuth() writes the header
+	// FIRST and the flag SECOND, so a reader that sees basicMode == true is guaranteed to see the
+	// header already set (volatile write ordering / happens-before).
+	private volatile boolean basicMode;
+	private volatile String expectedBasicHeader;
 	private final List<String> requestAuthorizations = new CopyOnWriteArrayList<>();
 
 	/**
@@ -225,8 +230,10 @@ public final class FakeWsmanServer implements AutoCloseable {
 	 * @return this server, for chaining
 	 */
 	public FakeWsmanServer withBasicAuth(final String expectedAuthorization) {
-		basicMode = true;
+		// Write the header before enabling the mode (see the field comment): the server thread must
+		// never observe basicMode == true with a null expected header.
 		expectedBasicHeader = expectedAuthorization;
+		basicMode = true;
 		return this;
 	}
 

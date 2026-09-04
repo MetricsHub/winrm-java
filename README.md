@@ -102,7 +102,8 @@ try (WinRMClient client = WinRMClient.builder("server01.acme.com")
 ```
 
 Connection-scoped options on the builder: `https()`, `port(int)`,
-`authentication(AuthScheme.KERBEROS, AuthScheme.NTLM)` (ordered fallback; NTLM is the default),
+`authentication(AuthScheme.KERBEROS, AuthScheme.NTLM)` (ordered fallback; NTLM is the default —
+Kerberos in the list requires `https()`),
 `ticketCache(Path)`, `namespace(String)`, `trustAllCertificates()` (per-client alternative to the
 `org.metricshub.winrm.tls.insecure` system property; insecure, testing only), and
 `sslContext(SSLContext)` for a dedicated trust store.

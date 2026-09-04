@@ -14,6 +14,7 @@ values:
 import org.metricshub.winrm.AuthScheme;
 
 WinRMClient.builder("server.example.com")
+    .https()
     .credentials("DOMAIN\\Administrator", password)
     .authentication(AuthScheme.NTLM)                       // NTLM only (also the default)
     // .authentication(AuthScheme.KERBEROS)                // Kerberos only
@@ -97,9 +98,11 @@ handshake and no message protection, so the payload travels as plaintext SOAP. I
 transports, but over plain HTTP the credential and the data are sent **in the clear**: use Basic
 over HTTPS only, where TLS protects both.
 
-The credential is the user name exactly as given to `credentials(...)`. A domain-qualified name
-(`DOMAIN\user`) keeps its domain prefix on the wire, which is how a domain controller locates the
-account; a bare name is used as-is.
+The credential is the user name, **with all whitespace removed** before it is sent: a
+`DOMAIN\user` account is rebuilt as `DOMAIN` + `\` + the account (the backslash is where the domain
+and account are split on), and a bare name is sent as-is. Windows account names contain no
+whitespace, so the removal is a no-op in practice — but if you supply one, the header carries the
+whitespace-stripped account, not the exact string you typed.
 
 ```java
 try (WinRMClient client = WinRMClient.builder("server.example.com")
