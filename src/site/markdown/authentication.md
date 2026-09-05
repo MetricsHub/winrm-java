@@ -127,10 +127,13 @@ TLS provides the confidentiality. Over plain HTTP — which, as noted, should no
 service would additionally have to set `AllowUnencrypted=true` (otherwise it refuses the unprotected
 SOAP), which is exactly what the HTTPS recommendation exists to avoid.
 
-Note that every server-side refusal above surfaces as the same `401`: a Basic authentication
-error can mean a wrong password, but also a domain-qualified or domain account, `Basic`
-disabled on the service, or unencrypted HTTP with `AllowUnencrypted=false` — check the
-configuration before suspecting the credential.
+Note that most server-side refusals above surface as the same `401`: a Basic authentication
+error can mean a wrong password, but also a domain-qualified or domain account, or `Basic`
+disabled on the service — check the configuration before suspecting the credential. Unencrypted
+HTTP with `AllowUnencrypted=false` is refused too, but not always as a `401`: depending on the
+Windows version, the service may authenticate the credential and then reject the unprotected
+SOAP with a WSMan fault (a `401` was observed on Server 2008 R2, a fault is reported on later
+versions), so that misconfiguration can surface as either an authentication error or a fault.
 
 ## Authentication failures
 
