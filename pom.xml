@@ -75,6 +75,11 @@
 		<!-- Java 11 -->
 		<maven.compiler.release>11</maven.compiler.release>
 
+		<!-- Encoding of the generated site reports. oss-parent only sets the source encoding;
+		     spotbugs-maven-plugin 4.10.4.0 stopped defaulting to UTF-8 when this is missing and
+		     fails with "charsetName" while rendering its report during `mvn verify site`. -->
+		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
 		<!-- Reproducible Build -->
 		<!-- See https://maven.apache.org/guides/mini/guide-reproducible-builds.html -->
 		<!-- Also drives the Maven site copyright year and "Documentation as of" date; bump at release. -->
