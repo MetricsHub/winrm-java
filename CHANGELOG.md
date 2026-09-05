@@ -14,8 +14,10 @@ Kerberos:
   there is no message protection — the payload travels as plaintext SOAP. The scheme is accepted
   over both transports, but it must be used over **HTTPS** in practice, where TLS protects the
   credential and the payload (over plain HTTP both travel in the clear).
-* A domain-qualified user name (`DOMAIN\user`) keeps its domain prefix on the wire; the server
-  must have the `Basic` setting enabled on the WinRM service (`winrm/config/service/auth`).
+* On Windows, WinRM accepts Basic for **local accounts only**, addressed by their **bare user
+  name**: a domain account — or even a local account written as `MACHINE\user` — is rejected
+  with a 401 (verified against a real host). The server must have the `Basic` setting enabled
+  on the WinRM service (`winrm/config/service/auth`).
 * `BASIC` joins `AuthenticationEnum` (legacy API) and participates in the ordered-fallback list
   like the other schemes.
 

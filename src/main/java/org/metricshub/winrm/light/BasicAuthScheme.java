@@ -55,10 +55,12 @@ final class BasicAuthScheme extends PlaintextSoapAuthScheme {
 	private final char[] password;
 
 	/**
-	 * @param username the account name (a domain-qualified name keeps its domain prefix, which is
-	 *        how the server locates the account). The caller passes an already whitespace-stripped
-	 *        account (the service rebuilds it from the endpoint's normalized domain/username parts),
-	 *        so it is used verbatim here.
+	 * @param username the account name, used verbatim. A qualified name keeps its prefix on the
+	 *        wire, but Windows WinRM accepts Basic for bare local account names only and 401s any
+	 *        {@code DOMAIN\}/{@code MACHINE\}-qualified form (the qualified form is still sent
+	 *        as-is for non-Microsoft WSMan services). The caller passes an already
+	 *        whitespace-stripped account (the service rebuilds it from the endpoint's normalized
+	 *        domain/username parts).
 	 * @param password the account password, kept as {@code char[]} so the caller owns the single
 	 *        wipeable copy of the secret
 	 */

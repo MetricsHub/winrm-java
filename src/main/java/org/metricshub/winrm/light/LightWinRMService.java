@@ -290,7 +290,9 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 				// over both transports. Rebuild the account from the whitespace-normalized
 				// domain/username parts (the same account NTLM/Kerberos use), domain-qualified when
 				// the endpoint was given one — the endpoint's raw username is kept verbatim for
-				// public-API stability and is intentionally NOT used here.
+				// public-API stability and is intentionally NOT used here. Windows WinRM accepts
+				// Basic for bare local account names only (a qualified name gets a 401), but the
+				// qualified form is passed through unchanged for non-Microsoft WSMan services.
 				final String basicAccount = domain != null ? domain + "\\" + username : username;
 				schemes.add(new BasicAuthScheme(basicAccount, password));
 			} else {

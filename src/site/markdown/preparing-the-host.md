@@ -37,8 +37,9 @@ here:
   it refuses the unprotected SOAP — see [Authentication](authentication.html).)
 * **The service's `Basic` and `CredSSP` settings stay `False` unless you use HTTP Basic.** NTLM
   and Kerberos need neither. To use HTTP Basic, enable the `Basic` setting under the service's
-  `auth` section — `winrm set winrm/config/service/auth @{Basic=true}` — and connect over HTTPS
-  ([Authentication](authentication.html)).
+  `auth` section — `winrm set winrm/config/service/auth @{Basic=true}` — connect over HTTPS, and
+  authenticate with a **bare local account name**: Windows rejects Basic for domain accounts and
+  for any `DOMAIN\`-qualified name ([Authentication](authentication.html)).
 * **`TrustedHosts` is irrelevant.** That is a setting on the *Windows* WinRM **client**, consulted
   by the `winrs` command-line tool. A Java client never reads it, so you do not need to add anything
   to it on either machine.
