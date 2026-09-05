@@ -82,6 +82,8 @@ requires `--kerberos-kdc`.
 `--basic` authenticates with HTTP Basic, sending the credential in the `Authorization` header of
 every request. It has no message protection, so the credential and payload are plaintext over HTTP —
 combine it with `--https` (and `--https-permissive` for self-signed hosts) so TLS protects them.
+On Windows, use a **bare local account name** with `-u`: the WinRM service rejects Basic for
+domain accounts and for any `DOMAIN\`-qualified name.
 
 See [Authentication](authentication.html) for how NTLM, Kerberos, and Basic work on the wire.
 

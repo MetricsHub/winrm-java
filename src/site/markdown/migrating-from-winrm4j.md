@@ -139,7 +139,10 @@ the switch:
   protection: it accepts the scheme over both transports, so **use `https()` with it** — without
   TLS, the credential and payload travel in the clear and the client will not stop you. The host
   must have the `Basic` setting enabled on the WinRM service and be reachable over HTTPS
-  ([Preparing the Windows Host](preparing-the-host.html)). NTLM remains the recommended scheme.
+  ([Preparing the Windows Host](preparing-the-host.html)), and the credential must be a **bare
+  local account name** — Windows rejects Basic for domain accounts and for any
+  `DOMAIN\`/`MACHINE\`-qualified name ([Authentication](authentication.html)). NTLM remains the
+  recommended scheme.
 * **Kerberos requires HTTPS.** winrm4j runs Kerberos over plain HTTP; this client refuses at
   `build()`, because it does not implement Kerberos message encryption — without TLS the payload
   would travel unprotected. Connect with `https()` and by the FQDN the KDC knows

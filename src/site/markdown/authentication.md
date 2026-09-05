@@ -100,16 +100,19 @@ handshake and no message protection, so the payload travels as plaintext SOAP. I
 transports, but over plain HTTP the credential and the data are sent **in the clear**: use Basic
 over HTTPS only, where TLS protects both.
 
-The credential is the user name, **with all whitespace removed** before it is sent: a
-`DOMAIN\user` account is rebuilt as `DOMAIN` + `\` + the account (the backslash is where the domain
-and account are split on), and a bare name is sent as-is. Windows account names contain no
-whitespace, so the removal is a no-op in practice — but if you supply one, the header carries the
-whitespace-stripped account, not the exact string you typed.
+On Windows, WinRM accepts Basic for **local accounts only**, addressed by their **bare user
+name**: a domain account is rejected, and so is a *local* account written with a qualifying
+prefix — `MACHINE\user` or `DOMAIN\user` gets a `401` even when the password is correct
+(verified against a real host). Use `credentials("user", password)`, not
+`credentials("MACHINE\\user", password)`. The client itself does not reject a qualified name —
+some non-Microsoft WSMan services accept one — and sends the account with all whitespace
+removed: a `DOMAIN\user` value is rebuilt as `DOMAIN` + `\` + the account, and a bare name is
+sent as-is.
 
 ```java
 try (WinRMClient client = WinRMClient.builder("server.example.com")
         .https()
-        .credentials("DOMAIN\\Administrator", password)
+        .credentials("Administrator", password)   // Windows: a bare LOCAL account name
         .authentication(AuthScheme.BASIC)
         .build()) {
     ...
@@ -123,6 +126,11 @@ the service's `auth` section, `False` by default:
 TLS provides the confidentiality. Over plain HTTP — which, as noted, should not be used — the
 service would additionally have to set `AllowUnencrypted=true` (otherwise it refuses the unprotected
 SOAP), which is exactly what the HTTPS recommendation exists to avoid.
+
+Note that every server-side refusal above surfaces as the same `401`: a Basic authentication
+error can mean a wrong password, but also a domain-qualified or domain account, `Basic`
+disabled on the service, or unencrypted HTTP with `AllowUnencrypted=false` — check the
+configuration before suspecting the credential.
 
 ## Authentication failures
 
