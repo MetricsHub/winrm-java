@@ -130,6 +130,14 @@ Consequences:
 
 ### Changed
 
+- **Kerberos over plain HTTP is now rejected for any authentication list that contains it.**
+  An ordered fallback list such as `authentication(AuthScheme.KERBEROS, AuthScheme.NTLM)` on the
+  default (HTTP) builder previously dropped the Kerberos entry and quietly fell back to the
+  remaining schemes (NTLM); it now fails at `build()` with a `WinRMClientException`
+  ("Kerberos over WinRM requires HTTPS …"). This makes the rejection fail-closed for every list
+  rather than only a Kerberos-only one, matching the builder's documented "Kerberos requested over
+  HTTP is rejected" contract and the CLI's `--kerberos` requiring `--https`. Existing code that
+  uses such a list over plain HTTP must either call `https()` or remove Kerberos from the list.
 - HTTPS connections validate certificates and verify hostnames by default (see the breaking
   change above).
 - The exception surface matches the pre-2.0.0 CXF backend (feature parity): authentication
