@@ -8,7 +8,7 @@
 See **[Project Documentation](https://metricshub.org/winrm-java)** and the [Javadoc](https://metricshub.org/winrm-java/apidocs) for more information on how to use this library in your code.
 
 The Windows Remote Management (WinRM) Java Client is a library that enables to:
-* Connect to a remote Windows server using one of the two authentication types (NTLM, KERBEROS)
+* Connect to a remote Windows server using one of three authentication types (NTLM, Kerberos, or Basic)
 * Execute WMI Query Language (WQL) queries which uses HTTP/HTTPS protocols.
 
 > ## ⚠️ Upgrading from 1.x
@@ -54,9 +54,11 @@ WinRM must be enabled on the targeted Windows host, and the account must have su
   Non-administrator accounts need an explicit grant on the WinRM listener (`RootSDDL`), plus — only
   if they run WQL queries — WMI grants (`WinRMRemoteWMIUsers__` and namespace rights). An account
   that only runs commands never reaches WMI and needs nothing there.
-* `AllowUnencrypted`, `Basic`, `CredSSP` and `TrustedHosts` do **not** need to be changed: over
+* With NTLM, `AllowUnencrypted`, `CredSSP` and `TrustedHosts` do **not** need to be changed: over
   plain HTTP the payload is protected by NTLM message encryption, and `TrustedHosts` is a
-  Windows-client setting that a Java client never reads.
+  Windows-client setting that a Java client never reads. The HTTP Basic scheme is the exception:
+  enable the service's `Basic` setting, and — over plain HTTP only — also `AllowUnencrypted=true`
+  ([Preparing the Windows Host](https://metricshub.org/winrm-java/preparing-the-host.html)).
 
 The full prerequisites — enabling WinRM over HTTP or HTTPS, Group Policy, firewall rules, the
 privileges each operation requires, configuring a non-administrator account, host quotas, and a
@@ -100,7 +102,8 @@ try (WinRMClient client = WinRMClient.builder("server01.acme.com")
 ```
 
 Connection-scoped options on the builder: `https()`, `port(int)`,
-`authentication(AuthScheme.KERBEROS, AuthScheme.NTLM)` (ordered fallback; NTLM is the default),
+`authentication(AuthScheme.KERBEROS, AuthScheme.NTLM)` (ordered fallback; NTLM is the default —
+Kerberos in the list requires `https()`),
 `ticketCache(Path)`, `namespace(String)`, `trustAllCertificates()` (per-client alternative to the
 `org.metricshub.winrm.tls.insecure` system property; insecure, testing only), and
 `sslContext(SSLContext)` for a dedicated trust store.
@@ -201,7 +204,8 @@ The pre-existing static helpers (`WinRMWqlExecutor.executeWql(...)`,
 The client has **zero runtime dependencies** (no Apache CXF / JAX-WS / JAXB, no BouncyCastle, no
 SLF4J — problems are reported through exceptions only) and is immune by construction to JAXP
 `ServiceLoader` conflicts (it uses the JDK-default XML factories). It supports **NTLM over HTTP
-(with message encryption) and HTTPS** and **Kerberos (SPNEGO) over HTTPS**.
+(with message encryption) and HTTPS**, **Kerberos (SPNEGO) over HTTPS**, and **HTTP Basic over
+HTTPS**.
 
 Files passed to `upload(...)` (or `localFileToCopyList` in the legacy API) are copied to the
 remote host **through the WinRM channel itself** (chunked base64 through the command shell,

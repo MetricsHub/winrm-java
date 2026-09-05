@@ -26,6 +26,7 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.security.auth.Subject;
 import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.CallbackHandler;
@@ -53,9 +54,8 @@ import org.ietf.jgss.Oid;
  * the {@code java.security.krb5.*} system properties), exactly as the CXF path did — the library
  * sets none itself.
  */
-final class KerberosAuthScheme implements AuthScheme {
+final class KerberosAuthScheme extends PlaintextSoapAuthScheme {
 
-	private static final String SOAP_CONTENT_TYPE = "application/soap+xml;charset=UTF-8";
 	// SPNEGO mechanism OID — the "Negotiate" scheme Windows http.sys expects.
 	private static final String SPNEGO_OID = "1.3.6.1.5.5.2";
 
@@ -66,8 +66,12 @@ final class KerberosAuthScheme implements AuthScheme {
 	private final char[] password;
 	private final Path ticketCache;
 
-	private GSSContext context;
-	private boolean authenticated;
+	// The SPNEGO context, claimed atomically on disposal: reset() can run from two threads at once
+	// (close() disposing the state, and the last operation releasing the connection) with no shared
+	// lock, and two threads must never dispose the same GSSContext. The claim is the
+	// getAndSet(null) in reset() — a single atomic step — so exactly one thread wins the context and
+	// disposes it, while any concurrent reset() sees null and skips.
+	private final AtomicReference<GSSContext> context = new AtomicReference<>();
 
 	/**
 	 * @param servicePrincipalHost the host whose {@code HTTP/<host>} SPN to target — must be the FQDN
@@ -99,13 +103,29 @@ final class KerberosAuthScheme implements AuthScheme {
 				final Oid spnego = new Oid(SPNEGO_OID);
 				// NT_HOSTBASED_SERVICE "HTTP@host" maps to the SPN HTTP/host.
 				final GSSName serverName = manager.createName("HTTP@" + servicePrincipalHost, GSSName.NT_HOSTBASED_SERVICE);
-				context = manager.createContext(serverName, spnego, null, GSSContext.DEFAULT_LIFETIME);
-				context.requestMutualAuth(true);
-				context.requestCredDeleg(false);
-				// The AP-REQ is complete after the first call; the KDC issued the service ticket using the
-				// Subject's TGT. The server validates it on the first real request (and, over HTTPS, TLS
-				// already authenticates the server, so we do not need to process a mutual-auth reply token).
-				return context.initSecContext(new byte[0], 0, 0);
+				final GSSContext newContext = manager.createContext(serverName, spnego, null, GSSContext.DEFAULT_LIFETIME);
+				try {
+					newContext.requestMutualAuth(true);
+					newContext.requestCredDeleg(false);
+					// The AP-REQ is complete after the first call; the KDC issued the service ticket using the
+					// Subject's TGT. The server validates it on the first real request (and, over HTTPS, TLS
+					// already authenticates the server, so we do not need to process a mutual-auth reply token).
+					final byte[] token = newContext.initSecContext(new byte[0], 0, 0);
+					// Publish only on success: a failed setup (below) must not leave a half-initialized
+					// context in `context`, and the success path is disposed by the normal reset()/close().
+					context.set(newContext);
+					return token;
+				} catch (final Exception e) {
+					// Dispose the context on any failure before it is published to `context`: otherwise no
+					// reset()/close() could ever reach it, and each failed attempt (e.g. an unavailable
+					// service principal or KDC) would leak implementation/native GSS resources.
+					try {
+						newContext.dispose();
+					} catch (final GSSException ignored) {
+						// disposing an already-failed context is best-effort
+					}
+					throw e;
+				}
 			}
 		);
 		authenticated = true;
@@ -113,37 +133,22 @@ final class KerberosAuthScheme implements AuthScheme {
 	}
 
 	@Override
-	public boolean isAuthenticated() {
-		return authenticated;
-	}
-
-	@Override
 	public void reset() {
-		if (context != null) {
+		// The wipe can come from two threads at once (close() disposing the state, and the last
+		// in-flight operation releasing the connection) with no shared lock, so CLAIM the context
+		// atomically before disposing: getAndSet(null) is a single atomic step, so exactly one
+		// concurrent reset() wins a non-null context and disposes it, while the others see null and
+		// skip. A plain "read then null" (even into a local) would let two threads read the same
+		// non-null value before either clears it, and both would dispose the same GSSContext.
+		final GSSContext ctx = context.getAndSet(null);
+		if (ctx != null) {
 			try {
-				context.dispose();
+				ctx.dispose();
 			} catch (final GSSException ignored) {
 				// disposing a dead context is best-effort
 			}
-			context = null;
 		}
 		authenticated = false;
-	}
-
-	@Override
-	public byte[] wrap(final byte[] soapUtf8) {
-		// HTTPS only: TLS provides confidentiality, so the SOAP travels plaintext.
-		return soapUtf8;
-	}
-
-	@Override
-	public String wrapContentType() {
-		return SOAP_CONTENT_TYPE;
-	}
-
-	@Override
-	public byte[] unwrap(final HttpTransport.Response response) {
-		return response.body;
 	}
 
 	/** Obtain a Kerberos {@link Subject} (holding the TGT) via a programmatic JAAS login. */

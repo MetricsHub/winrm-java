@@ -83,7 +83,7 @@ all **checked**.
   [TLS / HTTPS](tls.html)); there is no per-call trust store.
 * Authentication schemes come from
   [`AuthenticationEnum`](apidocs/org/metricshub/winrm/service/client/auth/AuthenticationEnum.html)
-  (`NTLM`, `KERBEROS`), with the same ordered-fallback semantics as the fluent
+  (`NTLM`, `KERBEROS`, `BASIC`), with the same ordered-fallback semantics as the fluent
   [`AuthScheme`](apidocs/org/metricshub/winrm/AuthScheme.html).
 * For advanced use, the underlying reusable executor is also public:
   [`WinRMExecutorFactory.createInstance(...)`](apidocs/org/metricshub/winrm/service/WinRMExecutorFactory.html)

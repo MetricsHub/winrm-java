@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased] — 2.0.0
 
+### Added — HTTP Basic authentication
+
+The client now supports **HTTP Basic** as an authentication scheme, in addition to NTLM and
+Kerberos:
+
+* `WinRMClient.Builder.authentication(AuthScheme.BASIC)` and the CLI's `--basic` option select it.
+* Basic is stateless: the credential rides the `Authorization` header of **every** request, and
+  there is no message protection — the payload travels as plaintext SOAP. The scheme is accepted
+  over both transports, but it must be used over **HTTPS** in practice, where TLS protects the
+  credential and the payload (over plain HTTP both travel in the clear).
+* A domain-qualified user name (`DOMAIN\user`) keeps its domain prefix on the wire; the server
+  must have the `Basic` setting enabled on the WinRM service (`winrm/config/service/auth`).
+* `BASIC` joins `AuthenticationEnum` (legacy API) and participates in the ordered-fallback list
+  like the other schemes.
+
 ### ⚠️ Breaking — SMB file copy replaced by a transfer through the WinRM channel
 
 Files passed to `WinRMCommandExecutor.execute(...)` in `localFileToCopyList` are no longer copied
@@ -115,6 +130,14 @@ Consequences:
 
 ### Changed
 
+- **Kerberos over plain HTTP is now rejected for any authentication list that contains it.**
+  An ordered fallback list such as `authentication(AuthScheme.KERBEROS, AuthScheme.NTLM)` on the
+  default (HTTP) builder previously dropped the Kerberos entry and quietly fell back to the
+  remaining schemes (NTLM); it now fails at `build()` with a `WinRMClientException`
+  ("Kerberos over WinRM requires HTTPS …"). This makes the rejection fail-closed for every list
+  rather than only a Kerberos-only one, matching the builder's documented "Kerberos requested over
+  HTTP is rejected" contract and the CLI's `--kerberos` requiring `--https`. Existing code that
+  uses such a list over plain HTTP must either call `https()` or remove Kerberos from the list.
 - HTTPS connections validate certificates and verify hostnames by default (see the breaking
   change above).
 - The exception surface matches the pre-2.0.0 CXF backend (feature parity): authentication

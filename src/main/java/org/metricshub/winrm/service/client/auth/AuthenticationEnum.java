@@ -20,6 +20,7 @@ package org.metricshub.winrm.service.client.auth;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
@@ -28,7 +29,8 @@ import java.util.stream.Stream;
 
 public enum AuthenticationEnum {
 	NTLM,
-	KERBEROS;
+	KERBEROS,
+	BASIC;
 
 	private static final Map<String, AuthenticationEnum> VALUES_OF = Stream
 		.of(values())
@@ -41,6 +43,10 @@ public enum AuthenticationEnum {
 	 * @return An optional with the enum value if found empty otherwise
 	 */
 	public static Optional<AuthenticationEnum> getValueOf(final String name) {
-		return name != null ? Optional.ofNullable(VALUES_OF.get(name.trim().toUpperCase())) : Optional.empty();
+		// Locale.ROOT: the default-locale toUpperCase() mangles some names (Turkish: "basic" →
+		// "BASİC"), which would silently fail to resolve in those environments.
+		return name != null
+			? Optional.ofNullable(VALUES_OF.get(name.trim().toUpperCase(Locale.ROOT)))
+			: Optional.empty();
 	}
 }

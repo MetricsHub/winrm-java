@@ -1,12 +1,12 @@
-keywords: authentication, ntlm, kerberos, spnego, domain, realm, kdc, krb5, ticket cache
-description: Authenticate to WinRM with NTLM or Kerberos (SPNEGO), including domain accounts, ordered fallback, and Kerberos configuration.
+keywords: authentication, ntlm, kerberos, spnego, basic, domain, realm, kdc, krb5, ticket cache
+description: Authenticate to WinRM with NTLM, Kerberos (SPNEGO), or HTTP Basic, including domain accounts, ordered fallback, and Kerberos configuration.
 
 # Authentication
 
 <!-- MACRO{toc|fromDepth=2|toDepth=3|id=toc} -->
 
-The client authenticates with either **NTLM** or **Kerberos (SPNEGO)**. The scheme is chosen with
-`authentication(...)` on the [`WinRMClient`](apidocs/org/metricshub/winrm/WinRMClient.html)
+The client authenticates with **NTLM**, **Kerberos (SPNEGO)**, or **HTTP Basic**. The scheme is
+chosen with `authentication(...)` on the [`WinRMClient`](apidocs/org/metricshub/winrm/WinRMClient.html)
 builder, which takes one or more [`AuthScheme`](apidocs/org/metricshub/winrm/AuthScheme.html)
 values:
 
@@ -14,9 +14,11 @@ values:
 import org.metricshub.winrm.AuthScheme;
 
 WinRMClient.builder("server.example.com")
+    .https()
     .credentials("DOMAIN\\Administrator", password)
     .authentication(AuthScheme.NTLM)                       // NTLM only (also the default)
     // .authentication(AuthScheme.KERBEROS)                // Kerberos only
+    // .authentication(AuthScheme.BASIC)                   // HTTP Basic only
     // .authentication(AuthScheme.KERBEROS, AuthScheme.NTLM) // ordered fallback
     .build();
 ```
@@ -27,7 +29,9 @@ When `authentication(...)` is not called, **NTLM** is used.
 
 Several schemes form an **ordered fallback list**: each is tried in the given order until one
 succeeds. `authentication(KERBEROS, NTLM)` attempts Kerberos first and falls back to NTLM — for
-example when the KDC is unreachable or the clock skew is too large.
+example when the KDC is unreachable or the clock skew is too large. Because the list contains
+Kerberos, it requires an HTTPS transport: Kerberos is rejected over plain HTTP rather than being
+silently dropped (see [Kerberos](#kerberos-spnego) below).
 
 ## User name and domain
 
@@ -89,6 +93,37 @@ java -Djava.security.krb5.realm=EXAMPLE.COM \
 The optional `ticketCache(Path)` builder option points at a Kerberos ticket cache to use for the
 connection; without it, Kerberos logs in with the user name and password.
 
+## Basic
+
+HTTP Basic sends the credential in the `Authorization` header of **every** request — there is no
+handshake and no message protection, so the payload travels as plaintext SOAP. It works over both
+transports, but over plain HTTP the credential and the data are sent **in the clear**: use Basic
+over HTTPS only, where TLS protects both.
+
+The credential is the user name, **with all whitespace removed** before it is sent: a
+`DOMAIN\user` account is rebuilt as `DOMAIN` + `\` + the account (the backslash is where the domain
+and account are split on), and a bare name is sent as-is. Windows account names contain no
+whitespace, so the removal is a no-op in practice — but if you supply one, the header carries the
+whitespace-stripped account, not the exact string you typed.
+
+```java
+try (WinRMClient client = WinRMClient.builder("server.example.com")
+        .https()
+        .credentials("DOMAIN\\Administrator", password)
+        .authentication(AuthScheme.BASIC)
+        .build()) {
+    ...
+}
+```
+
+The server must have Basic authentication enabled on the WinRM service — the `Basic` setting under
+the service's `auth` section, `False` by default:
+`winrm set winrm/config/service/auth @{Basic=true}`; see
+[Preparing the Windows Host](preparing-the-host.html). Over HTTPS that is all that is needed, since
+TLS provides the confidentiality. Over plain HTTP — which, as noted, should not be used — the
+service would additionally have to set `AllowUnencrypted=true` (otherwise it refuses the unprotected
+SOAP), which is exactly what the HTTPS recommendation exists to avoid.
+
 ## Authentication failures
 
 A rejected credential (after every scheme of the fallback list was tried) surfaces as a
@@ -97,8 +132,8 @@ whose message has the stable form `Authentication error on <endpoint> with user 
 
 ## Choosing the scheme on the command line
 
-The standalone jar selects the scheme with `--ntlm` (the default) or `--kerberos`. The two are
-mutually exclusive, and `--kerberos` requires `--https`:
+The standalone jar selects the scheme with `--ntlm` (the default), `--kerberos`, or `--basic`. The
+three are mutually exclusive, and `--kerberos` requires `--https`:
 
 ```bash
 java -jar ${project.artifactId}-${project.version}-standalone.jar \

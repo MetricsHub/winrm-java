@@ -1,5 +1,5 @@
 keywords: cli, command line, standalone, jar, wql, exec, shell, interactive, stdin, exit codes, manual
-description: Manual page of the winrm-java standalone command-line client - subcommands, options, passwords, Kerberos, streaming output, the interactive shell, and exit codes.
+description: Manual page of the winrm-java standalone command-line client - subcommands, options, passwords, authentication schemes (NTLM, Kerberos, Basic), streaming output, the interactive shell, and exit codes.
 
 # Command-Line Client
 
@@ -48,12 +48,13 @@ takes no argument.
 | `--https-permissive` | Trust any HTTPS certificate and hostname. Intentionally insecure: testing and isolated hosts only. Requires `--https`. |
 | `--ntlm` | Authenticate with NTLM (the default). |
 | `--kerberos` | Authenticate with Kerberos. Requires `--https`. |
+| `--basic` | Authenticate with HTTP Basic. Use with `--https` so the credential is not sent in the clear. |
 | `--kerberos-kdc <host>` | Set the Kerberos KDC for this invocation; the realm is inferred from its DNS suffix (see below). |
 | `--kerberos-realm <realm>` | Override the realm inferred from `--kerberos-kdc`. |
 | `--help` | Print the usage summary. |
 | `--version` | Print the build version. |
 
-`--ntlm` and `--kerberos` are mutually exclusive, as are the two password options.
+`--ntlm`, `--kerberos`, and `--basic` are mutually exclusive, as are the two password options.
 
 ## Passwords
 
@@ -76,7 +77,13 @@ common Active Directory DNS naming convention; it is not guaranteed by Kerberos,
 fully qualified DNS name. Both options are valid only with `--kerberos`, and `--kerberos-realm`
 requires `--kerberos-kdc`.
 
-See [Authentication](authentication.html) for how NTLM and Kerberos work on the wire.
+## Basic
+
+`--basic` authenticates with HTTP Basic, sending the credential in the `Authorization` header of
+every request. It has no message protection, so the credential and payload are plaintext over HTTP —
+combine it with `--https` (and `--https-permissive` for self-signed hosts) so TLS protects them.
+
+See [Authentication](authentication.html) for how NTLM, Kerberos, and Basic work on the wire.
 
 ## Output
 

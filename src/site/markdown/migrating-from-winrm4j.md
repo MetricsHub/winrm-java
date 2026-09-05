@@ -80,7 +80,7 @@ with largely overlapping options. Both map to the single
 | `port(int)` | `port(int)` |
 | `authenticationScheme(AuthSchemes.NTLM)` | `authentication(AuthScheme.NTLM)` — the default; several schemes form an ordered fallback list ([Authentication](authentication.html)) |
 | `authenticationScheme(AuthSchemes.KERBEROS)` | `authentication(AuthScheme.KERBEROS)` — requires `https()` (see [behavioral differences](#behavioral-differences)) |
-| `authenticationScheme(AuthSchemes.BASIC)` | none — use NTLM; see [behavioral differences](#behavioral-differences) |
+| `authenticationScheme(AuthSchemes.BASIC)` | `authentication(AuthScheme.BASIC)` — over HTTPS (see [behavioral differences](#behavioral-differences)) |
 | `disableCertificateChecks(true)` | `trustAllCertificates()` |
 | `sslContext(SSLContext)` | `sslContext(SSLContext)` — hostname verification stays on |
 | `hostnameVerifier(...)`, `sslSocketFactory(...)` | none — hostname verification is all or nothing: on with `sslContext(...)`, off (together with certificate validation) with `trustAllCertificates()`. There is no custom-verifier hook, so the certificate must identify the hostname you connect by ([TLS / HTTPS](tls.html)) |
@@ -134,11 +134,12 @@ the switch:
   final 0.12.x releases. Here, HTTP always uses NTLM message encryption — there is no unencrypted
   mode and nothing to configure, and hosts that require encryption (`AllowUnencrypted=false`, the
   Windows default) work out of the box.
-* **No Basic authentication.** Basic sends credentials effectively in the clear and is disabled on
-  Windows by default; the client does not implement it. Authenticate with NTLM instead — and
-  check the host: `Negotiate` authentication must be enabled on the WinRM service (it is what
-  carries NTLM, and is `True` by default), and NTLM must not be disabled by security policy
-  ([Preparing the Windows Host](preparing-the-host.html)).
+* **Basic needs HTTPS, but the client does not enforce it.** winrm4j offers `AuthSchemes.BASIC`,
+  which here maps to `authentication(AuthScheme.BASIC)`. This client has no Basic message
+  protection: it accepts the scheme over both transports, so **use `https()` with it** — without
+  TLS, the credential and payload travel in the clear and the client will not stop you. The host
+  must have the `Basic` setting enabled on the WinRM service and be reachable over HTTPS
+  ([Preparing the Windows Host](preparing-the-host.html)). NTLM remains the recommended scheme.
 * **Kerberos requires HTTPS.** winrm4j runs Kerberos over plain HTTP; this client refuses at
   `build()`, because it does not implement Kerberos message encryption — without TLS the payload
   would travel unprotected. Connect with `https()` and by the FQDN the KDC knows

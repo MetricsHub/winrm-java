@@ -84,7 +84,9 @@ final class CliArguments implements AutoCloseable {
 		port = WinRMEndpoint.getEndpointPort(protocol, builder.port);
 		timeout = builder.timeout;
 		permissiveHttps = builder.permissiveHttps;
-		authentication = builder.kerberos ? AuthenticationEnum.KERBEROS : AuthenticationEnum.NTLM;
+		authentication = builder.basic
+			? AuthenticationEnum.BASIC
+			: builder.kerberos ? AuthenticationEnum.KERBEROS : AuthenticationEnum.NTLM;
 		kerberosKdc = builder.kerberosKdc;
 		kerberosRealm = builder.kerberosRealm;
 		kerberosRealmInferred = builder.kerberosRealmInferred;
@@ -173,6 +175,9 @@ final class CliArguments implements AutoCloseable {
 		case "--kerberos":
 			builder.kerberos = true;
 			return index + 1;
+		case "--basic":
+			builder.basic = true;
+			return index + 1;
 		case "--kerberos-kdc":
 			builder.kerberosKdc = optionValue(arguments, index, option);
 			return nextIndex(argument, index);
@@ -252,6 +257,12 @@ final class CliArguments implements AutoCloseable {
 		}
 		if (builder.ntlm && builder.kerberos) {
 			throw new CliUsageException("--ntlm and --kerberos are mutually exclusive");
+		}
+		if (builder.ntlm && builder.basic) {
+			throw new CliUsageException("--ntlm and --basic are mutually exclusive");
+		}
+		if (builder.kerberos && builder.basic) {
+			throw new CliUsageException("--kerberos and --basic are mutually exclusive");
 		}
 		if (builder.kerberos && !builder.https) {
 			throw new CliUsageException("--kerberos requires --https");
@@ -547,6 +558,7 @@ final class CliArguments implements AutoCloseable {
 		private boolean permissiveHttps;
 		private boolean ntlm;
 		private boolean kerberos;
+		private boolean basic;
 		private String kerberosKdc;
 		private String kerberosRealm;
 		private boolean kerberosRealmInferred;

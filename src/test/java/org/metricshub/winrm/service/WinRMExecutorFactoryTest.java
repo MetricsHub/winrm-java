@@ -64,18 +64,19 @@ class WinRMExecutorFactoryTest {
 	}
 
 	@Test
-	void mixedKerberosNtlmFallsBackToNtlmOverHttp() throws Exception {
-		// Ordered fallback: [KERBEROS, NTLM] over HTTP cannot use Kerberos (HTTPS-only), so it falls back
-		// to NTLM and constructs successfully. Building the client opens no connection, so this is offline.
-		try (
-			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+	void mixedKerberosNtlmRejectedOverHttp() {
+		// Kerberos requires HTTPS and is rejected FAIL-CLOSED for any list that contains it over HTTP —
+		// rather than being silently dropped from an ordered fallback and downgrading to NTLM, which
+		// would contradict the "Kerberos over HTTP is rejected" contract. Building opens no connection.
+		assertThrows(
+			WinRMException.class,
+			() -> WinRMExecutorFactory.createInstance(
 				endpoint(WinRMHttpProtocolEnum.HTTP),
 				30000L,
 				null,
 				List.of(AuthenticationEnum.KERBEROS, AuthenticationEnum.NTLM)
-			)) {
-			assertInstanceOf(LightWinRMService.class, executor);
-		}
+			)
+		);
 	}
 
 	@Test
@@ -88,6 +89,45 @@ class WinRMExecutorFactoryTest {
 				30000L,
 				null,
 				List.of(AuthenticationEnum.KERBEROS)
+			)) {
+			assertInstanceOf(LightWinRMService.class, executor);
+		}
+	}
+
+	@Test
+	void basicAcceptedOverHttpAndHttps() throws Exception {
+		// Basic is stateless and rides the Authorization header, so it is supported over both
+		// transports. Constructing the executor opens no connection, so this stays offline.
+		try (
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTP),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.BASIC)
+			)) {
+			assertInstanceOf(LightWinRMService.class, executor);
+		}
+		try (
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTPS),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.BASIC)
+			)) {
+			assertInstanceOf(LightWinRMService.class, executor);
+		}
+	}
+
+	@Test
+	void basicFallsBackWithOtherSchemesOverHttp() throws Exception {
+		// Ordered fallback: [BASIC, NTLM] over HTTP is a valid candidate list (both are supported
+		// over HTTP), so it constructs successfully.
+		try (
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+				endpoint(WinRMHttpProtocolEnum.HTTP),
+				30000L,
+				null,
+				List.of(AuthenticationEnum.BASIC, AuthenticationEnum.NTLM)
 			)) {
 			assertInstanceOf(LightWinRMService.class, executor);
 		}

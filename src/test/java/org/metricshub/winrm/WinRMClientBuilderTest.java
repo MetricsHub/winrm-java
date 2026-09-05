@@ -122,6 +122,26 @@ class WinRMClientBuilderTest {
 	}
 
 	@Test
+	void basicIsAcceptedOverHttpAndHttps() {
+		// Unlike Kerberos, Basic is a plain-HTTP scheme (the credential rides the Authorization
+		// header), so a Basic-only client must build over both transports. build() does not connect.
+		try (WinRMClient client = validBuilder().authentication(AuthScheme.BASIC).build()) {
+			assertEquals("host", client.hostname());
+		}
+		try (WinRMClient client = validBuilder().https().authentication(AuthScheme.BASIC).build()) {
+			assertEquals("host", client.hostname());
+		}
+	}
+
+	@Test
+	void basicFallsBackWithOtherSchemes() {
+		// An ordered fallback list with Basic alongside NTLM builds over HTTP without error.
+		try (WinRMClient client = validBuilder().authentication(AuthScheme.BASIC, AuthScheme.NTLM).build()) {
+			assertEquals("host", client.hostname());
+		}
+	}
+
+	@Test
 	void buildSucceedsWithoutConnecting() {
 		// The fluent one-liner shape: build() must not reach out to the (nonexistent) host.
 		try (WinRMClient client = validBuilder().https().port(5987).namespace("root\\custom").build()) {

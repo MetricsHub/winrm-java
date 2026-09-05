@@ -34,6 +34,7 @@ import static org.metricshub.winrm.light.FakeWsmanResponses.signalResponse;
 import static org.metricshub.winrm.light.FakeWsmanResponses.stream;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -449,7 +450,156 @@ class WsmanProtocolTest {
 		}
 	}
 
+	// --- HTTP Basic ---------------------------------------------------------------
+
+	@Test
+	void basicAuthenticatesEveryRequestOverPlaintextHttp() throws Exception {
+		// HTTP Basic is stateless: the Authorization header must repeat on EVERY request, and the
+		// payload is plaintext SOAP (no message protection). The fake server enforces the header and
+		// serves plaintext responses, so a successful round trip proves both.
+		final String expectedHeader = "Basic " + Base64.getEncoder().encodeToString(
+			(DOMAIN + "\\" + USER + ":" + PASSWORD).getBytes(StandardCharsets.UTF_8)
+		);
+		server.withBasicAuth(expectedHeader);
+		server
+			.enqueue(
+				200,
+				envelope(
+					"<wsen:EnumerateResponse xmlns:wsen=\"" +
+						WSEN +
+						"\" xmlns:wsman=\"" +
+						WSMAN +
+						"\">" +
+						"<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" +
+						"<wsman:Items>" +
+						service("Spooler", "Running") +
+						"</wsman:Items>" +
+						"</wsen:EnumerateResponse>"
+				)
+			)
+			.enqueue(
+				200,
+				envelope(
+					"<wsen:PullResponse xmlns:wsen=\"" +
+						WSEN +
+						"\" xmlns:wsman=\"" +
+						WSMAN +
+						"\">" +
+						"<wsman:Items>" +
+						service("WinRM", "Running") +
+						"</wsman:Items>" +
+						"<wsman:EndOfSequence/>" +
+						"</wsen:PullResponse>"
+				)
+			);
+
+		final WinRMEndpoint endpoint = new WinRMEndpoint(
+			WinRMHttpProtocolEnum.HTTP,
+			"127.0.0.1",
+			server.port(),
+			DOMAIN + "\\" + USER,
+			PASSWORD.toCharArray(),
+			null
+		);
+		try (
+			LightWinRMService service = LightWinRMService
+				.createInstance(endpoint, TIMEOUT, null, List.of(AuthenticationEnum.BASIC))) {
+			final List<Map<String, Object>> rows = service.executeWql("SELECT Name,State FROM Win32_Service", TIMEOUT);
+
+			assertEquals(2, rows.size());
+			assertEquals("Spooler", rows.get(0).get("Name"));
+			assertEquals("WinRM", rows.get(1).get("Name"));
+		}
+
+		// The header must have been repeated on BOTH the Enumerate and the Pull (stateless Basic).
+		final List<String> authorizations = server.requestAuthorizations();
+		assertEquals(2, authorizations.size(), () -> String.join("\n", authorizations));
+		assertEquals(expectedHeader, authorizations.get(0));
+		assertEquals(expectedHeader, authorizations.get(1));
+	}
+
+	@Test
+	void basicWithWrongCredentialSurfacesTheCxfAuthenticationErrorMessage() throws Exception {
+		// The server expects a different Basic credential than the client presents, so it rejects the
+		// request with 401; the client must surface the standard (CXF-parity) authentication error.
+		server.withBasicAuth("Basic " + Base64.getEncoder().encodeToString("user:wrong".getBytes(StandardCharsets.UTF_8)));
+		server.enqueue(200, envelope("<wsen:PullResponse xmlns:wsen=\"" + WSEN + "\"></wsen:PullResponse>"));
+
+		final WinRMEndpoint endpoint = new WinRMEndpoint(
+			WinRMHttpProtocolEnum.HTTP,
+			"127.0.0.1",
+			server.port(),
+			DOMAIN + "\\" + USER,
+			PASSWORD.toCharArray(),
+			null
+		);
+		try (
+			LightWinRMService service = LightWinRMService
+				.createInstance(endpoint, TIMEOUT, null, List.of(AuthenticationEnum.BASIC))) {
+			final WinRMException e = assertThrows(
+				WinRMException.class,
+				() -> service.executeWql("SELECT Name FROM Win32_Service", TIMEOUT)
+			);
+			assertEquals(
+				"Authentication error on http://127.0.0.1:" + server.port() + "/wsman with user name \"FAKE\\user\"",
+				e.getMessage()
+			);
+		}
+	}
+
+	@Test
+	void basicSendsTheWhitespaceNormalizedAccountOnTheWire() throws Exception {
+		// The endpoint strips whitespace from the account parts (domain / user) for the
+		// domain-splitting protocols; Basic must send the SAME normalized account (the whole
+		// whitespace-stripped username, still domain-qualified) rather than the padded string.
+		server.withBasicAuth(expectedNormalizedHeader());
+		server.enqueue(
+			200,
+			envelope(
+				"<wsen:EnumerateResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN
+					+ "\"><wsen:EnumerationContext>uuid:1</wsen:EnumerationContext></wsen:EnumerateResponse>"
+			)
+		);
+		server.enqueue(
+			200,
+			envelope(
+				"<wsen:PullResponse xmlns:wsen=\"" + WSEN + "\"><wsman:EndOfSequence xmlns:wsman=\"" + WSMAN
+					+ "\"/></wsen:PullResponse>"
+			)
+		);
+
+		// The caller passes the account heavily padded with whitespace, exactly the form that
+		// previously leaked through unnormalized: the endpoint must strip it to the plain account.
+		final WinRMEndpoint endpoint = new WinRMEndpoint(
+			WinRMHttpProtocolEnum.HTTP,
+			"127.0.0.1",
+			server.port(),
+			" \t\r\n " + DOMAIN + " \t\r\n \\ \t\r\n " + USER + " \t\r\n ",
+			PASSWORD.toCharArray(),
+			null
+		);
+		// The endpoint keeps the raw username verbatim (stable public API), but the wire credential
+		// must be the normalized account the service rebuilds from domain/username.
+		assertEquals(" \t\r\n " + DOMAIN + " \t\r\n \\ \t\r\n " + USER + " \t\r\n ", endpoint.getRawUsername());
+		try (
+			LightWinRMService service = LightWinRMService
+				.createInstance(endpoint, TIMEOUT, null, List.of(AuthenticationEnum.BASIC))) {
+			final List<Map<String, Object>> rows = service.executeWql("SELECT Name FROM Win32_Service", TIMEOUT);
+			assertEquals(0, rows.size());
+		}
+
+		// The server would have 401'd on any non-normalized header, so a successful round trip
+		// proves the client sent the normalized account, exactly as the other protocols do.
+		assertEquals(expectedNormalizedHeader(), server.requestAuthorizations().get(0));
+	}
+
 	// --- response body builders -----------------------------------------------------
+
+	private static String expectedNormalizedHeader() {
+		return "Basic " + Base64.getEncoder().encodeToString(
+			(DOMAIN + "\\" + USER + ":" + PASSWORD).getBytes(StandardCharsets.UTF_8)
+		);
+	}
 
 	private static String service(final String name, final String state) {
 		return instance("Win32_Service", "Name", name, "State", state);

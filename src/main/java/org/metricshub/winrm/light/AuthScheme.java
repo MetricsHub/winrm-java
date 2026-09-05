@@ -42,6 +42,20 @@ interface AuthScheme {
 	 */
 	String authenticate(HttpTransport transport) throws Exception;
 
+	/**
+	 * The {@code Authorization} header value a request must carry, or {@code null} when the
+	 * connection's authentication state needs no per-request header.
+	 * <p>
+	 * For NTLM and Kerberos the token rides only the first real request (hence the value returned
+	 * by {@link #authenticate(HttpTransport)}), so this is {@code null}; for stateless schemes
+	 * such as Basic the header must repeat on EVERY request.
+	 *
+	 * @return the {@code Authorization} header value, or {@code null}
+	 */
+	default String requestAuthorization() {
+		return null;
+	}
+
 	/** @return whether the connection is currently authenticated. */
 	boolean isAuthenticated();
 

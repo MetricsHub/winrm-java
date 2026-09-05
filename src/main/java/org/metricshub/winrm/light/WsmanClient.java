@@ -132,8 +132,26 @@ final class WsmanClient implements AutoCloseable {
 	private void lockAbortably() throws InterruptedException {
 		connectionPermit.acquire();
 		if (Thread.interrupted()) {
-			connectionPermit.release();
+			releaseConnection();
 			throw new InterruptedException("Operation abandoned: cancelled while waiting for the connection.");
+		}
+	}
+
+	/**
+	 * Release the connection permit. Authentication state is disposed by {@link #close()}
+	 * (unconditionally, once the transport is closed); this method only releases the permit, plus a
+	 * backstop for the one state close() cannot see: a worker that re-authenticated — installing,
+	 * e.g., a fresh Kerberos GSSContext — AFTER close()'s own reset, which is possible because the
+	 * Kerberos GSS exchange does no socket I/O and so is not interrupted by the transport close.
+	 * Resetting after the release is safe: every scheme's reset() is idempotent and the Kerberos
+	 * scheme claims its context atomically, so racing close()'s reset cannot double-dispose it.
+	 */
+	private void releaseConnection() {
+		connectionPermit.release();
+		// Backstop for the post-close re-authentication described above: if the client was closed
+		// while this operation installed fresh auth state, erase it now.
+		if (closed) {
+			auth.reset();
 		}
 	}
 
@@ -291,7 +309,7 @@ final class WsmanClient implements AutoCloseable {
 			return enumeration;
 		} finally {
 			if (!opened) {
-				connectionPermit.release();
+				releaseConnection();
 			}
 		}
 	}
@@ -370,7 +388,7 @@ final class WsmanClient implements AutoCloseable {
 			while (cursor >= page.size()) {
 				if (endOfSequence) {
 					finished = true;
-					connectionPermit.release();
+					releaseConnection();
 					return null;
 				}
 				// Stop pulling once the caller has been told the operation timed out.
@@ -409,7 +427,7 @@ final class WsmanClient implements AutoCloseable {
 					}
 				}
 			} finally {
-				connectionPermit.release();
+				releaseConnection();
 			}
 		}
 	}
@@ -544,7 +562,7 @@ final class WsmanClient implements AutoCloseable {
 			return new RemoteCommand(commandId, operationTimeoutMs, failOnQuietTimeout);
 		} finally {
 			if (!opened) {
-				connectionPermit.release();
+				releaseConnection();
 			}
 		}
 	}
@@ -846,7 +864,7 @@ final class WsmanClient implements AutoCloseable {
 					}
 				}
 			} finally {
-				connectionPermit.release();
+				releaseConnection();
 			}
 		}
 
@@ -864,7 +882,7 @@ final class WsmanClient implements AutoCloseable {
 					terminateCompleted(budgetMs);
 				}
 			} finally {
-				connectionPermit.release();
+				releaseConnection();
 			}
 		}
 
@@ -1106,9 +1124,10 @@ final class WsmanClient implements AutoCloseable {
 					continue;
 				}
 			}
-			// The handshake's Authorization accompanies the first real request; later requests on the
-			// already-authenticated connection carry no Authorization header.
-			final String authorization = pendingAuthorization;
+			// The handshake's Authorization accompanies the first real request; stateless schemes
+			// (Basic) instead repeat their header on EVERY request, and NTLM/Kerberos need none after
+			// the first.
+			final String authorization = pendingAuthorization != null ? pendingAuthorization : auth.requestAuthorization();
 			pendingAuthorization = null;
 
 			final HttpTransport.Response resp = transport.post(
@@ -1345,31 +1364,33 @@ final class WsmanClient implements AutoCloseable {
 		// Only attempt a graceful shell Delete if no operation is currently using the connection: a
 		// non-blocking tryAcquire (never an acquire()) keeps close() from waiting on an abandoned,
 		// timed-out worker — or an open streaming handle — still holding the permit while blocked on
-		// a socket read. When we cannot acquire the permit, or a request would otherwise race the
-		// worker, we skip the Delete and just hard-close the transport below — which unblocks that
-		// worker's read; the shell is reaped by the server IdleTimeout.
+		// a socket read. When we cannot acquire the permit we skip the Delete and just hard-close the
+		// transport — which unblocks that worker's read; the shell is reaped by the server IdleTimeout.
 		final boolean locked = connectionPermit.tryAcquire();
 		try {
 			final String shell = shellId;
 			shellId = null;
-			if (locked) {
-				if (shell != null) {
-					try {
-						send(Envelopes.deleteShell(url, shell, timeoutMs));
-					} catch (final Exception ignored) {
-						// best-effort shell cleanup
-					}
+			if (locked && shell != null) {
+				try {
+					send(Envelopes.deleteShell(url, shell, timeoutMs));
+				} catch (final Exception ignored) {
+					// best-effort shell cleanup
 				}
-				// Release the connection-bound auth state — notably the Kerberos GSSContext, whose only
-				// disposal path is reset(). Skipped when not locked: another (timed-out) worker still owns
-				// the auth scheme, and the transport hard-close below unblocks it.
-				auth.reset();
 			}
 		} finally {
 			if (locked) {
 				connectionPermit.release();
 			}
 			transport.close();
+			// Dispose the auth state unconditionally, now that the transport is gone. The state (the
+			// NTLM session keys, the Basic credential, the Kerberos GSSContext) is bound to the
+			// connection, not the socket, so it needs no permit — and disposing it here, rather than
+			// only when we hold the permit, is what erases the credential even when an idle streaming
+			// handle still holds the permit and so skipped the shell Delete above. This is the single
+			// disposal point; it is safe to race a worker's own release sweep (releaseConnection)
+			// because every scheme's reset() is idempotent and the Kerberos scheme claims its context
+			// atomically, so the two cannot double-dispose it.
+			auth.reset();
 		}
 	}
 }

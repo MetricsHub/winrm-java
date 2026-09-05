@@ -21,8 +21,8 @@ Both operations can also **stream**: WQL rows are consumed page by page as they 
 returning a `java.lang.Process`-like handle) — memory stays bounded regardless of the result
 size.
 
-It supports **NTLM** over HTTP (with message encryption) and HTTPS, and **Kerberos (SPNEGO)** over
-HTTPS ([Authentication](authentication.html)).
+It supports **NTLM** over HTTP (with message encryption) and HTTPS, **Kerberos (SPNEGO)** over
+HTTPS, and **HTTP Basic** over HTTPS ([Authentication](authentication.html)).
 
 Since 2.0.0 the client has **zero runtime dependencies** (no Apache CXF / JAX-WS / JAXB stack, no SMB
 stack) and is immune by construction to JAXP `ServiceLoader` conflicts, because it uses the

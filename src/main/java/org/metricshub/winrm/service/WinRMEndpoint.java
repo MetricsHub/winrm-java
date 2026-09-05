@@ -74,6 +74,8 @@ public class WinRMEndpoint {
 
 		this.hostname = hostname.replaceAll("\\s", Utils.EMPTY);
 		this.password = password;
+		// Keep the caller's raw username verbatim (a domain-qualified account keeps its prefix) so
+		// the public API is stable — the domain/username split below already normalizes whitespace.
 		rawUsername = username;
 
 		this.namespace = buildNamespace(namespace);
@@ -110,7 +112,11 @@ public class WinRMEndpoint {
 		return domain;
 	}
 
-	/** get the username as indicated in the constructor (could be in domain\\user form) */
+	/**
+	 * Get the username exactly as supplied in the constructor (could be in domain\\user form, and
+	 * may contain the whitespace the caller typed). The {@link #getDomain()} / {@link #getUsername()}
+	 * parts are the whitespace-normalized split of this value, which is what the protocols send.
+	 */
 	public String getRawUsername() {
 		return rawUsername;
 	}

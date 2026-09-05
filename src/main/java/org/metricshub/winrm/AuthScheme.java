@@ -29,5 +29,8 @@ public enum AuthScheme {
 	NTLM,
 
 	/** Kerberos (SPNEGO) authentication — requires HTTPS and connecting by the FQDN the KDC knows. */
-	KERBEROS
+	KERBEROS,
+
+	/** HTTP Basic authentication — the credential rides the {@code Authorization} header of every request. */
+	BASIC
 }
