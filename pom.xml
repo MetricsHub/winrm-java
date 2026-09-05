@@ -8,7 +8,7 @@
 	</parent>
 
 	<artifactId>winrm-java</artifactId>
-	<version>2.2.00</version>
+	<version>2.3.00-SNAPSHOT</version>
 
 	<name>WinRM Java Client</name>
 	<description>WinRM Java Client</description>
@@ -37,7 +37,7 @@
 	<scm>
 		<connection>scm:git:https://github.com/metricshub/winrm-java.git</connection>
 		<url>https://github.com/metricshub/winrm-java</url>
-		<tag>v2.2.00</tag>
+		<tag>HEAD</tag>
 	</scm>
 
 	<developers>
@@ -78,7 +78,7 @@
 		<!-- Reproducible Build -->
 		<!-- See https://maven.apache.org/guides/mini/guide-reproducible-builds.html -->
 		<!-- Also drives the Maven site copyright year and "Documentation as of" date; bump at release. -->
-		<project.build.outputTimestamp>2026-09-05T12:36:14Z</project.build.outputTimestamp>
+		<project.build.outputTimestamp>2026-09-05T12:37:47Z</project.build.outputTimestamp>
 	</properties>
 
 	<dependencyManagement>
