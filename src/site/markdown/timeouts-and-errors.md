@@ -35,8 +35,10 @@ socket timeouts follow each operation's own deadline.
 
 ### Streaming terminals: inactivity timeout
 
-The streaming terminals — `stream()` on a WQL request and `start()` on a command (see
-[WQL Queries](wql.html) and [Remote Commands](commands.html)) — interpret the same `timeout(...)`
+The streaming terminals — `stream()` on a WQL request, `start()` on a command,
+`openStream()`/`openReader()` on a remote file and `stream()` on a directory listing (see
+[WQL Queries](wql.html), [Remote Commands](commands.html) and [Remote Files](files.html)) —
+interpret the same `timeout(...)`
 value differently, because an overall deadline would make long-running streams impossible: there
 it is an **inactivity timeout**, the longest silence tolerated from the server between two
 responses. A query result can be consumed, or a command can keep streaming output, for arbitrarily

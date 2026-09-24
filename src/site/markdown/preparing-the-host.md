@@ -44,8 +44,9 @@ here:
   by the `winrs` command-line tool. A Java client never reads it, so you do not need to add anything
   to it on either machine.
 * **No DCOM (port 135) and no SMB (port 445).** WQL rides WinRM rather than DCOM, and file
-  transfers ride the WinRM channel itself ([File Transfers](file-transfers.html)). The WinRM port
-  is the only one you need to open.
+  transfers and remote file access ride the WinRM channel itself
+  ([File Transfers](file-transfers.html), [Remote Files](files.html)). The WinRM port is the only
+  one you need to open.
 
 ## Is WinRM already enabled?
 
@@ -271,6 +272,7 @@ separately:
 | **Remote commands** (`client.command(...)`) | Remote access to the listener, remote shell access on the host (`AllowRemoteShellAccess`, `True` by default), and whatever rights **the command itself** needs once it runs. |
 | **Transfer-and-run** (`upload(...)`) | Both of the above, plus write access to `<windir>\Temp\winrm-upload-<CLIENT>`, and `certutil` and `forfiles` present on the host. See [File Transfers](file-transfers.html). |
 | **`uploadFile(...)`** to an explicit path | Remote shell access, write access to the destination directory, and `certutil` on the host (the same transfer engine, minus the transfer directory and its `forfiles` housekeeping). |
+| **Remote file access** (`client.file(...)`: reads, `info()`, `list()`) | Remote shell access, **PowerShell 2.0 or later in `FullLanguage` mode** (not constrained by AppLocker or WDAC), and read access to the files and directories themselves. Nothing is written on the host. See [Remote Files](files.html). |
 
 So an account can perfectly well run WQL queries and fail to run commands, or the reverse. When
 diagnosing, test the two independently — as in [Checking from the client](#Checking_from_the_client)
@@ -281,7 +283,8 @@ above.
 Non-administrative access is possible, and is the right choice for a monitoring account that only
 needs to read WMI. Step 1 below is always required. **Step 2 is only needed for WQL queries** (and
 therefore for transfer-and-run, which discovers the remote Windows directory with one): an account
-that only runs commands or calls `uploadFile(...)` never reaches WMI, so grant it nothing there.
+that only runs commands, calls `uploadFile(...)` or accesses remote files never reaches WMI, so
+grant it nothing there.
 
 **1. Grant remote access to the WinRM listener.** The default listener security descriptor
 (`RootSDDL`) grants full access to `BUILTIN\Administrators` and read access to interactive users
@@ -355,7 +358,8 @@ an administrative account when you run commands. Whichever you choose, verify it
 A remote command authenticates with a **network logon** whose credentials **cannot be delegated
 onward**. So a command that reaches a *second* remote resource — a UNC path, another server, a
 mapped drive — fails with access denied, even though the same command works when run locally on
-the host.
+the host. The same goes for a UNC path given to [`client.file(...)`](files.html), which runs as a
+remote command too.
 
 Windows solves this with CredSSP or Kerberos constrained delegation. This client **does not support
 CredSSP** ([Authentication](authentication.html)), so the workaround is to avoid the second hop:
@@ -401,5 +405,6 @@ The full exception surface, including how to read a WSMan fault code, is describ
 * [Authentication](authentication.html) — NTLM and Kerberos, and what each needs from the host
 * [TLS / HTTPS](tls.html) — trusting the listener's certificate
 * [File Transfers](file-transfers.html) — what transfers need on the host
+* [Remote Files](files.html) — reading and listing remote files, and what that needs on the host
 * [Timeouts and Errors](timeouts-and-errors.html) — the exception surface and WSMan fault detail
 * [Command-Line Client](cli.html) — the quickest way to test a host's configuration

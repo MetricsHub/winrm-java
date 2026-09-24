@@ -1,5 +1,5 @@
 keywords: winrm java client, windows remote management, wsman, dependency-free, overview
-description: A dependency-free Java client for Windows Remote Management (WinRM): run WQL queries and remote commands over NTLM or Kerberos.
+description: A dependency-free Java client for Windows Remote Management (WinRM): run WQL queries and remote commands, and read and list remote files, over NTLM or Kerberos.
 
 # WinRM Java Client
 
@@ -11,15 +11,17 @@ The **WinRM Java Client** is a small library that talks to the Windows Remote Ma
 (WS-Management) service on a remote Windows host. It lets a Java application:
 
 * run **WQL / WMI queries** such as `SELECT Name, State FROM Win32_Service` and read the rows back
-  ([WQL Queries](wql.html)), and
+  ([WQL Queries](wql.html)),
 * **execute remote commands** — `cmd.exe` command lines or PowerShell scripts — capturing standard
   output, standard error and the exit code, optionally copying local script files to the host
-  first ([Remote Commands](commands.html)).
+  first ([Remote Commands](commands.html)), and
+* **access remote files** — read a file (whole, a byte range, a tail), get its properties, or
+  list a directory with filters evaluated on the host ([Remote Files](files.html)).
 
-Both operations can also **stream**: WQL rows are consumed page by page as they arrive
-(`stream()`), and command output is consumed while the command is still running (`start()`,
-returning a `java.lang.Process`-like handle) — memory stays bounded regardless of the result
-size.
+All of them can also **stream**: WQL rows are consumed page by page as they arrive
+(`stream()`), command output is consumed while the command is still running (`start()`,
+returning a `java.lang.Process`-like handle), and file contents and directory listings are
+decoded as the host sends them — memory stays bounded regardless of the result size.
 
 It supports **NTLM** over HTTP (with message encryption) and HTTPS, **Kerberos (SPNEGO)** over
 HTTPS, and **HTTP Basic** over HTTPS ([Authentication](authentication.html)).
@@ -111,6 +113,13 @@ quoting or escaping at all:
 CommandResult ps = client.powerShell("Get-Service | Where-Object Status -eq 'Running'").execute();
 ```
 
+Remote files go through the same connection — no SMB, no extra port:
+
+```java
+String tail = client.file("D:\\logs\\app.log").offset(-8192).readText(StandardCharsets.UTF_8);
+RemoteFileList logs = client.file("D:\\logs").list().glob("*.log").recursive().execute();
+```
+
 Failures are reported through the unchecked
 [`WinRMClientException`](apidocs/org/metricshub/winrm/exceptions/WinRMClientException.html)
 hierarchy. The static one-shot helpers that predate `WinRMClient`
@@ -126,7 +135,7 @@ remain available and unchanged, with their checked exceptions.
 * [WQL Queries](wql.html) — query WMI and read the result
 * [Remote Commands](commands.html) — run commands and copy files to the host
 * [File Transfers](file-transfers.html) — how files are copied through the WinRM channel
-* [Remote Files](files.html) — read remote files: whole, byte ranges, tails, streams, digests
+* [Remote Files](files.html) — read remote files (whole, byte ranges, tails, streams, digests), get file properties, list directories
 * [Command-Line Client](cli.html) — the standalone jar's manual page
 * [Authentication](authentication.html) — NTLM and Kerberos
 * [TLS / HTTPS](tls.html) — certificate validation and trust stores

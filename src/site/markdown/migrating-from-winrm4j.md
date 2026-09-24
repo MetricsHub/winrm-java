@@ -24,7 +24,8 @@ code base can switch in one sitting.
   winrm4j/CXF failure mode.
 * **Actively maintained**, with releases published on Maven Central.
 * **Features winrm4j never had:** [WQL / WMI queries](wql.html), [file transfers](file-transfers.html)
-  through the WinRM channel, [standard input](commands.html#standard-input),
+  and [remote file reads and directory listings](files.html) through the WinRM channel,
+  [standard input](commands.html#standard-input),
   [`Process`-style streaming](commands.html#streaming-the-output) of live output, and a
   full-featured [command-line client](cli.html).
 
@@ -179,6 +180,9 @@ Once on the fluent API, features winrm4j never offered are one call away:
   typed rows and streaming ([WQL Queries](wql.html)).
 * **File transfers** — `upload(Path...)` copies local scripts to the host through the WinRM
   channel itself (no SMB, no port 445) before the command runs ([File Transfers](file-transfers.html)).
+* **Remote files** — `client.file(path)` reads a file (whole, a byte range, a tail, or streamed),
+  returns its properties, or lists a directory with filters evaluated on the host
+  ([Remote Files](files.html)).
 * **Standard input** — `stdin(...)` feeds a remote command its input, with real EOF semantics
   ([Standard input](commands.html#standard-input)).
 * **Live streaming** — `start()` returns a `java.lang.Process`-shaped

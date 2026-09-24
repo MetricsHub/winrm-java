@@ -25,16 +25,23 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import org.metricshub.winrm.exceptions.WinRMClientException;
+import org.metricshub.winrm.exceptions.WinRMTimeoutException;
 
 /**
  * The remote file access primitive: small PowerShell scripts that open a remote file and write
  * what the caller asked for as <b>base64 lines</b> on stdout, and the {@link InputStream} that
- * decodes those lines as the output chunks arrive.
+ * decodes those lines as the output chunks arrive. The metadata scripts ({@link #infoScript},
+ * {@link #listScript}) write one ASCII record per entry instead, parsed by {@link #parseEntry}
+ * and {@link #parseInaccessible}: plain integers, and only the path base64-encoded.
  * <p>
  * Base64 is what makes a text console a binary-safe channel: every byte value survives, and the
  * output is pure ASCII, so recovering the exact bytes never depends on the remote console code
@@ -63,6 +70,9 @@ final class RemoteFiles {
 	/** The path is a directory, not a file. */
 	static final int EXIT_IS_DIRECTORY = 6;
 
+	/** The path is a file, not a directory (listing). */
+	static final int EXIT_NOT_DIRECTORY = 7;
+
 	/** The exit code of {@code cmd.exe} when {@code powershell.exe} cannot be found. */
 	static final int EXIT_COMMAND_NOT_FOUND = 9009;
 
@@ -86,13 +96,11 @@ final class RemoteFiles {
 	/**
 	 * The opening shared by every script: check the language mode, define {@code fail}, which maps
 	 * a .NET failure to the documented exit code (a sharing violation is HRESULT
-	 * {@code 0x80070020}, 32; a byte-range lock violation {@code 0x80070021}, 33), then open the
-	 * file with a share mode that tolerates other writers ({@code ReadWrite}) — a log written by a
-	 * running service is the most common thing to read, and {@code File.OpenRead} fails on it.
-	 * {@code exit} in a function exits the whole script. {@code %s} is the base64 of the path's
-	 * UTF-8 bytes.
+	 * {@code 0x80070020}, 32; a byte-range lock violation {@code 0x80070021}, 33), and decode the
+	 * path into {@code $p}. {@code exit} in a function exits the whole script. {@code %s} is the
+	 * base64 of the path's UTF-8 bytes.
 	 */
-	private static final String OPEN_FILE = "if($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage'){exit 5};"
+	private static final String PREAMBLE = "if($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage'){exit 5};"
 		+
 		"$ErrorActionPreference='Stop';" +
 		"function fail($e){if($e.InnerException){$e=$e.InnerException};" +
@@ -102,9 +110,83 @@ final class RemoteFiles {
 		"$h=[Runtime.InteropServices.Marshal]::GetHRForException($e) -band 0xFFFF;" +
 		"if($h -eq 32 -or $h -eq 33){exit 3};" +
 		"exit 1};" +
-		"$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'));" +
+		"$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'));";
+
+	/**
+	 * Open the file with a share mode that tolerates other writers ({@code ReadWrite}) — a log
+	 * written by a running service is the most common thing to read, and {@code File.OpenRead}
+	 * fails on it.
+	 */
+	private static final String OPEN_FILE = PREAMBLE +
 		"if([IO.Directory]::Exists($p)){exit 6};" +
 		"try{$f=[IO.File]::Open($p,'Open','Read','ReadWrite')}catch{fail $_.Exception};";
+
+	/**
+	 * The opening of the metadata scripts, after {@link #PREAMBLE}: the record writer and the path
+	 * resolution. Kept terse: the script must fit the command line with room for long paths.
+	 * <ul>
+	 * <li>{@code out} writes the buffered records and a newline to the raw stdout stream as one
+	 * write (see {@link #READ_RANGE} for why); with nothing buffered, the bare newline is a
+	 * keepalive the parser skips, so a long walk that matches nothing does not trip the inactivity
+	 * timeout;
+	 * <li>the path is made absolute, then given the {@code \\?\} prefix ({@code \\?\UNC\} for a
+	 * UNC path) that lifts the 260-character {@code MAX_PATH} limit — where .NET accepts it (4.6.2
+	 * and later: older versions reject {@code GetFullPath('\\?\...')}, and paths stay limited
+	 * there); {@code $pn} and {@code $pa} strip the prefix from the reported paths again;
+	 * <li>{@code $a} gets the attributes of the path, failing with the documented exit codes.
+	 * </ul>
+	 */
+	private static final String METADATA = PREAMBLE +
+		"$o=[Console]::OpenStandardOutput();$u=[Text.Encoding]::UTF8;$w=New-Object Text.StringBuilder;$t=0;" +
+		"function out{$y=$u.GetBytes(\"$w`n\");$o.Write($y,0,$y.Length);$o.Flush();$w.Length=0;" +
+		"$script:t=[Environment]::TickCount};" +
+		"try{$q=[IO.Path]::GetFullPath($p);" +
+		"try{$q=[IO.Path]::GetFullPath((($q-replace'^\\\\\\\\(?=[^\\\\?.])','\\\\?\\UNC\\')" +
+		"-replace'^(?=[A-Za-z]:\\\\)','\\\\?\\'))}catch{};" +
+		"$a=[int][IO.File]::GetAttributes($q)}catch{fail $_.Exception};" +
+		"$pn=0;$pa='';if($q -match '^\\\\\\\\\\?\\\\(UNC)?'){$pn=$matches[0].Length;if($matches[1]){$pa='\\'}};";
+
+	/**
+	 * Buffer the {@code F} record of the {@code FileSystemInfo} in {@code $e}: plain integers
+	 * (PowerShell expands them with the invariant culture) and the base64 of the UTF-8 path.
+	 * Inlined wherever it is used: a PowerShell function call costs more than the record itself
+	 * (about 45 µs, measured), which would make a large listing 10 times slower.
+	 */
+	private static final String RECORD = "$l=0;if($e -is [IO.FileInfo]){$l=$e.Length};" +
+		"[void]$w.Append(\"F $([int]$e.Attributes) $l $($e.LastWriteTimeUtc.ToFileTimeUtc()) " +
+		"$($e.CreationTimeUtc.ToFileTimeUtc()) $($e.LastAccessTimeUtc.ToFileTimeUtc()) " +
+		"$([Convert]::ToBase64String($u.GetBytes($pa+$e.FullName.Substring($pn))))`n\")";
+
+	/** Write the record of the path itself, a file or a directory. */
+	private static final String INFO = "try{if($a -band 16){$e=New-Object IO.DirectoryInfo $q}" +
+		"else{$e=New-Object IO.FileInfo $q};" + RECORD + ";out}catch{fail $_.Exception}";
+
+	/**
+	 * Walk the directory with an explicit stack of {@code (DirectoryInfo, depth)} pairs:
+	 * {@code EnumerateFileSystemInfos} where it exists (.NET 4), {@code GetFileSystemInfos}
+	 * otherwise (PowerShell 2.0 runs on .NET 2.0). Every entry is evaluated against the filters
+	 * here, on the host; a directory is pushed for traversal whatever the filters, unless it is a
+	 * reparse point (junction, symbolic link: never followed, so a junction loop terminates) or
+	 * at the maximum depth. A directory that cannot be read becomes a {@code !} record and the walk
+	 * goes on — except the root itself, which fails the listing. {@code %s} and {@code %d} are the
+	 * base64 name regex (see {@link #globRegex(String)}; empty: any name), the type (0: all, 1:
+	 * files, 2: directories), the size bounds, the exclusive FileTime bounds and the maximum depth.
+	 */
+	private static final String LIST = "if(!($a -band 16)){exit 7};" +
+		"$g=$u.GetString([Convert]::FromBase64String('%s'));$k=%d;$mn=%d;$mx=%d;$ta=%d;$tb=%d;$md=%d;" +
+		"$m=[IO.DirectoryInfo].GetMethod('EnumerateFileSystemInfos',[Type[]]@());" +
+		"$s=New-Object Collections.Stack;$s.Push(@((New-Object IO.DirectoryInfo $q),1));" +
+		"while($s.Count){$d,$n=$s.Pop();" +
+		"try{if($m){$c=$d.EnumerateFileSystemInfos()}else{$c=$d.GetFileSystemInfos()};" +
+		"foreach($e in $c){$i=$e -is [IO.DirectoryInfo];" +
+		"if($i -and !([int]$e.Attributes -band 1024) -and $n -lt $md){$s.Push(@($e,($n+1)))};" +
+		"$f=$e.LastWriteTimeUtc.ToFileTimeUtc();" +
+		"if(($k -eq 0 -or ($k -eq 2) -eq $i) -and ($i -or ($e.Length -ge $mn -and $e.Length -le $mx)) -and " +
+		"$f -gt $ta -and $f -lt $tb -and $e.Name -match $g){" + RECORD + "};" +
+		"if($w.Length -gt 32000 -or [Environment]::TickCount-$t -gt 1000){out}}}" +
+		"catch{if($n -eq 1){fail $_.Exception};$x=$_.Exception;if($x.InnerException){$x=$x.InnerException};" +
+		"[void]$w.Append(\"! $([Convert]::ToBase64String($u.GetBytes($pa+$d.FullName.Substring($pn)))) " +
+		"$([Convert]::ToBase64String($u.GetBytes($x.Message)))`n\")}};out";
 
 	/**
 	 * Read a byte range: resolve a negative offset from the size of the <i>open</i> stream (so a
@@ -160,7 +242,167 @@ final class RemoteFiles {
 	}
 
 	private static String openFile(final String path) {
-		return String.format(OPEN_FILE, Base64.getEncoder().encodeToString(path.getBytes(StandardCharsets.UTF_8)));
+		return String.format(OPEN_FILE, base64(path));
+	}
+
+	private static String base64(final String text) {
+		return Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8));
+	}
+
+	/**
+	 * Build the script writing the {@code F} record of the path itself.
+	 *
+	 * @param path the remote file or directory
+	 * @return the PowerShell script
+	 */
+	static String infoScript(final String path) {
+		return String.format(METADATA, base64(path)) + INFO;
+	}
+
+	/**
+	 * Build the script listing a directory: one {@code F} record per matching entry, one {@code !}
+	 * record per directory that could not be read.
+	 *
+	 * @param path the remote directory
+	 * @param glob the wildcard pattern the entry names must match (see {@link #globRegex}), or
+	 *        {@code null}
+	 * @param type 0: files and directories, 1: files only, 2: directories only
+	 * @param minSize the smallest file size, inclusive
+	 * @param maxSize the largest file size, inclusive
+	 * @param after the exclusive lower bound of the last write time, as a FileTime
+	 * @param before the exclusive upper bound of the last write time, as a FileTime
+	 * @param maxDepth the deepest level listed, 1 being the directory's own entries
+	 * @return the PowerShell script
+	 */
+	static String listScript(
+		final String path,
+		final String glob,
+		final int type,
+		final long minSize,
+		final long maxSize,
+		final long after,
+		final long before,
+		final int maxDepth
+	) {
+		return String.format(METADATA, base64(path)) +
+			String.format(LIST, glob == null ? "" : base64(globRegex(glob)), type, minSize, maxSize, after, before, maxDepth);
+	}
+
+	/**
+	 * Translate a Windows wildcard pattern into the anchored .NET regex the listing script matches
+	 * names with (PowerShell's {@code -match}: case-insensitive): {@code *} is any sequence,
+	 * {@code ?} any one character, and every other character is literal. ASCII punctuation is
+	 * escaped; letters, digits, {@code _} and non-ASCII characters are never special, and .NET
+	 * rejects escaping them.
+	 *
+	 * @param glob the wildcard pattern
+	 * @return the regex
+	 */
+	static String globRegex(final String glob) {
+		final StringBuilder regex = new StringBuilder("^");
+		for (final char c : glob.toCharArray()) {
+			if (c == '*') {
+				regex.append(".*");
+			} else if (c == '?') {
+				regex.append('.');
+			} else if (c < 128 && !Character.isLetterOrDigit(c) && c != '_') {
+				regex.append('\\').append(c);
+			} else {
+				regex.append(c);
+			}
+		}
+		return regex.append('$').toString();
+	}
+
+	/** The FileTime of the Unix epoch: 100-nanosecond intervals since 1601-01-01 UTC. */
+	private static final long FILETIME_EPOCH = 116_444_736_000_000_000L;
+
+	/** 100-nanosecond intervals per second. */
+	private static final long FILETIME_PER_SECOND = 10_000_000L;
+
+	/**
+	 * Convert a Windows FileTime to an {@link Instant}.
+	 *
+	 * @param fileTime 100-nanosecond intervals since 1601-01-01 UTC
+	 * @return the instant
+	 */
+	static Instant fromFileTime(final long fileTime) {
+		final long sinceEpoch = fileTime - FILETIME_EPOCH;
+		return Instant.ofEpochSecond(
+			Math.floorDiv(sinceEpoch, FILETIME_PER_SECOND),
+			Math.floorMod(sinceEpoch, FILETIME_PER_SECOND) * 100
+		);
+	}
+
+	/**
+	 * Convert an {@link Instant} to a Windows FileTime, truncated to 100 nanoseconds.
+	 *
+	 * @param instant the instant
+	 * @return 100-nanosecond intervals since 1601-01-01 UTC
+	 */
+	static long toFileTime(final Instant instant) {
+		return FILETIME_EPOCH + instant.getEpochSecond() * FILETIME_PER_SECOND + instant.getNano() / 100;
+	}
+
+	/**
+	 * Parse an {@code F} record:
+	 * {@code F <attributes> <size> <lastWrite> <creation> <lastAccess> <base64(UTF-8 path)>}.
+	 *
+	 * @param line the record
+	 * @return the entry
+	 * @throws WinRMClientException when the record is truncated or malformed
+	 */
+	static RemoteFileInfo parseEntry(final String line) {
+		final String[] fields = line.split(" ", 7);
+		if (fields.length != 7 || !"F".equals(fields[0])) {
+			throw malformed(line, null);
+		}
+		try {
+			return new RemoteFileInfo(
+				decode(fields[6]),
+				Integer.parseInt(fields[1]),
+				Long.parseLong(fields[2]),
+				fromFileTime(Long.parseLong(fields[3])),
+				fromFileTime(Long.parseLong(fields[4])),
+				fromFileTime(Long.parseLong(fields[5]))
+			);
+		} catch (final IllegalArgumentException e) {
+			throw malformed(line, e);
+		}
+	}
+
+	/**
+	 * Parse a {@code !} record: {@code ! <base64(UTF-8 path)> <base64(UTF-8 message)>}.
+	 *
+	 * @param line the record
+	 * @return the path of the directory that could not be read
+	 * @throws WinRMClientException when the record is truncated or malformed
+	 */
+	static String parseInaccessible(final String line) {
+		final String[] fields = line.split(" ", 3);
+		if (fields.length != 3 || !"!".equals(fields[0])) {
+			throw malformed(line, null);
+		}
+		try {
+			decode(fields[2]);
+			return decode(fields[1]);
+		} catch (final IllegalArgumentException e) {
+			throw malformed(line, e);
+		}
+	}
+
+	private static String decode(final String base64) {
+		if (base64.isEmpty()) {
+			throw new IllegalArgumentException("empty field");
+		}
+		return new String(Base64.getDecoder().decode(base64), StandardCharsets.UTF_8);
+	}
+
+	private static WinRMClientException malformed(final String line, final Throwable cause) {
+		return new WinRMClientException(
+			"Malformed remote file record: " + (line.length() > 120 ? line.substring(0, 120) + "..." : line),
+			cause
+		);
 	}
 
 	/**
@@ -174,23 +416,115 @@ final class RemoteFiles {
 	 * @return the decoded stream; it must be closed
 	 */
 	static InputStream open(final WinRMClient client, final String path, final String script, final Duration timeout) {
-		if (CommandRequest.encodePowerShell(script) == null) {
-			// powerShell(...) would transparently fall back to uploading the script as a file: a read
-			// must stay read-only on the host (no files written, no certutil), so refuse instead.
-			throw new WinRMClientException(
-				String.format(
-					"Remote path too long to read on %s (%d characters): the reader script must fit the remote command line",
-					client.hostname(),
-					path.length()
-				)
-			);
-		}
-		final RemoteProcess process = client.powerShell(script).timeout(timeout).start();
+		final RemoteProcess process = start(client, path, script, timeout);
 		try {
 			return new DecodingStream(process, path, client.hostname());
 		} catch (final RuntimeException e) {
 			process.close();
 			throw e;
+		}
+	}
+
+	/**
+	 * Start a script. It must fit the command line: {@code powerShell(...)} would transparently
+	 * fall back to uploading it as a file, and file access must stay read-only on the host (no
+	 * files written, no certutil), so a script too long is refused instead.
+	 *
+	 * @param client the client to run the script on
+	 * @param path the remote path, for the error messages
+	 * @param script the script
+	 * @param timeout the inactivity timeout of the process
+	 * @return the running process; it must be closed
+	 */
+	static RemoteProcess start(final WinRMClient client, final String path, final String script, final Duration timeout) {
+		if (CommandRequest.encodePowerShell(script) == null) {
+			throw new WinRMClientException(
+				String.format(
+					"Remote path too long to access on %s (%d characters): the script must fit the remote command line",
+					client.hostname(),
+					path.length()
+				)
+			);
+		}
+		return client.powerShell(script).timeout(timeout).start();
+	}
+
+	/**
+	 * Read the next stdout line of a script.
+	 *
+	 * @param stdout the script's stdout
+	 * @return the line, or {@code null} at the end of the output
+	 */
+	static String readLine(final BufferedReader stdout) {
+		try {
+			return stdout.readLine();
+		} catch (final IOException e) {
+			// Unreachable: the reader reports failures unchecked (see RemoteProcess).
+			throw new WinRMClientException(e.getMessage(), e);
+		}
+	}
+
+	/**
+	 * The output of a script ended: collect the exit code and release the connection.
+	 *
+	 * @param process the script's process
+	 * @param path the remote path, for the error messages
+	 * @param hostname the remote host, for the error messages
+	 * @param notFoundIsEmpty whether {@link #EXIT_NOT_FOUND} is a normal outcome, not a failure
+	 * @return the exit code, 0 or {@link #EXIT_NOT_FOUND} when {@code notFoundIsEmpty}
+	 * @throws WinRMClientException for any other non-zero exit code
+	 */
+	static int finish(
+		final RemoteProcess process,
+		final String path,
+		final String hostname,
+		final boolean notFoundIsEmpty
+	) {
+		final int exitCode = process.waitFor();
+		// PowerShell serializes its progress records to a redirected stderr as CLIXML (e.g. "Preparing
+		// modules for first use"): noise, not the error message.
+		final String stderr = exitCode == 0
+			? ""
+			: process
+				.stderr()
+				.lines()
+				.filter(line -> !line.startsWith("#< CLIXML") && !line.startsWith("<Objs "))
+				.collect(Collectors.joining("\n"));
+		process.close();
+		if (exitCode != 0 && !(notFoundIsEmpty && exitCode == EXIT_NOT_FOUND)) {
+			throw failure(exitCode, path, hostname, stderr);
+		}
+		return exitCode;
+	}
+
+	/**
+	 * Run a blocking terminal under the wall-clock deadline: a worker runs the exchange and is
+	 * cancelled when the deadline fires, exactly like {@link CommandRequest#execute()}.
+	 *
+	 * @param <T> the result type
+	 * @param client the client, for the error messages
+	 * @param path the remote path, for the error messages
+	 * @param timeout the deadline
+	 * @param task the exchange
+	 * @return the result of the task
+	 */
+	static <T> T blocking(final WinRMClient client, final String path, final Duration timeout, final Callable<T> task) {
+		try {
+			return Utils.execute(task, WinRMClient.toMillis(timeout));
+		} catch (final TimeoutException e) {
+			throw new WinRMTimeoutException(
+				String.format("Accessing remote path %s timed out after %s on %s", path, timeout, client.hostname()),
+				e
+			);
+		} catch (final InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new WinRMClientException(e.getMessage(), e);
+		} catch (final ExecutionException e) {
+			final Throwable cause = e.getCause() != null ? e.getCause() : e;
+			if (cause instanceof RuntimeException) {
+				throw (RuntimeException) cause;
+			}
+			throw new WinRMClientException(String.valueOf(cause.getMessage()), cause);
 		}
 	}
 
@@ -211,7 +545,7 @@ final class RemoteFiles {
 	) {
 		switch (exitCode) {
 		case EXIT_NOT_FOUND:
-			return new WinRMClientException(String.format("Remote file not found on %s: %s", hostname, path));
+			return new WinRMClientException(String.format("Remote path not found on %s: %s", hostname, path));
 		case EXIT_SHARING_VIOLATION:
 			return new WinRMClientException(
 				String.format(
@@ -229,6 +563,8 @@ final class RemoteFiles {
 					hostname
 				)
 			);
+		case EXIT_NOT_DIRECTORY:
+			return new WinRMClientException(String.format("Remote path %s on %s is a file, not a directory", path, hostname));
 		case EXIT_IS_DIRECTORY:
 			return new WinRMClientException(String.format("Remote path %s on %s is a directory, not a file", path, hostname));
 		case EXIT_COMMAND_NOT_FOUND:
@@ -238,7 +574,7 @@ final class RemoteFiles {
 		default:
 			return new WinRMClientException(
 				String.format(
-					"Failed to read remote file %s on %s (exit code %d)%s",
+					"Failed to access remote path %s on %s (exit code %d)%s",
 					path,
 					hostname,
 					exitCode,
@@ -302,7 +638,7 @@ final class RemoteFiles {
 				if (ended) {
 					return false;
 				}
-				final String line = readLine();
+				final String line = readLine(stdout);
 				if (line == null) {
 					end();
 					return false;
@@ -329,24 +665,10 @@ final class RemoteFiles {
 			return true;
 		}
 
-		private String readLine() {
-			try {
-				return stdout.readLine();
-			} catch (final IOException e) {
-				// Unreachable: the reader reports failures unchecked (see RemoteProcess).
-				throw new WinRMClientException(e.getMessage(), e);
-			}
-		}
-
 		/** The output ended: collect the exit code, release the connection, report a failure. */
 		private void end() {
 			ended = true;
-			final int exitCode = process.waitFor();
-			final String stderr = exitCode == 0 ? "" : process.stderr().lines().collect(Collectors.joining("\n"));
-			process.close();
-			if (exitCode != 0) {
-				throw failure(exitCode, path, hostname, stderr);
-			}
+			finish(process, path, hostname, false);
 		}
 
 		@Override

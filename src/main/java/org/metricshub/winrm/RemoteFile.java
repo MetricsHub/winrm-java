@@ -21,23 +21,23 @@ package org.metricshub.winrm;
  */
 
 import java.io.BufferedReader;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeoutException;
 import org.metricshub.winrm.exceptions.WinRMClientException;
 import org.metricshub.winrm.exceptions.WinRMTimeoutException;
 
 /**
- * A file on the remote host, obtained with {@link WinRMClient#file(String)}: read its content —
- * whole, as a byte range, or as a stream — or compute its digest. Nothing is sent until a
- * terminal ({@link #readBytes()}, {@link #readText(Charset)}, {@link #openStream()},
- * {@link #openReader(Charset)}, {@link #digest(String)}) is called.
+ * A file or directory on the remote host, obtained with {@link WinRMClient#file(String)}: read a
+ * file's content — whole, as a byte range, or as a stream — or compute its digest, get its
+ * properties ({@link #info()}, {@link #exists()}), or {@link #list()} a directory. Nothing is sent
+ * until a terminal ({@link #readBytes()}, {@link #readText(Charset)}, {@link #openStream()},
+ * {@link #openReader(Charset)}, {@link #digest(String)}, {@link #info()}, {@link #exists()}) is
+ * called.
  *
  * <pre>{@code
  * byte[] content = client.file("C:\\Windows\\Temp\\collect.bin").readBytes();
@@ -284,35 +284,69 @@ public final class RemoteFile {
 		});
 	}
 
+	/**
+	 * Get the properties of the file or directory: size, timestamps, attributes. A path that does
+	 * not exist is not an error: the result is empty. The {@link #offset(long)} and
+	 * {@link #length(long)} settings do not apply.
+	 *
+	 * @return the properties, or empty when the path does not exist
+	 * @throws WinRMClientException when the properties cannot be read (access denied, invalid
+	 *         path, PowerShell unavailable or constrained)
+	 * @throws WinRMTimeoutException when the timeout elapses first
+	 */
+	public Optional<RemoteFileInfo> info() {
+		final String script = RemoteFiles.infoScript(path);
+		return blocking(() -> {
+			final RemoteProcess process = RemoteFiles.start(client, path, script, timeout);
+			try {
+				final RemoteFileInfo info = process
+					.stdout()
+					.lines()
+					.filter(line -> !line.isBlank())
+					.map(line -> RemoteFiles.parseEntry(line.strip()))
+					.reduce((first, last) -> last)
+					.orElse(null);
+				return RemoteFiles.finish(process, path, client.hostname(), true) == 0
+					? Optional.ofNullable(info)
+					: Optional.<RemoteFileInfo>empty();
+			} finally {
+				process.close();
+			}
+		});
+	}
+
+	/**
+	 * Tell whether the file or directory exists: {@code info().isPresent()}.
+	 *
+	 * @return {@code true} when the path exists
+	 * @throws WinRMClientException when the path cannot be checked (e.g. access denied)
+	 * @throws WinRMTimeoutException when the timeout elapses first
+	 */
+	public boolean exists() {
+		return info().isPresent();
+	}
+
+	/**
+	 * Prepare the listing of this path, a directory: set its filters, then call
+	 * {@link RemoteDirectoryListing#execute()} or {@link RemoteDirectoryListing#stream()}. The
+	 * timeout of this request, when set, carries over.
+	 *
+	 * <pre>{@code
+	 * RemoteFileList logs = client.file("C:\\inetpub\\logs").list().glob("*.log").recursive().execute();
+	 * }</pre>
+	 *
+	 * @return the listing request
+	 */
+	public RemoteDirectoryListing list() {
+		return new RemoteDirectoryListing(client, path).timeout(timeout);
+	}
+
 	/** Start the remote read of the configured offset and the given length ({@code -1}: to the end). */
 	private InputStream open(final long readLength) {
 		return RemoteFiles.open(client, path, RemoteFiles.readScript(path, offset, readLength), timeout);
 	}
 
-	/**
-	 * Run a blocking terminal under the wall-clock deadline: a worker runs the exchange and is
-	 * cancelled when the deadline fires, exactly like {@link CommandRequest#execute()}.
-	 */
 	private <T> T blocking(final Callable<T> task) {
-		try {
-			return Utils.execute(task, WinRMClient.toMillis(timeout));
-		} catch (final TimeoutException e) {
-			throw new WinRMTimeoutException(
-				String.format("Reading remote file %s timed out after %s on %s", path, timeout, client.hostname()),
-				e
-			);
-		} catch (final InterruptedException e) {
-			Thread.currentThread().interrupt();
-			throw new WinRMClientException(e.getMessage(), e);
-		} catch (final ExecutionException e) {
-			final Throwable cause = e.getCause() != null ? e.getCause() : e;
-			if (cause instanceof RuntimeException) {
-				throw (RuntimeException) cause;
-			}
-			if (cause instanceof IOException) {
-				throw new WinRMClientException(cause.getMessage(), cause);
-			}
-			throw new WinRMClientException(String.valueOf(cause.getMessage()), cause);
-		}
+		return RemoteFiles.blocking(client, path, timeout, task);
 	}
 }
