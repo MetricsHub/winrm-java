@@ -912,7 +912,7 @@ public class ShellFileCopy {
 	 * @param maxLength Maximum length, in UTF-16 chars
 	 * @return the truncated string
 	 */
-	private static String truncateAtCodePoint(final String value, final int maxLength) {
+	static String truncateAtCodePoint(final String value, final int maxLength) {
 		if (value.length() <= maxLength) {
 			return value;
 		}

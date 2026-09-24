@@ -141,11 +141,16 @@ class RemoteFileTest {
 
 	/** The probe output announcing the given content: its size (8 bytes, little-endian), then its SHA-256 digest. */
 	private static String probe(final byte[] content) throws Exception {
+		return probe(content.length, content);
+	}
+
+	/** The probe output announcing the given size and the SHA-256 digest of the given content. */
+	private static String probe(final long size, final byte[] content) throws Exception {
 		return b64(
 			ByteBuffer
 				.allocate(RemoteFiles.PROBE_LENGTH)
 				.order(ByteOrder.LITTLE_ENDIAN)
-				.putLong(content.length)
+				.putLong(size)
 				.put(MessageDigest.getInstance("SHA-256").digest(content))
 				.array()
 		) +
@@ -342,6 +347,82 @@ class RemoteFileTest {
 	}
 
 	@Test
+	void noQuotaRetryStartsAfterTheTimeout() throws Exception {
+		// The first retry would start 5 s later, past the 3 s timeout of this stream: it is not attempted.
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(
+				500,
+				fault("2150859174", "The maximum number of concurrent operations for this user has been exceeded.")
+			);
+		try (WinRMClient client = client()) {
+			final RemoteFile file = client.file(PATH).timeout(Duration.ofSeconds(3));
+			final long start = System.nanoTime();
+			final WinRMClientException e = assertThrows(WinRMClientException.class, file::openStream);
+			assertTrue(e.getMessage().contains("2150859174"), e.getMessage());
+			assertTrue(System.nanoTime() - start < 2_000_000_000L, "retried after its timeout");
+		}
+		assertEquals(1, sentScripts().size());
+	}
+
+	@Test
+	void downloadReplacesADifferentLocalFile(@TempDir final Path directory) throws Exception {
+		final byte[] content = "the new content".getBytes(StandardCharsets.US_ASCII);
+		final Path local = Files.write(directory.resolve("copy.bin"), "previous".getBytes(StandardCharsets.US_ASCII));
+		enqueueRead(0, null, probe(content));
+		enqueueCommand(0, null, b64(content) + "\r\n");
+		try (WinRMClient client = client()) {
+			assertEquals(content.length, client.downloadFile(PATH, local));
+		}
+		assertArrayEquals(content, Files.readAllBytes(local));
+		assertEquals(List.of(local), files(directory));
+	}
+
+	@Test
+	void aSizeMismatchFailsEvenWhenTheDigestMatches(@TempDir final Path directory) throws Exception {
+		final byte[] content = { 1, 2, 3 };
+		enqueueRead(0, null, probe(999, content));
+		enqueueCommand(0, null, b64(content) + "\r\n");
+		final Path local = directory.resolve("copy.bin");
+		try (WinRMClient client = client()) {
+			final RemoteFile file = client.file(PATH);
+			final WinRMClientException e = assertThrows(WinRMClientException.class, () -> file.downloadTo(local));
+			assertTrue(e.getMessage().contains("(3 bytes received, 999 expected)"), e.getMessage());
+		}
+		assertEquals(List.of(), files(directory));
+	}
+
+	@Test
+	void aLongDestinationNameStillFitsTheStagingFile(@TempDir final Path directory) throws Exception {
+		// 244 characters fit the 255-character (NTFS) and 255-byte (ext4) limits; with the
+		// ".<random>.part" suffix appended, they would not.
+		final byte[] content = { 1, 2, 3 };
+		final Path local = directory.resolve("a".repeat(240) + ".bin");
+		enqueueRead(0, null, probe(content));
+		enqueueCommand(0, null, b64(content) + "\r\n");
+		try (WinRMClient client = client()) {
+			assertEquals(3, client.downloadFile(PATH, local));
+		}
+		assertArrayEquals(content, Files.readAllBytes(local));
+	}
+
+	@Test
+	void publishingAndAbandoningExcludeEachOther(@TempDir final Path directory) throws Exception {
+		final Path part = Files.write(directory.resolve("copy.bin.part"), new byte[] { 1 });
+		final Path target = directory.resolve("copy.bin");
+
+		final RemoteFile.Publication abandoned = new RemoteFile.Publication();
+		assertTrue(abandoned.abandon());
+		assertFalse(abandoned.publish(part, target));
+		assertFalse(Files.exists(target));
+
+		final RemoteFile.Publication published = new RemoteFile.Publication();
+		assertTrue(published.publish(part, target));
+		assertFalse(published.abandon());
+		assertArrayEquals(new byte[] { 1 }, Files.readAllBytes(target));
+	}
+
+	@Test
 	void downloadWritesTheVerifiedContent(@TempDir final Path directory) throws Exception {
 		final byte[] content = new byte[300];
 		for (int i = 0; i < content.length; i++) {
@@ -362,7 +443,7 @@ class RemoteFileTest {
 		assertArrayEquals(content, Files.readAllBytes(local));
 		assertEquals(List.of(local), files(directory));
 		final List<String> scripts = sentScripts();
-		assertTrue(scripts.get(0).contains("[BitConverter]::GetBytes($f.Length)"), scripts.get(0));
+		assertTrue(scripts.get(0).contains("[BitConverter]::GetBytes($f.Position)"), scripts.get(0));
 		assertTrue(scripts.get(1).contains("$n=[long]0;$l=[long]-1"), scripts.get(1));
 	}
 

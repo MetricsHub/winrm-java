@@ -206,9 +206,10 @@ like `cp`: `downloadFile("C:\\Windows\\Temp\\collect.log", Path.of("logs"))` wri
    is transferred: the download returns 0.
 3. **Transfer.** The file is read with [`openStream()`](files.html#streaming-large-files) and
    written, block by block, to a temporary file **next to the destination**:
-   `<name>.<random>.part`. Memory stays bounded whatever the size of the file — a 64 MiB file was
-   downloaded by a JVM limited to a 32 MiB heap.
-4. **Verify and publish.** The digest of the received bytes must match the probed one; the
+   `<name>.<random>.part` (the name cut to 64 characters, so a long one still fits the file-name
+   limits). Memory stays bounded whatever the size of the file — a 64 MiB file was downloaded by a
+   JVM limited to a 32 MiB heap.
+4. **Verify and publish.** The received bytes must match the probed size and digest; the
    temporary file is then flushed to disk (`fsync`) and moved onto the destination in one atomic
    step (`ATOMIC_MOVE`), replacing any previous file.
 
@@ -240,6 +241,10 @@ deadline fires, the exception says how far the transfer got:
 Download of D:\exports\big.csv from server01 timed out after PT30S, 41943040 of 104857600 bytes
 transferred: raise the timeout for large files
 ```
+
+The deadline and the final move exclude each other: a timeout is only reported when the
+destination was left untouched. A deadline that fires while the verified file is being moved into
+place lets the move complete, and the download succeeds.
 
 ### Download performance
 

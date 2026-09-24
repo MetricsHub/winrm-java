@@ -41,6 +41,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
 import org.metricshub.winrm.exceptions.WinRMClientException;
@@ -91,6 +92,12 @@ public final class RemoteFile {
 
 	/** The largest byte array the JVM reliably allocates. */
 	private static final long MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8L;
+
+	/**
+	 * How much of the destination's name a download's staging file keeps: 64 UTF-16 units are at
+	 * most 192 bytes in UTF-8, so {@code <name>.<random>.part} stays under the 255-byte limit.
+	 */
+	private static final int MAX_PART_PREFIX_LENGTH = 64;
 
 	private final WinRMClient client;
 	private final String path;
@@ -298,8 +305,9 @@ public final class RemoteFile {
 	 * {@link #maxBytes(long)} settings do not apply.
 	 * <p>
 	 * The timeout is a wall-clock deadline for the whole download, and the transfer runs at about
-	 * 1.5 MB/s: a large file needs a raised {@link #timeout(Duration)}. Downloads are not
-	 * resumable — one that fails or times out starts over.
+	 * 1.5 MB/s: a large file needs a raised {@link #timeout(Duration)}. A deadline that fires while
+	 * the verified file is being moved onto the destination lets that move complete: the download
+	 * then succeeds. Downloads are not resumable — one that fails or times out starts over.
 	 *
 	 * @param localFile the local file to write, or an existing directory to write the file into
 	 * @return the number of bytes transferred: the size of the file, or 0 when the local file
@@ -313,10 +321,11 @@ public final class RemoteFile {
 		Utils.checkNonNull(localFile, "localFile");
 		final AtomicLong size = new AtomicLong(-1);
 		final AtomicLong transferred = new AtomicLong();
+		final Publication publication = new Publication();
 		try {
 			return blocking(() -> {
 				try {
-					return download(localFile, size, transferred);
+					return download(localFile, size, transferred, publication);
 				} catch (final IOException e) {
 					throw new WinRMClientException(
 						String.format("Download of %s from %s failed: %s", path, client.hostname(), e),
@@ -324,7 +333,15 @@ public final class RemoteFile {
 					);
 				}
 			});
-		} catch (final WinRMTimeoutException e) {
+		} catch (final WinRMClientException e) {
+			// The deadline, or an interruption, may fire while the worker moves the verified file
+			// into place: that move then completes, and so does the download.
+			if (!publication.abandon()) {
+				return transferred.get();
+			}
+			if (!(e instanceof WinRMTimeoutException)) {
+				throw e;
+			}
 			throw new WinRMTimeoutException(
 				String.format(
 					"Download of %s from %s timed out after %s, %s: raise the timeout for large files",
@@ -348,10 +365,15 @@ public final class RemoteFile {
 	 * @param localFile the local file, or an existing directory to write the file into
 	 * @param size receives the size of the remote file, for the timeout message
 	 * @param transferred counts the bytes transferred, for the timeout message
+	 * @param publication decides between moving the file into place and abandoning the download
 	 * @return the number of bytes transferred
 	 */
-	private long download(final Path localFile, final AtomicLong size, final AtomicLong transferred)
-		throws IOException, NoSuchAlgorithmException {
+	private long download(
+		final Path localFile,
+		final AtomicLong size,
+		final AtomicLong transferred,
+		final Publication publication
+	) throws IOException, NoSuchAlgorithmException {
 		final Path target = Files.isDirectory(localFile)
 			? localFile.resolve(path.replaceFirst(".*[\\\\/:]", "")) : localFile;
 
@@ -376,8 +398,10 @@ public final class RemoteFile {
 			}
 		}
 
-		final Path directory = target.toAbsolutePath().getParent();
-		if (directory == null) {
+		final Path absolute = target.toAbsolutePath();
+		final Path directory = absolute.getParent();
+		final Path name = absolute.getFileName();
+		if (directory == null || name == null) {
 			// A root that is not a directory, e.g. a drive with no media
 			throw new NoSuchFileException(target.toString());
 		}
@@ -386,14 +410,18 @@ public final class RemoteFile {
 		if (!Files.isDirectory(directory)) {
 			Files.createDirectories(directory);
 		}
+		// The name is cut so the staging name fits the file-name limits (255 UTF-16 units on NTFS,
+		// 255 bytes on ext4) whatever the length of the destination's name.
 		final Path part = directory.resolve(
-			target.getFileName() + "." + Long.toHexString(ThreadLocalRandom.current().nextLong()) + ".part"
+			ShellFileCopy.truncateAtCodePoint(name.toString(), MAX_PART_PREFIX_LENGTH) + "." +
+				Long.toHexString(ThreadLocalRandom.current().nextLong()) + ".part"
 		);
 		try {
 			try (
 				InputStream in = RemoteFiles.open(client, path, RemoteFiles.readScript(path, 0, -1), timeout);
 				FileChannel out = FileChannel.open(part, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
-				if (!MessageDigest.isEqual(copy(in, Channels.newOutputStream(out), transferred), digest)) {
+				final byte[] received = copy(in, Channels.newOutputStream(out), transferred);
+				if (transferred.get() != size.get() || !MessageDigest.isEqual(received, digest)) {
 					throw new WinRMClientException(
 						String.format(
 							"Integrity check failed after downloading %s from %s to %s (%d bytes received, %d expected): " +
@@ -406,11 +434,12 @@ public final class RemoteFile {
 						)
 					);
 				}
-				// Interruptible like every channel operation: a download cancelled by its deadline
-				// fails here, before the move.
 				out.force(true);
 			}
-			Files.move(part, target, StandardCopyOption.ATOMIC_MOVE);
+			if (!publication.publish(part, target)) {
+				// The caller already reported the failure: the destination must stay as it was.
+				throw new CancellationException("Download abandoned by its deadline");
+			}
 			return transferred.get();
 		} catch (final IOException | RuntimeException e) {
 			try {
@@ -530,5 +559,42 @@ public final class RemoteFile {
 
 	private <T> T blocking(final Callable<T> task) {
 		return RemoteFiles.blocking(client, path, timeout, task);
+	}
+
+	/**
+	 * Decides, once, between the worker moving a download's verified file into place and the
+	 * caller abandoning the download when its deadline fires, so the outcome the caller reports
+	 * always matches the destination: a move in progress completes before the caller decides.
+	 */
+	static final class Publication {
+
+		private boolean abandoned;
+		private boolean published;
+
+		/**
+		 * Move the verified file onto the destination, unless the download was abandoned.
+		 *
+		 * @param part the verified staging file
+		 * @param target the destination
+		 * @return whether the file was moved onto the destination
+		 * @throws IOException when the move fails
+		 */
+		synchronized boolean publish(final Path part, final Path target) throws IOException {
+			if (!abandoned) {
+				Files.move(part, target, StandardCopyOption.ATOMIC_MOVE);
+				published = true;
+			}
+			return published;
+		}
+
+		/**
+		 * Abandon the download, unless its file was already moved onto the destination.
+		 *
+		 * @return whether the download was abandoned
+		 */
+		synchronized boolean abandon() {
+			abandoned = !published;
+			return abandoned;
+		}
 	}
 }
