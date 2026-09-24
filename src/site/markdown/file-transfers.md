@@ -194,7 +194,9 @@ long bytes = client.file("D:\\exports\\big.csv")
 
 When the local path is an existing directory, the file is written into it under its remote name,
 like `cp`: `downloadFile("C:\\Windows\\Temp\\collect.log", Path.of("logs"))` writes
-`logs/collect.log`. The destination's directory is created when needed.
+`logs/collect.log`. A remote name with a colon — an alternate data stream (`a.txt:meta`) or a
+drive-relative path (`C:a.txt`) — is refused there: name the local file explicitly. The
+destination's directory is created when needed.
 
 ### How a download works
 
@@ -211,15 +213,22 @@ like `cp`: `downloadFile("C:\\Windows\\Temp\\collect.log", Path.of("logs"))` wri
    JVM limited to a 32 MiB heap.
 4. **Verify and publish.** The received bytes must match the probed size and digest; the
    temporary file is then flushed to disk (`fsync`) and moved onto the destination in one atomic
-   step (`ATOMIC_MOVE`), replacing any previous file.
+   step (`ATOMIC_MOVE`), replacing any previous file. On Linux and macOS a replaced file keeps its
+   permissions — the temporary file gets them before any byte is written, so a `0600` file stays
+   private throughout. On Windows, the new file gets the permissions the directory gives new
+   files: an explicit ACL set on the replaced file is not carried over.
 
 **The destination is never seen truncated or half-written**: until the final move it keeps its
 previous content (or does not exist), and after it, it has the complete, verified content. On any
 failure — a digest mismatch, a read error, a timeout — the destination is left as it was and the
 temporary file is deleted as the transfer stops; only a process killed in the middle of a download
-can leave a `.part` file behind. A file modified on the host between the probe and the end of the
-transfer (a log being appended to, for instance) fails the integrity check: the download reports
-it rather than delivering a torn copy.
+can leave a `.part` file behind.
+
+The local copy is always **exactly the bytes the probe hashed**: one consistent version of the
+remote file, never a mix of two. A change that reaches bytes not transferred yet — a log being
+appended to, a file rewritten — fails the integrity check instead of delivering a torn copy. A
+change confined to bytes already transferred leaves that consistent version in place, like any
+copy of a file that changes after it was read.
 
 Downloads are **not resumable**: a download that fails or times out starts over from the first
 byte next time. Resuming would mean tracking verified byte ranges across attempts and proving

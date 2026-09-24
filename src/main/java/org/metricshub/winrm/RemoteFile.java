@@ -36,10 +36,12 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFilePermission;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ThreadLocalRandom;
@@ -291,16 +293,20 @@ public final class RemoteFile {
 	 * {@link WinRMClient#uploadFile(Path, String)}, with the same guarantees:
 	 * <ul>
 	 * <li><b>verified</b>: the host first reports the size and the SHA-256 digest of the file, and
-	 * the received bytes must carry that digest — a file modified during the download fails;
+	 * the received bytes must match both, so the local file is exactly one version of the remote
+	 * file, never a mix of two: a change that reaches bytes not transferred yet fails the download;
 	 * <li><b>no wasted transfer</b>: when the local file already has that digest, nothing is
 	 * transferred;
 	 * <li><b>atomic</b>: the content goes to a temporary file next to the destination
 	 * ({@code <name>.<random>.part}), which is flushed to disk, then moved onto the destination in
 	 * one step. The destination is never seen truncated: a failure or a timeout leaves it as it
-	 * was, and the temporary file is deleted as the transfer stops.
+	 * was, and the temporary file is deleted as the transfer stops. A replaced file keeps its POSIX
+	 * permissions; on Windows, the new file gets the permissions the directory gives new files.
 	 * </ul>
 	 * When {@code localFile} is an existing directory, the file is written into it under its remote
-	 * name, like {@code cp}; the destination's directory is created when needed. Memory is bounded
+	 * name, like {@code cp} — so the remote name must not contain a colon (an alternate data stream,
+	 * or a drive-relative path): name the local file explicitly for those. The destination's
+	 * directory is created when needed. Memory is bounded
 	 * whatever the size of the file. The {@link #offset(long)}, {@link #length(long)} and
 	 * {@link #maxBytes(long)} settings do not apply.
 	 * <p>
@@ -316,6 +322,8 @@ public final class RemoteFile {
 	 *         local file cannot be written
 	 * @throws WinRMTimeoutException when the timeout elapses first; the message tells how much was
 	 *         transferred
+	 * @throws IllegalArgumentException when {@code localFile} is a directory and the remote name
+	 *         contains a colon
 	 */
 	public long downloadTo(final Path localFile) {
 		Utils.checkNonNull(localFile, "localFile");
@@ -374,8 +382,7 @@ public final class RemoteFile {
 		final AtomicLong transferred,
 		final Publication publication
 	) throws IOException, NoSuchAlgorithmException {
-		final Path target = Files.isDirectory(localFile)
-			? localFile.resolve(path.replaceFirst(".*[\\\\/:]", "")) : localFile;
+		final Path target = Files.isDirectory(localFile) ? localFile.resolve(localName()) : localFile;
 
 		final ByteBuffer probe;
 		try (InputStream in = RemoteFiles.open(client, path, RemoteFiles.probeScript(path), timeout)) {
@@ -390,13 +397,20 @@ public final class RemoteFile {
 		final byte[] digest = new byte[probe.remaining()];
 		probe.get(digest);
 
-		if (Files.isRegularFile(target) && Files.size(target) == size.get()) {
+		final boolean replacing = Files.isRegularFile(target);
+		if (replacing && Files.size(target) == size.get()) {
 			try (InputStream in = Files.newInputStream(target)) {
 				if (MessageDigest.isEqual(copy(in, OutputStream.nullOutputStream(), new AtomicLong()), digest)) {
 					return 0;
 				}
 			}
 		}
+		// A replaced file keeps its POSIX permissions (a 0600 file must not become 0644): the staging
+		// file gets them before any byte is written. Windows has no such mode bits.
+		final Set<PosixFilePermission> permissions = replacing
+			&&
+			target.getFileSystem().supportedFileAttributeViews().contains("posix")
+				? Files.getPosixFilePermissions(target) : null;
 
 		final Path absolute = target.toAbsolutePath();
 		final Path directory = absolute.getParent();
@@ -420,6 +434,9 @@ public final class RemoteFile {
 			try (
 				InputStream in = RemoteFiles.open(client, path, RemoteFiles.readScript(path, 0, -1), timeout);
 				FileChannel out = FileChannel.open(part, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+				if (permissions != null) {
+					Files.setPosixFilePermissions(part, permissions);
+				}
 				final byte[] received = copy(in, Channels.newOutputStream(out), transferred);
 				if (transferred.get() != size.get() || !MessageDigest.isEqual(received, digest)) {
 					throw new WinRMClientException(
@@ -449,6 +466,28 @@ public final class RemoteFile {
 			}
 			throw e;
 		}
+	}
+
+	/**
+	 * The name of the file in a local destination directory: the last element of the remote path.
+	 *
+	 * @return the name
+	 * @throws IllegalArgumentException when the name contains a colon: an alternate data stream
+	 *         ({@code a.txt:meta}), whose name alone would collide with other streams, or a
+	 *         drive-relative path ({@code C:a.txt}), which a Windows client resolves outside the
+	 *         directory
+	 */
+	private String localName() {
+		final String name = path.substring(Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/')) + 1);
+		if (name.indexOf(':') >= 0) {
+			throw new IllegalArgumentException(
+				String.format(
+					"Remote path %s is an alternate data stream or drive-relative: give the local file name, not a directory",
+					path
+				)
+			);
+		}
+		return name;
 	}
 
 	/**

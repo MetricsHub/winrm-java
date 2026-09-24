@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.metricshub.winrm.light.FakeWsmanResponses.commandResponse;
 import static org.metricshub.winrm.light.FakeWsmanResponses.done;
 import static org.metricshub.winrm.light.FakeWsmanResponses.envelope;
@@ -42,11 +43,14 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -376,6 +380,34 @@ class RemoteFileTest {
 		}
 		assertArrayEquals(content, Files.readAllBytes(local));
 		assertEquals(List.of(local), files(directory));
+	}
+
+	@Test
+	void aReplacedFileKeepsItsPosixPermissions(@TempDir final Path directory) throws Exception {
+		assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"), "POSIX only");
+		final Set<PosixFilePermission> ownerOnly = PosixFilePermissions.fromString("rw-------");
+		final Path local = Files.write(directory.resolve("secret.conf"), "previous".getBytes(StandardCharsets.US_ASCII));
+		Files.setPosixFilePermissions(local, ownerOnly);
+		final byte[] content = "password=new".getBytes(StandardCharsets.US_ASCII);
+		enqueueRead(0, null, probe(content));
+		enqueueCommand(0, null, b64(content) + "\r\n");
+		try (WinRMClient client = client()) {
+			client.downloadFile(PATH, local);
+		}
+		assertArrayEquals(content, Files.readAllBytes(local));
+		assertEquals(ownerOnly, Files.getPosixFilePermissions(local));
+	}
+
+	@Test
+	void aStreamPathIsNotDownloadedIntoADirectory(@TempDir final Path directory) {
+		// "a.txt:meta" and "b.txt:meta" would both land in <directory>/meta.
+		try (WinRMClient client = client()) {
+			final RemoteFile stream = client.file("C:\\reports\\a.txt:meta");
+			assertThrows(IllegalArgumentException.class, () -> stream.downloadTo(directory));
+			final RemoteFile driveRelative = client.file("C:a.txt");
+			assertThrows(IllegalArgumentException.class, () -> driveRelative.downloadTo(directory));
+		}
+		assertEquals(0, server.decryptedRequests().size());
 	}
 
 	@Test
