@@ -214,8 +214,8 @@ destination's directory is created when needed.
 4. **Verify and publish.** The received bytes must match the probed size and digest; the
    temporary file is then flushed to disk (`fsync`) and moved onto the destination in one atomic
    step (`ATOMIC_MOVE`), replacing any previous file. On Linux and macOS a replaced file keeps its
-   permissions — the temporary file gets them before any byte is written, so a `0600` file stays
-   private throughout. On Windows, the new file gets the permissions the directory gives new
+   permissions — the temporary file is created with them, so a `0600` file stays private
+   throughout. On Windows, the new file gets the permissions the directory gives new
    files: an explicit ACL set on the replaced file is not carried over.
 
 **The destination is never seen truncated or half-written**: until the final move it keeps its

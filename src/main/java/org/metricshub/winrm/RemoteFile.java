@@ -36,10 +36,13 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.EnumSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -405,12 +408,16 @@ public final class RemoteFile {
 				}
 			}
 		}
-		// A replaced file keeps its POSIX permissions (a 0600 file must not become 0644): the staging
-		// file gets them before any byte is written. Windows has no such mode bits.
+		// A replaced file keeps its POSIX permissions (a 0600 file must not become 0644). The staging
+		// file is created with them: set afterward, a reader could open it in between and keep its
+		// descriptor. Windows has no such mode bits.
 		final Set<PosixFilePermission> permissions = replacing
 			&&
 			target.getFileSystem().supportedFileAttributeViews().contains("posix")
 				? Files.getPosixFilePermissions(target) : null;
+		final FileAttribute<?>[] attributes = permissions == null
+			? new FileAttribute<?>[0] : new FileAttribute<?>[]
+			{ PosixFilePermissions.asFileAttribute(permissions) };
 
 		final Path absolute = target.toAbsolutePath();
 		final Path directory = absolute.getParent();
@@ -433,8 +440,13 @@ public final class RemoteFile {
 		try {
 			try (
 				InputStream in = RemoteFiles.open(client, path, RemoteFiles.readScript(path, 0, -1), timeout);
-				FileChannel out = FileChannel.open(part, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+				FileChannel out = FileChannel.open(
+					part,
+					EnumSet.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
+					attributes
+				)) {
 				if (permissions != null) {
+					// The umask can only have narrowed the creation mode: restore the exact permissions.
 					Files.setPosixFilePermissions(part, permissions);
 				}
 				final byte[] received = copy(in, Channels.newOutputStream(out), transferred);
