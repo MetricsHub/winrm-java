@@ -177,5 +177,6 @@ Notes:
 
 ## See also
 
+* [Remote Files](files.html) — the other direction: reading remote files through the WinRM channel
 * [Remote Commands](commands.html) — the command builder that carries the transfer
 * [Preparing the Windows Host](preparing-the-host.html) — the privileges a transfer needs
