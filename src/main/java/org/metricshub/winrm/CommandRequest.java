@@ -154,7 +154,7 @@ public final class CommandRequest {
 	 *         shell's command-line limit (room for the {@code CMD.EXE /C} wrapper included, so
 	 *         the decision does not depend on {@link #upload(Path...)})
 	 */
-	private static String encodePowerShell(final String script) {
+	static String encodePowerShell(final String script) {
 		final String encoded = POWERSHELL_PREFIX
 			+ Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
 		return encoded.length() > MAX_COMMAND_LINE_LENGTH - CMD_WRAPPER_LENGTH ? null : encoded;
