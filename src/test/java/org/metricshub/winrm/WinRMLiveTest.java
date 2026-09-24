@@ -5,9 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.List;
@@ -16,6 +20,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.junit.jupiter.api.io.TempDir;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 import org.metricshub.winrm.wql.WinRMWqlExecutor;
 
@@ -302,5 +307,81 @@ class WinRMLiveTest {
 
 	private static List<String> paths(final List<RemoteFileInfo> entries) {
 		return entries.stream().map(RemoteFileInfo::path).collect(Collectors.toList());
+	}
+
+	@Test
+	void downloadRoundTripsAnUpload(@TempDir final Path directory) throws Exception {
+		// Every byte value, under a non-ASCII name. Small: an upload costs one command leg per ~8 KB.
+		final byte[] content = new byte[1024];
+		for (int i = 0; i < content.length; i++) {
+			content[i] = (byte) i;
+		}
+		final String name = "winrm-java-live-round-trip-donn\u00e9es-\u6f22\u5b57.bin";
+		final Path local = Files.write(directory.resolve(name), content);
+		final String remote = "C:\\Windows\\Temp\\" + name;
+		final Path downloads = Files.createDirectory(directory.resolve("downloads"));
+
+		try (WinRMClient client = client()) {
+			client.uploadFile(local, remote);
+			try {
+				// Into a directory: the file keeps its remote name.
+				final long start = System.nanoTime();
+				assertEquals(content.length, client.downloadFile(remote, downloads));
+				final long downloaded = System.nanoTime();
+				assertArrayEquals(content, Files.readAllBytes(downloads.resolve(name)));
+				// Identical: nothing transferred.
+				assertEquals(0, client.downloadFile(remote, downloads.resolve(name)));
+				System.out.printf(
+					"Downloaded 1 KiB in %d ms, skipped the identical copy in %d ms%n",
+					(downloaded - start) / 1_000_000L,
+					(System.nanoTime() - downloaded) / 1_000_000L
+				);
+			} finally {
+				client.powerShell("Remove-Item -LiteralPath '" + remote + "' -ErrorAction SilentlyContinue").execute();
+			}
+		}
+	}
+
+	@Test
+	void downloadIsDigestVerifiedWithBoundedMemory(@TempDir final Path directory) throws Exception {
+		// Larger than the heap when run with a small one, e.g. -DargLine=-Xmx32m
+		// -Dwinrm.live.download.mib=64. Created on the host by one command.
+		final int mebibytes = Integer.getInteger("winrm.live.download.mib", 20);
+		final String remote = "C:\\Windows\\Temp\\winrm-java-live-download.bin";
+		try (WinRMClient client = client()) {
+			client
+				.powerShell(
+					"$r=New-Object Random 42;$b=New-Object byte[] 1048576;$f=[IO.File]::Create('" + remote + "');" +
+						"for($i=0;$i -lt " + mebibytes + ";$i++){$r.NextBytes($b);$f.Write($b,0,$b.Length)};$f.Close()"
+				)
+				.execute();
+			try {
+				final Path local = directory.resolve("download.bin");
+				final long start = System.nanoTime();
+				assertEquals(
+					mebibytes * 1048576L,
+					client.file(remote).timeout(Duration.ofMinutes(15)).downloadTo(local)
+				);
+				final long millis = (System.nanoTime() - start) / 1_000_000L;
+				System.out.printf(
+					"Downloaded %d MiB in %d ms (%.2f MB/s) with a %d MiB heap%n",
+					mebibytes,
+					millis,
+					mebibytes * 1048.576 / millis,
+					Runtime.getRuntime().maxMemory() >> 20
+				);
+				final MessageDigest digest = MessageDigest.getInstance("SHA-256");
+				try (InputStream in = new DigestInputStream(Files.newInputStream(local), digest)) {
+					in.transferTo(OutputStream.nullOutputStream());
+				}
+				final StringBuilder sha256 = new StringBuilder();
+				for (final byte b : digest.digest()) {
+					sha256.append(String.format("%02x", b));
+				}
+				assertEquals(client.file(remote).digest("SHA256"), sha256.toString());
+			} finally {
+				client.command("del /q \"" + remote + "\"").execute();
+			}
+		}
 	}
 }

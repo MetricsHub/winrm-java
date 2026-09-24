@@ -28,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -206,6 +208,7 @@ class RemoteFilesScriptTest {
 		final Outcome outcome = run(RemoteFiles.readScript(empty.toString(), 0, -1));
 		assertEquals(0, outcome.exitCode);
 		assertEquals(0, outcome.bytes.length);
+		assertArrayEquals(probe(new byte[0]), run(RemoteFiles.probeScript(empty.toString())).bytes);
 	}
 
 	@Test
@@ -218,7 +221,29 @@ class RemoteFilesScriptTest {
 				"line 1\r\n".getBytes(StandardCharsets.US_ASCII),
 				run(RemoteFiles.readScript(log.toString(), 0, -1)).bytes
 			);
+			// The download probe too — certutil -hashfile fails on such a file with a sharing violation.
+			assertArrayEquals(
+				probe("line 1\r\n".getBytes(StandardCharsets.US_ASCII)),
+				run(RemoteFiles.probeScript(log.toString())).bytes
+			);
 		}
+	}
+
+	/** The expected probe output: the size (8 bytes, little-endian), then the SHA-256 digest. */
+	private static byte[] probe(final byte[] bytes) throws Exception {
+		return ByteBuffer
+			.allocate(RemoteFiles.PROBE_LENGTH)
+			.order(ByteOrder.LITTLE_ENDIAN)
+			.putLong(bytes.length)
+			.put(MessageDigest.getInstance("SHA-256").digest(bytes))
+			.array();
+	}
+
+	@Test
+	void probeReportsTheSizeAndTheDigest() throws Exception {
+		final Outcome outcome = run(RemoteFiles.probeScript(file.toString()));
+		assertEquals(0, outcome.exitCode);
+		assertArrayEquals(probe(content), outcome.bytes);
 	}
 
 	@Test

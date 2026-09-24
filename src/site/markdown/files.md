@@ -1,5 +1,5 @@
-keywords: remote file, read file, byte range, tail, digest, base64, powershell, stream, directory listing, file properties, exists, glob
-description: How the WinRM Java Client reads files and lists directories on the remote host through the WinRM channel itself — whole files, byte ranges, tails, streams, digests, file properties, and filtered recursive listings.
+keywords: remote file, read file, download, byte range, tail, digest, base64, powershell, stream, directory listing, file properties, exists, glob
+description: How the WinRM Java Client reads files and lists directories on the remote host through the WinRM channel itself — whole files, byte ranges, tails, streams, downloads, digests, file properties, and filtered recursive listings.
 
 # Remote Files
 
@@ -75,11 +75,26 @@ it holds the client's connection until it reaches its end or is closed, and clos
 the remote read. The file is opened before `openStream()` returns, so a missing file fails there;
 a failure midway is reported by `read()`, never as a silently short read.
 
+## Downloading to a local file
+
+`downloadTo(Path)` writes the whole file to a local file — digest-verified, skipped when the local
+copy is already identical, and atomic: the destination is replaced in one step, never left
+half-written. `client.downloadFile(remote, local)` does the same with the client's timeout:
+
+```java
+long bytes = client.file("C:\\Windows\\Temp\\collect.log").downloadTo(Path.of("collect.log"));
+```
+
+It streams, so memory stays bounded whatever the size of the file, and its timeout is a
+wall-clock deadline for the whole transfer. The mechanics, the guarantees and the measured speed
+are described in [File Transfers](file-transfers.html#downloading-a-file).
+
 ## Timeouts
 
-The blocking terminals (`readBytes`, `readText`, `digest`, `info`, `exists`, and `execute()` on a
-[directory listing](#listing-a-directory)) run under a **wall-clock deadline**: the client's
-timeout, or `timeout(Duration)` on the request — raise it for large reads and big trees.
+The blocking terminals (`readBytes`, `readText`, `downloadTo`, `digest`, `info`, `exists`, and
+`execute()` on a [directory listing](#listing-a-directory)) run under a **wall-clock deadline**:
+the client's timeout, or `timeout(Duration)` on the request — raise it for large reads, downloads
+and big trees.
 `openStream()`/`openReader()` and a listing's `stream()` use the **inactivity** semantics of the
 other streaming terminals: the timeout bounds the silence between two blocks, not the whole
 operation. See [Timeouts and Errors](timeouts-and-errors.html).
@@ -92,6 +107,10 @@ operation. See [Timeouts and Errors](timeouts-and-errors.html).
 * Every failure is a `WinRMClientException` naming its cause: path not found, a directory where a
   file is expected (or a file given to `list()`), access denied, sharing violation, PowerShell not
   available, or PowerShell in Constrained Language Mode.
+* A script rejected at startup by the host's per-user operation quota (as low as 15 concurrent
+  operations on Windows Server 2008 R2) has not run: it is retried with escalating delays (5, 10,
+  15, 20 seconds) for as long as the timeout allows, like the steps of a
+  [file transfer](file-transfers.html).
 * The host needs **PowerShell 2.0 or later in `FullLanguage` mode** (Windows Server 2008 R2 and
   later ship it). When AppLocker or WDAC puts PowerShell in Constrained Language Mode, the .NET
   calls the scripts rely on are blocked: remote file access is then not available.
@@ -255,6 +274,6 @@ DMTF strings.
 
 ## See also
 
-* [File Transfers](file-transfers.html) — the other direction: copying local files to the host
+* [File Transfers](file-transfers.html) — copying local files to the host, and how downloads work
 * [Remote Commands](commands.html) — the command shell the reads and listings ride
 * [WQL Queries](wql.html) — the WMI alternative for file metadata
