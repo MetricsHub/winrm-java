@@ -11,6 +11,8 @@ import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -191,5 +193,114 @@ class WinRMLiveTest {
 			}
 			client.command("del /q \"" + big + "\" \"" + log + "\"").execute();
 		}
+	}
+
+	@Test
+	void remoteDirectoryListing() throws Exception {
+		final String base = "C:\\Windows\\Temp\\winrm-java-live-list";
+		final String nonAscii = base + "\\donn\u00e9es-\u6f22\u5b57.txt";
+		// 3 x 100 characters below the base: over 330 characters in all.
+		final String longDir = base + "\\long\\" + "a".repeat(100) + "\\" + "b".repeat(100);
+		final String longFile = longDir + "\\" + "c".repeat(100) + ".txt";
+
+		try (WinRMClient client = client()) {
+			// .NET 4.6.2+ accepts \\?\ paths (long paths); PowerShell 2.0 on .NET 2.0 does not.
+			final boolean longPaths = client
+				.powerShell("try{[void][IO.Path]::GetFullPath('\\\\?\\C:\\x');'yes'}catch{'no'}")
+				.execute()
+				.stdout()
+				.contains("yes");
+			client
+				.powerShell(
+					"$b='" + base + "';" +
+						"foreach($d in 'sub\\deep','secret'){[void][IO.Directory]::CreateDirectory(\"$b\\$d\")};" +
+						"foreach($f in 'a.log','sub\\b.log','sub\\deep\\c.log','secret\\hidden.txt'){" +
+						"[IO.File]::WriteAllText(\"$b\\$f\",'x')};" +
+						"[IO.File]::WriteAllText('" + nonAscii + "','x');" +
+						"cmd /c mklink /J \"$b\\loop\" \"$b\" | Out-Null;" +
+						"icacls \"$b\\secret\" /deny '*S-1-1-0:(RD)' | Out-Null;" +
+						(longPaths
+							? "[void][IO.Directory]::CreateDirectory('\\\\?\\" + longDir + "');" +
+								"[IO.File]::WriteAllText('\\\\?\\" + longFile + "','0123456789')"
+							: "")
+				)
+				.execute();
+			try {
+				// A plain listing of C:\Windows\Temp.
+				assertTrue(
+					client
+						.file("C:\\Windows\\Temp")
+						.list()
+						.directoriesOnly()
+						.execute()
+						.entries()
+						.stream()
+						.anyMatch(e -> e.path().equalsIgnoreCase(base))
+				);
+
+				// Depth-limited.
+				final List<String> depth2 = paths(client.file(base).list().maxDepth(2).execute().entries());
+				assertTrue(depth2.contains(base + "\\sub\\b.log"), depth2::toString);
+				assertTrue(depth2.contains(base + "\\sub\\deep"), depth2::toString);
+				assertFalse(depth2.contains(base + "\\sub\\deep\\c.log"), depth2::toString);
+
+				// The whole tree: the junction loop terminates, the denied directory is reported.
+				final long start = System.nanoTime();
+				final RemoteFileList all = client.file(base).list().recursive().execute();
+				System.out.printf("Listed %s in %d ms%n", all, (System.nanoTime() - start) / 1_000_000L);
+				final List<String> paths = paths(all.entries());
+				assertTrue(paths.contains(nonAscii), paths::toString);
+				assertTrue(paths.contains(base + "\\secret"), paths::toString);
+				// An administrator's WinRM session has SeBackupPrivilege enabled, and directory
+				// enumeration uses backup semantics: the deny ACE then does not apply.
+				if (paths.contains(base + "\\secret\\hidden.txt")) {
+					assertTrue(all.inaccessible().isEmpty(), all.inaccessible()::toString);
+					System.out.println("The deny ACE was bypassed (backup privilege): inaccessible directories not tested");
+				} else {
+					assertEquals(List.of(base + "\\secret"), all.inaccessible());
+				}
+				final RemoteFileInfo loop = all
+					.entries()
+					.stream()
+					.filter(e -> e.path().equals(base + "\\loop"))
+					.findFirst()
+					.orElseThrow();
+				assertTrue(loop.isReparsePoint() && loop.isDirectory());
+				assertTrue(paths.stream().noneMatch(p -> p.startsWith(base + "\\loop\\")), paths::toString);
+
+				// Streamed, with filters.
+				try (Stream<RemoteFileInfo> logs = client.file(base).list().recursive().glob("*.LOG").filesOnly().stream()) {
+					assertEquals(
+						List.of("a.log", "b.log", "c.log"),
+						logs.map(RemoteFileInfo::name).sorted().collect(Collectors.toList())
+					);
+				}
+
+				// Properties.
+				assertEquals(1, client.file(base + "\\a.log").info().orElseThrow().size());
+				assertTrue(client.file(nonAscii).exists());
+				assertFalse(client.file(base + "\\missing.log").exists());
+
+				if (longPaths) {
+					assertEquals(10, client.file(longFile).info().orElseThrow().size());
+					assertTrue(
+						paths(client.file(base + "\\long").list().recursive().filesOnly().execute().entries()).contains(longFile)
+					);
+				} else {
+					System.out.println("Long paths not supported by this host's .NET: skipped");
+				}
+			} finally {
+				client
+					.powerShell(
+						"$b='" + base + "';icacls \"$b\\secret\" /remove:d '*S-1-1-0' | Out-Null;" +
+							"cmd /c rmdir \"$b\\loop\";cmd /c rmdir /s /q \"\\\\?\\$b\""
+					)
+					.execute();
+			}
+		}
+	}
+
+	private static List<String> paths(final List<RemoteFileInfo> entries) {
+		return entries.stream().map(RemoteFileInfo::path).collect(Collectors.toList());
 	}
 }

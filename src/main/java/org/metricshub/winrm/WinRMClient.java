@@ -171,16 +171,19 @@ public final class WinRMClient implements AutoCloseable {
 	}
 
 	/**
-	 * Prepare access to a file on the remote host: read its content (whole, as a byte range, or as
-	 * a stream) or compute its digest, through the WinRM connection itself. Nothing is sent until
-	 * a terminal of the returned {@link RemoteFile} is called.
+	 * Prepare access to a file or directory on the remote host, through the WinRM connection
+	 * itself: read a file's content (whole, as a byte range, or as a stream), compute its digest,
+	 * get its properties, or list a directory. Nothing is sent until a terminal of the returned
+	 * {@link RemoteFile} is called.
 	 *
 	 * <pre>{@code
 	 * byte[] content = client.file("C:\\Windows\\Temp\\collect.bin").readBytes();
 	 * String tail = client.file("D:\\logs\\huge.log").offset(-8192).readText(StandardCharsets.UTF_8);
+	 * Optional<RemoteFileInfo> info = client.file("C:\\Windows\\Temp\\collect.log").info();
+	 * RemoteFileList logs = client.file("C:\\inetpub\\logs").list().glob("*.log").recursive().execute();
 	 * }</pre>
 	 *
-	 * @param path the absolute path of the file on the remote host, e.g.
+	 * @param path the absolute path of the file or directory on the remote host, e.g.
 	 *        {@code C:\Windows\Temp\collect.log}
 	 * @return the remote file, to configure and read
 	 * @throws IllegalArgumentException when the path is blank
