@@ -497,6 +497,10 @@ final class RemoteFiles {
 					Thread.currentThread().interrupt();
 					throw e;
 				}
+				// The pause itself can overrun (a GC pause, a descheduled thread).
+				if (Utils.getCurrentTimeMillis() - begin >= WinRMClient.toMillis(timeout)) {
+					throw e;
+				}
 			}
 		}
 	}
