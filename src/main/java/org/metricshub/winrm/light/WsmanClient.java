@@ -486,12 +486,19 @@ final class WsmanClient implements AutoCloseable {
 				stdout.write(chunk.stdout, 0, chunk.stdout.length);
 				stderr.write(chunk.stderr, 0, chunk.stderr.length);
 			}
-			return new CommandOutput(
-				new String(stdout.toByteArray(), cs),
-				new String(stderr.toByteArray(), cs),
-				command.exitCode()
-			);
+			return new CommandOutput(decode(stdout, cs), decode(stderr, cs), command.exitCode());
 		}
+	}
+
+	/**
+	 * Decode a whole output stream. With UTF-8, a byte order mark that starts the stream is dropped
+	 * — PowerShell 2.0 writes one ahead of its redirected output under console code page 65001 —
+	 * the same rule the streaming paths' {@code ChunkDecoder} applies; a U+FEFF later in the output
+	 * is left alone.
+	 */
+	private static String decode(final ByteArrayOutputStream bytes, final Charset charset) {
+		final String text = new String(bytes.toByteArray(), charset);
+		return StandardCharsets.UTF_8.equals(charset) && text.startsWith("\uFEFF") ? text.substring(1) : text;
 	}
 
 	/**
