@@ -96,6 +96,10 @@ the timeout bounds the silence between two blocks, not the whole read. See
   calls the reader relies on are blocked: remote file access is then not available.
 * Non-ASCII paths and content are safe: the path travels base64-encoded (UTF-8) inside the script
   and the content comes back base64-encoded, so neither depends on the remote console code page.
+* A read never writes anything on the host: the reader script travels on the command line, which
+  limits the path to about **1,450 characters** (about 720 with accented letters, 480 with CJK
+  characters — well above the classic 260-character `MAX_PATH`). A longer path fails with a
+  `WinRMClientException` before anything is sent.
 
 ## Performance
 

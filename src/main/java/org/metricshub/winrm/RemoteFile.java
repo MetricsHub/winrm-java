@@ -24,6 +24,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.time.Duration;
 import java.util.concurrent.Callable;
@@ -57,7 +58,10 @@ import org.metricshub.winrm.exceptions.WinRMTimeoutException;
  * <p>
  * The file is opened with a share mode that tolerates other writers, so a log being written by a
  * running service can be read; a file held with an exclusive lock (e.g. {@code pagefile.sys})
- * fails with a sharing violation. Ranges are <b>byte</b> ranges, and reads are not snapshots: a
+ * fails with a sharing violation. A read writes nothing on the host: its script travels on the
+ * command line, which limits the path to about 1,450 characters (fewer with non-Latin
+ * characters) — a longer path fails before anything is sent. Ranges are <b>byte</b> ranges, and
+ * reads are not snapshots: a
  * file that grows or shrinks between two reads is read as it is at each read.
  * <p>
  * A request is not thread-safe; configure it and call its terminals from one thread.
@@ -193,6 +197,10 @@ public final class RemoteFile {
 						)
 					);
 				}
+				// A read that filled exactly the requested length stops short of the end of the
+				// stream: drain it (the host sends nothing past the length) so the script's exit code
+				// is still checked and a late failure is not reported as a successful read.
+				in.transferTo(OutputStream.nullOutputStream());
 				return content;
 			}
 		});
@@ -200,8 +208,10 @@ public final class RemoteFile {
 
 	/**
 	 * Read the content (the whole file, or the configured range) into memory and decode it with the
-	 * given charset — no guessing, no default. A byte order mark is <b>not</b> stripped (it
-	 * decodes to {@code U+FEFF}). A range boundary may split a multibyte character, which then
+	 * given charset — no guessing, no default. This method strips nothing: a byte order mark is
+	 * handled exactly as the given charset's decoder handles it — {@code UTF-8} keeps it (as
+	 * {@code U+FEFF}), while {@code UTF-16} consumes it to detect the byte order. A range boundary
+	 * may split a multibyte character, which then
 	 * decodes to {@code U+FFFD} at the edges, like any malformed input.
 	 *
 	 * @param charset the charset the file is encoded with
@@ -237,7 +247,8 @@ public final class RemoteFile {
 	/**
 	 * Open the content (the whole file, or the configured range) as a character stream decoded
 	 * with the given charset: {@link #openStream()} behind an {@link InputStreamReader}, with the
-	 * same lifecycle — <b>close it</b>. A byte order mark is not stripped.
+	 * same lifecycle — <b>close it</b>. Like {@link #readText(Charset)}, it strips nothing: a byte
+	 * order mark is handled as the given charset's decoder handles it.
 	 *
 	 * @param charset the charset the file is encoded with
 	 * @return the reader, to use with try-with-resources

@@ -74,7 +74,6 @@ through the unchecked `WinRMClientException` hierarchy (`WinRMAuthenticationExce
 `WqlSyntaxException`).
 
 ```java
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import org.metricshub.winrm.*;
@@ -99,9 +98,6 @@ try (WinRMClient client = WinRMClient.builder("server01.acme.com")
 
     // Copy a file to the host (through the WinRM channel itself — no SMB)
     client.uploadFile(Path.of("collect.ps1"), "C:\\Windows\\Temp\\collect.ps1");
-
-    // Read a remote file — whole, a byte range, or the tail of a log
-    String tail = client.file("D:\\logs\\app.log").offset(-8192).readText(StandardCharsets.UTF_8);
 }
 ```
 

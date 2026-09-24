@@ -174,6 +174,17 @@ final class RemoteFiles {
 	 * @return the decoded stream; it must be closed
 	 */
 	static InputStream open(final WinRMClient client, final String path, final String script, final Duration timeout) {
+		if (CommandRequest.encodePowerShell(script) == null) {
+			// powerShell(...) would transparently fall back to uploading the script as a file: a read
+			// must stay read-only on the host (no files written, no certutil), so refuse instead.
+			throw new WinRMClientException(
+				String.format(
+					"Remote path too long to read on %s (%d characters): the reader script must fit the remote command line",
+					client.hostname(),
+					path.length()
+				)
+			);
+		}
 		final RemoteProcess process = client.powerShell(script).timeout(timeout).start();
 		try {
 			return new DecodingStream(process, path, client.hostname());

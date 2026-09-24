@@ -205,6 +205,30 @@ class RemoteFileTest {
 	}
 
 	@Test
+	void anExactLengthReadStillChecksTheExitCode() {
+		// The host sends exactly the requested bytes, then fails (e.g. while closing the file):
+		// readBytes() must drain to the end of the output instead of returning a full buffer.
+		enqueueRead(1, "The device is not ready", b64(new byte[] { 1, 2, 3 }) + "\r\n");
+		try (WinRMClient client = client()) {
+			final RemoteFile file = client.file(PATH).length(3);
+			final WinRMClientException e = assertThrows(WinRMClientException.class, file::readBytes);
+			assertTrue(e.getMessage().contains("device is not ready"), e.getMessage());
+		}
+	}
+
+	@Test
+	void aPathTooLongForTheCommandLineIsRefusedBeforeAnythingIsSent() {
+		try (WinRMClient client = client()) {
+			final RemoteFile file = client.file("C:\\" + "a".repeat(1500));
+			final WinRMClientException e = assertThrows(WinRMClientException.class, file::readBytes);
+			assertTrue(e.getMessage().contains("too long"), e.getMessage());
+			// Just under the limit still fits: the script is not uploaded as a file.
+			assertTrue(CommandRequest.encodePowerShell(RemoteFiles.readScript("C:\\" + "a".repeat(1450), -8192, 1)) != null);
+		}
+		assertEquals(0, server.decryptedRequests().size());
+	}
+
+	@Test
 	void aFailureMidwayIsNotASilentlyShortRead() throws Exception {
 		enqueueRead(1, "The device is not ready", b64(new byte[] { 1, 2, 3 }) + "\r\n");
 		try (WinRMClient client = client(); InputStream in = client.file(PATH).openStream()) {
