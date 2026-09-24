@@ -26,6 +26,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CoderResult;
 import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Incremental, stateful charset decoding for streamed command output. A multibyte character (e.g.
@@ -42,6 +43,12 @@ import java.nio.charset.CodingErrorAction;
  * until input arrives — whereas output chunks here are <i>pushed</i> by the protocol loop as each
  * Receive response is processed; there is no public JDK type for that direction, only the
  * {@link CharsetDecoder}/{@link ByteBuffer} primitives this class packages.
+ * <p>
+ * With UTF-8, a byte order mark (U+FEFF) that starts the stream is dropped: PowerShell 2.0 writes
+ * one ahead of its redirected output under console code page 65001, and the JDK's UTF-8 decoder
+ * keeps it. Only the very first character of the stream qualifies, even when the mark is split
+ * across chunks; a U+FEFF later in the output is left alone. The blocking path applies the same
+ * rule to the whole-buffer decode (see {@code WsmanClient.executeCommand}).
  */
 final class ChunkDecoder {
 
@@ -51,11 +58,15 @@ final class ChunkDecoder {
 	// front of the next chunk.
 	private byte[] pending = new byte[0];
 
+	// Nothing decoded yet from a UTF-8 stream: a leading byte order mark is still to be dropped.
+	private boolean dropBom;
+
 	ChunkDecoder(final Charset charset) {
 		this.decoder = charset
 			.newDecoder()
 			.onMalformedInput(CodingErrorAction.REPLACE)
 			.onUnmappableCharacter(CodingErrorAction.REPLACE);
+		this.dropBom = StandardCharsets.UTF_8.equals(charset);
 	}
 
 	/**
@@ -103,6 +114,14 @@ final class ChunkDecoder {
 			// Whatever the decoder left in the input is an incomplete character: carry it over.
 			pending = new byte[in.remaining()];
 			in.get(pending);
+		}
+		// A mark split across chunks stays pending until complete, so the first character decoded
+		// is the one to check, whichever call produces it.
+		if (dropBom && text.length() > 0) {
+			dropBom = false;
+			if (text.charAt(0) == '\uFEFF') {
+				text.deleteCharAt(0);
+			}
 		}
 		return text.toString();
 	}

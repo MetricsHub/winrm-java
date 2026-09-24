@@ -264,6 +264,19 @@ client.command("net user Administrateur")
 `chcp`) or writes raw bytes in a known encoding to its standard output. WQL results are unaffected
 by all of this: they travel as UTF-8 inside the SOAP envelope.
 
+**Byte order mark.** Under console code page 65001, PowerShell 2.0 (Windows Server 2008 R2,
+Windows 7) writes a UTF-8 byte order mark ahead of its redirected output, which would otherwise
+surface as an invisible `U+FEFF` that `trim()` does not remove (`"\uFEFF2.0"` for
+`$PSVersionTable.PSVersion.ToString()`). When the output is decoded as UTF-8, a single `U+FEFF`
+at the very start of stdout, and of stderr, is dropped — in `execute()`, the `onStdout(...)` /
+`onStderr(...)` callbacks, the `start()` readers, and the legacy `WinRMCommandExecutor`, which
+shares the same decoding. Newer PowerShell versions and `cmd.exe` write no mark, so nothing changes
+for them. A `U+FEFF` anywhere else is kept as data: PowerShell 2.0 emits its mark on the first write
+through its own output writer, so when a direct `[Console]::Out` or `[Console]::Error` write comes
+first, the mark lands mid-stream and stays there (typically on stderr, just before a `#< CLIXML`
+error block). With any other `charset(...)`, the bytes are decoded as they are. File reads
+(`client.file(...)`) return the file's content untouched, including its own byte order mark.
+
 > **Changed in 2.0.00** — earlier versions ran a `SELECT CodeSet FROM Win32_OperatingSystem` query
 > before the first command and decoded the output with the code page it reported. That property is
 > the remote machine's *ANSI* code page, which never matched what the shell emitted, so non-ASCII

@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Unit tests of {@link ChunkDecoder}: incrementally decoding a byte sequence — split at any
  * boundary, including inside multibyte characters — must yield exactly the text a whole-buffer
- * {@code new String(bytes, charset)} yields.
+ * {@code new String(bytes, charset)} yields, less a leading UTF-8 byte order mark.
  */
 class ChunkDecoderTest {
 
@@ -81,6 +81,22 @@ class ChunkDecoderTest {
 		final String text = "café au lait";
 		final byte[] bytes = text.getBytes(cp1252);
 		assertEquals(text, decodeSplit(bytes, bytes.length / 2, cp1252));
+	}
+
+	@Test
+	void onlyTheLeadingUtf8BomIsDroppedAtAnySplit() {
+		final byte[] bytes = { (byte) 0xEF, (byte) 0xBB, (byte) 0xBF, 'x', (byte) 0xEF, (byte) 0xBB, (byte) 0xBF, 'y' };
+		final String expected = "x" + (char) 0xFEFF + "y";
+		for (int split = 0; split <= bytes.length; split++) {
+			assertEquals(expected, decodeSplit(bytes, split, StandardCharsets.UTF_8), "split at " + split);
+		}
+	}
+
+	@Test
+	void theBomIsKeptWithOtherCharsets() {
+		final byte[] bytes = { (byte) 0xEF, (byte) 0xBB, (byte) 0xBF, 'x' };
+		final Charset cp1252 = Charset.forName("windows-1252");
+		assertEquals(new String(bytes, cp1252), decodeSplit(bytes, 1, cp1252));
 	}
 
 	@Test
