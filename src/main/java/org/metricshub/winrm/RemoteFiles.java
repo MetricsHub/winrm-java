@@ -128,7 +128,8 @@ final class RemoteFiles {
 	 * <li>{@code out} writes the buffered records and a newline to the raw stdout stream as one
 	 * write (see {@link #READ_RANGE} for why); with nothing buffered, the bare newline is a
 	 * keepalive the parser skips, so a long walk that matches nothing does not trip the inactivity
-	 * timeout;
+	 * timeout; {@code $v} times the silence since the last write — a {@code Stopwatch}, monotonic
+	 * and 64-bit, where {@code Environment.TickCount} is negative for half of its 49.7-day cycle;
 	 * <li>the path is made absolute, then given the {@code \\?\} prefix ({@code \\?\UNC\} for a
 	 * UNC path) that lifts the 260-character {@code MAX_PATH} limit — where .NET accepts it (4.6.2
 	 * and later: older versions reject {@code GetFullPath('\\?\...')}, and paths stay limited
@@ -137,9 +138,10 @@ final class RemoteFiles {
 	 * </ul>
 	 */
 	private static final String METADATA = PREAMBLE +
-		"$o=[Console]::OpenStandardOutput();$u=[Text.Encoding]::UTF8;$w=New-Object Text.StringBuilder;$t=0;" +
+		"$o=[Console]::OpenStandardOutput();$u=[Text.Encoding]::UTF8;$w=New-Object Text.StringBuilder;" +
+		"$v=[Diagnostics.Stopwatch]::StartNew();" +
 		"function out{$y=$u.GetBytes(\"$w`n\");$o.Write($y,0,$y.Length);$o.Flush();$w.Length=0;" +
-		"$script:t=[Environment]::TickCount};" +
+		"$v.Reset();$v.Start()};" +
 		"try{$q=[IO.Path]::GetFullPath($p);" +
 		"try{$q=[IO.Path]::GetFullPath((($q-replace'^\\\\\\\\(?=[^\\\\?.])','\\\\?\\UNC\\')" +
 		"-replace'^(?=[A-Za-z]:\\\\)','\\\\?\\'))}catch{};" +
@@ -183,7 +185,7 @@ final class RemoteFiles {
 		"$f=$e.LastWriteTimeUtc.ToFileTimeUtc();" +
 		"if(($k -eq 0 -or ($k -eq 2) -eq $i) -and ($i -or ($e.Length -ge $mn -and $e.Length -le $mx)) -and " +
 		"$f -gt $ta -and $f -lt $tb -and $e.Name -match $g){" + RECORD + "};" +
-		"if($w.Length -gt 32000 -or [Environment]::TickCount-$t -gt 1000){out}}}" +
+		"if($w.Length -gt 32000 -or $v.ElapsedMilliseconds -gt 1000){out}}}" +
 		"catch{if($n -eq 1){fail $_.Exception};$x=$_.Exception;if($x.InnerException){$x=$x.InnerException};" +
 		"[void]$w.Append(\"! $([Convert]::ToBase64String($u.GetBytes($pa+$d.FullName.Substring($pn)))) " +
 		"$([Convert]::ToBase64String($u.GetBytes($x.Message)))`n\")}};out";

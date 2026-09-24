@@ -98,10 +98,10 @@ operation. See [Timeouts and Errors](timeouts-and-errors.html).
 * Non-ASCII paths and content are safe: the path travels base64-encoded (UTF-8) inside the script
   and the content comes back base64-encoded, so neither depends on the remote console code page.
 * Remote file access never writes anything on the host: its scripts travel on the command line,
-  which limits the path to about **1,450 characters** for a read (about 720 with accented letters,
-  480 with CJK characters) and about **450 characters** for `info()` and `list()`, whose script
-  is larger — both well above the classic 260-character `MAX_PATH`. A longer path fails with a
-  `WinRMClientException` before anything is sent.
+  which limits the path to about **1,450 characters** for a read, **1,150** for `info()`, and
+  **450** for `list()`, whose walker script is the largest (roughly half as many with accented
+  letters, a third with CJK characters) — all above the classic 260-character `MAX_PATH`. A
+  longer path fails with a `WinRMClientException` before anything is sent.
 
 ## Read performance
 
@@ -243,7 +243,7 @@ DMTF strings.
   versions with WMF 5.1 and an updated .NET): the scripts use `\\?\`-prefixed paths there, and
   report paths without the prefix. On older hosts (e.g.
   Windows Server 2008 R2 with PowerShell 2.0), a path over 260 characters fails with an explicit
-  "path too long" error. The path *given* to `info()` or `list()` is limited to about 450
+  "path too long" error. The directory *given* to `list()` is limited to about 450
   characters (see [the requirements](#errors-and-requirements)); the entries a
   listing reports can be of any length.
 * **UNC paths** (`\\server\share\...`) are a *second hop*: the host must authenticate to the file
