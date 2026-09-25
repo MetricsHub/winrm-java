@@ -69,6 +69,12 @@ final class WsmanClient implements AutoCloseable {
 	// wire.
 	private static final long MIN_WIRE_POLL_MS = 750;
 
+	// How long the service may hold the terminate Signal of a command closed before it completed.
+	// The command is killed at once, but when it is blocked writing a block larger than its output
+	// pipe (a remote file read writes 64 KB lines), the service answers only when the Signal's
+	// OperationTimeout expires — the whole inactivity timeout, measured on Windows Server 2022.
+	private static final long EARLY_CLOSE_SIGNAL_MS = 1_000;
+
 	// WS-Enumeration namespace: the EndOfSequence / EnumerationContext markers live here. Match them by
 	// namespace, never by local name alone, so a WMI property that happens to be named "EndOfSequence"
 	// or "EnumerationContext" inside <Items> cannot be mistaken for the enumeration control element.
@@ -867,11 +873,27 @@ final class WsmanClient implements AutoCloseable {
 					if (exitCode != null) {
 						terminateCompleted(operationTimeoutMs);
 					} else {
-						terminate(commandId, operationTimeoutMs);
+						terminateRunning();
 					}
 				}
 			} finally {
 				releaseConnection();
+			}
+		}
+
+		/**
+		 * Terminate a command closed before it completed: the Signal is what stops it, so its
+		 * failures are reported — except the expiry of its short hold (see
+		 * {@link #EARLY_CLOSE_SIGNAL_MS}), a complete exchange that leaves the connection in sync
+		 * and the command killed.
+		 */
+		private void terminateRunning() throws Exception {
+			try {
+				terminate(commandId, Math.min(EARLY_CLOSE_SIGNAL_MS, operationTimeoutMs));
+			} catch (final WinRMFaultException e) {
+				if (!FAULT_OPERATION_TIMEOUT.equals(e.getFaultCode())) {
+					throw e;
+				}
 			}
 		}
 
