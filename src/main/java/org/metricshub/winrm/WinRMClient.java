@@ -220,6 +220,27 @@ public final class WinRMClient implements AutoCloseable {
 	}
 
 	/**
+	 * Copy a file from the remote host to a local file, through the WinRM connection itself — the
+	 * counterpart of {@link #uploadFile(Path, String)}, and a shorthand for
+	 * {@code file(remoteFile).downloadTo(localFile)}. The transfer is digest-verified, skipped when
+	 * the local file already has identical content, and atomic: the local file is replaced in one
+	 * step, never left half-written. When {@code localFile} is an existing directory, the file is
+	 * written into it under its remote name. The client's timeout applies, as a wall-clock deadline:
+	 * raise it for large files (see {@link RemoteFile#downloadTo(Path)}).
+	 *
+	 * @param remoteFile the absolute path of the file on the remote host, e.g.
+	 *        {@code C:\Windows\Temp\collect.log}
+	 * @param localFile the local file to write, or an existing directory to write the file into
+	 * @return the number of bytes transferred: the size of the file, or 0 when the local file
+	 *         already had the same content
+	 * @throws org.metricshub.winrm.exceptions.WinRMTimeoutException when the timeout elapses first
+	 * @throws org.metricshub.winrm.exceptions.WinRMClientException for any other failure
+	 */
+	public long downloadFile(final String remoteFile, final Path localFile) {
+		return file(remoteFile).downloadTo(localFile);
+	}
+
+	/**
 	 * Get the hostname this client connects to.
 	 *
 	 * @return the hostname

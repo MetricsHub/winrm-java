@@ -215,6 +215,20 @@ final class RemoteFiles {
 		"[Console]::Out.WriteLine([Convert]::ToBase64String($h.ComputeHash($f)))}catch{fail $_.Exception}finally{$f.Close()}";
 
 	/**
+	 * What a download is verified against, as one base64 line of {@link #PROBE_LENGTH} bytes: the
+	 * number of bytes hashed (8 bytes, little-endian), then their SHA-256 digest. The count is the
+	 * stream position after hashing, not the file length read beforehand, so both describe the same
+	 * bytes even when the file changes during the probe.
+	 */
+	private static final String PROBE = "try{$h=[Security.Cryptography.HashAlgorithm]::Create('SHA256');$d=$h.ComputeHash($f);"
+		+
+		"[Console]::Out.WriteLine([Convert]::ToBase64String([byte[]]([BitConverter]::GetBytes($f.Position)+$d)))}" +
+		"catch{fail $_.Exception}finally{$f.Close()}";
+
+	/** The length of the {@link #probeScript(String)} output: an 8-byte size and a 32-byte SHA-256 digest. */
+	static final int PROBE_LENGTH = 40;
+
+	/**
 	 * Build the script writing a byte range of the file.
 	 *
 	 * @param path the remote file
@@ -241,6 +255,16 @@ final class RemoteFiles {
 			);
 		}
 		return openFile(path) + String.format(DIGEST, algorithm);
+	}
+
+	/**
+	 * Build the script writing the size and the SHA-256 digest of the file (see {@link #PROBE}).
+	 *
+	 * @param path the remote file
+	 * @return the PowerShell script
+	 */
+	static String probeScript(final String path) {
+		return openFile(path) + PROBE;
 	}
 
 	private static String openFile(final String path) {
@@ -431,6 +455,11 @@ final class RemoteFiles {
 	 * Start a script. It must fit the command line: {@code powerShell(...)} would transparently
 	 * fall back to uploading it as a file, and file access must stay read-only on the host (no
 	 * files written, no certutil), so a script too long is refused instead.
+	 * <p>
+	 * A start rejected by the host's operation quota ran nothing (see
+	 * {@link ShellFileCopy#isRetryableQuotaRejection(Exception)}): it is retried with the escalating
+	 * delays of the file transfers, as long as the retry starts within the timeout, counted from the
+	 * first attempt.
 	 *
 	 * @param client the client to run the script on
 	 * @param path the remote path, for the error messages
@@ -448,7 +477,32 @@ final class RemoteFiles {
 				)
 			);
 		}
-		return client.powerShell(script).timeout(timeout).start();
+		final long begin = Utils.getCurrentTimeMillis();
+		for (int attempt = 0;; attempt++) {
+			try {
+				return client.powerShell(script).timeout(timeout).start();
+			} catch (final WinRMClientException e) {
+				final long delay = ShellFileCopy.QUOTA_RETRY_DELAY_MILLIS * (attempt + 1);
+				// No retry once the pause would reach the timeout: it must start within it.
+				if (attempt >= ShellFileCopy.QUOTA_RETRIES
+					||
+					!ShellFileCopy.isRetryableQuotaRejection(e)
+					||
+					Utils.getCurrentTimeMillis() - begin + delay >= WinRMClient.toMillis(timeout)) {
+					throw e;
+				}
+				try {
+					Utils.sleep(delay);
+				} catch (final InterruptedException interrupted) {
+					Thread.currentThread().interrupt();
+					throw e;
+				}
+				// The pause itself can overrun (a GC pause, a descheduled thread).
+				if (Utils.getCurrentTimeMillis() - begin >= WinRMClient.toMillis(timeout)) {
+					throw e;
+				}
+			}
+		}
 	}
 
 	/**

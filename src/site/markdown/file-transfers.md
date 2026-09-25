@@ -1,14 +1,16 @@
-keywords: file transfer, file copy, upload, certutil, base64, digest, content-addressed, temporary files
-description: How the WinRM Java Client copies local files to the remote host through the WinRM channel itself — destination paths, temporary files, integrity verification, and command-line substitution.
+keywords: file transfer, file copy, upload, download, certutil, base64, digest, content-addressed, temporary files, atomic
+description: How the WinRM Java Client copies files to and from the remote host through the WinRM channel itself — destination paths, temporary files, integrity verification, atomic downloads, and command-line substitution.
 
 # File Transfers
 
 <!-- MACRO{toc|fromDepth=2|toDepth=3|id=toc} -->
 
-The client can copy local files to the remote host **through the WinRM connection itself** — no
-SMB, no TCP port 445, no administrative share — so it works from any client OS and needs no port
-beyond the WinRM one. This page explains exactly how the transfer works: where files land, which
-temporary files are created, how integrity is guaranteed, and how the command line is rewritten.
+The client can copy local files to the remote host, and remote files back, **through the WinRM
+connection itself** — no SMB, no TCP port 445, no administrative share — so it works from any
+client OS and needs no port beyond the WinRM one. This page explains exactly how the transfers
+work: where files land, which temporary files are created, how integrity is guaranteed, and how
+the command line is rewritten. [Downloading a file](#downloading-a-file) covers the other
+direction.
 
 ## The two entry points
 
@@ -175,8 +177,99 @@ Notes:
   destination directory, and the host must provide `certutil` (transfer) and `forfiles`
   (housekeeping). See [Preparing the Windows Host](preparing-the-host.html).
 
+## Downloading a file
+
+[`WinRMClient.downloadFile(...)`](apidocs/org/metricshub/winrm/WinRMClient.html) copies a remote
+file to a local one — the counterpart of `uploadFile(...)`, with the same guarantees: the content
+is verified, an identical copy is not transferred again, and a failure never leaves a truncated
+file behind. The same terminal exists on the per-path request, where the timeout can be set:
+
+```java
+client.downloadFile("C:\\Windows\\Temp\\collect.log", Path.of("collect.log"));
+
+long bytes = client.file("D:\\exports\\big.csv")
+    .timeout(Duration.ofMinutes(10))
+    .downloadTo(Path.of("big.csv"));   // bytes transferred, 0 when the local copy was already identical
+```
+
+When the local path is an existing directory, the file is written into it under its remote name,
+like `cp`: `downloadFile("C:\\Windows\\Temp\\collect.log", Path.of("logs"))` writes
+`logs/collect.log`. A remote name with a colon — an alternate data stream (`a.txt:meta`) or a
+drive-relative path (`C:a.txt`) — is refused there: name the local file explicitly. The
+destination's directory is created when needed.
+
+### How a download works
+
+1. **Probe.** One PowerShell invocation on the host reports the size and the SHA-256 digest of
+   the file. It opens the file exactly like the [remote file reads](files.html) do, with a share
+   mode that tolerates other writers — so a log held open by a running service can be downloaded
+   (`certutil -hashfile`, which the uploads use, fails on such a file with a sharing violation).
+2. **Skip check.** If the local destination already exists with the same size and digest, nothing
+   is transferred: the download returns 0.
+3. **Transfer.** The file is read with [`openStream()`](files.html#streaming-large-files) and
+   written, block by block, to a temporary file **next to the destination**:
+   `<name>.<random>.part` (the name cut to 64 characters, so a long one still fits the file-name
+   limits). Memory stays bounded whatever the size of the file — a 64 MiB file was downloaded by a
+   JVM limited to a 32 MiB heap.
+4. **Verify and publish.** The received bytes must match the probed size and digest; the
+   temporary file is then flushed to disk (`fsync`) and moved onto the destination in one atomic
+   step (`ATOMIC_MOVE`), replacing any previous file. On Linux and macOS a replaced file keeps its
+   permissions — the temporary file is created with them, so a `0600` file stays private
+   throughout. On Windows, the new file gets the permissions the directory gives new
+   files: an explicit ACL set on the replaced file is not carried over.
+
+**The destination is never seen truncated or half-written**: until the final move it keeps its
+previous content (or does not exist), and after it, it has the complete, verified content. On any
+failure — a digest mismatch, a read error, a timeout — the destination is left as it was and the
+temporary file is deleted as the transfer stops; only a process killed in the middle of a download
+can leave a `.part` file behind.
+
+The local copy is always **exactly the bytes the probe hashed**: one consistent version of the
+remote file, never a mix of two. A change that reaches bytes not transferred yet — a log being
+appended to, a file rewritten — fails the integrity check instead of delivering a torn copy. A
+change confined to bytes already transferred leaves that consistent version in place, like any
+copy of a file that changes after it was read.
+
+Downloads are **not resumable**: a download that fails or times out starts over from the first
+byte next time. Resuming would mean tracking verified byte ranges across attempts and proving
+that the remote file did not change in between — more machinery than the speed of this transport
+justifies.
+
+The file is read-only on the host: a download writes nothing there, and needs what the remote file
+reads need — PowerShell 2.0 or later in `FullLanguage` mode, and read access to the file (see
+[Remote Files](files.html#errors-and-requirements)).
+
+### Timeout
+
+The timeout of a download is a **wall-clock deadline for the whole transfer**: the client's
+timeout for `downloadFile(...)` (30 seconds by default), or `timeout(Duration)` on the request.
+A large file needs a raised timeout — at the speed below, 30 seconds is about 40 MB. When the
+deadline fires, the exception says how far the transfer got:
+
+```text
+Download of D:\exports\big.csv from server01 timed out after PT30S, 41943040 of 104857600 bytes
+transferred: raise the timeout for large files
+```
+
+The deadline and the final move exclude each other: a timeout is only reported when the
+destination was left untouched. A deadline that fires while the verified file is being moved into
+place lets the move complete, and the download succeeds.
+
+### Download performance
+
+Measured over HTTP with NTLM encryption, a download runs at about **1.35–1.45 MB/s**: 20 MiB in
+14.7 seconds on Windows Server 2022, 15.6 seconds on Windows Server 2008 R2 (PowerShell 2.0), and
+64 MiB in 46 seconds on 2022 — probe included. A small file costs under a second (two PowerShell
+invocations: the probe and the read), and skipping an identical copy about 0.4 seconds. The limit
+is on the host, in the way the WinRM service forwards a command's output — see
+[Read performance](files.html#read-performance).
+
+That is one to two orders of magnitude slower than SMB on a local network: **downloads are not a
+bulk transport either**. They suit logs, configuration files and command results; to move
+gigabytes, use SMB (or any file-transfer protocol the host offers).
+
 ## See also
 
-* [Remote Files](files.html) — the other direction: reading and listing remote files through the WinRM channel
+* [Remote Files](files.html) — reading remote files (whole, byte ranges, streams) and listing directories through the WinRM channel
 * [Remote Commands](commands.html) — the command builder that carries the transfer
 * [Preparing the Windows Host](preparing-the-host.html) — the privileges a transfer needs

@@ -20,24 +20,45 @@ package org.metricshub.winrm;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.Channels;
+import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.EnumSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicLong;
 import org.metricshub.winrm.exceptions.WinRMClientException;
 import org.metricshub.winrm.exceptions.WinRMTimeoutException;
 
 /**
  * A file or directory on the remote host, obtained with {@link WinRMClient#file(String)}: read a
- * file's content — whole, as a byte range, or as a stream — or compute its digest, get its
- * properties ({@link #info()}, {@link #exists()}), or {@link #list()} a directory. Nothing is sent
- * until a terminal ({@link #readBytes()}, {@link #readText(Charset)}, {@link #openStream()},
- * {@link #openReader(Charset)}, {@link #digest(String)}, {@link #info()}, {@link #exists()}) is
- * called.
+ * file's content — whole, as a byte range, or as a stream — download it to a local file, or
+ * compute its digest, get its properties ({@link #info()}, {@link #exists()}), or {@link #list()} a
+ * directory. Nothing is sent until a terminal ({@link #readBytes()}, {@link #readText(Charset)},
+ * {@link #openStream()}, {@link #openReader(Charset)}, {@link #downloadTo(Path)},
+ * {@link #digest(String)}, {@link #info()}, {@link #exists()}) is called.
  *
  * <pre>{@code
  * byte[] content = client.file("C:\\Windows\\Temp\\collect.bin").readBytes();
@@ -66,6 +87,9 @@ import org.metricshub.winrm.exceptions.WinRMTimeoutException;
  * <p>
  * A request is not thread-safe; configure it and call its terminals from one thread.
  */
+@SuppressFBWarnings(value = "AT_NONATOMIC_64BIT_PRIMITIVE", justification = "A request is not thread-safe (documented): it is configured, "
+	+
+	"then used, from one thread; a blocking terminal's worker only starts after the configuration")
 public final class RemoteFile {
 
 	/** Default cap of {@link #readBytes()} and {@link #readText(Charset)}: 64 MiB. */
@@ -73,6 +97,12 @@ public final class RemoteFile {
 
 	/** The largest byte array the JVM reliably allocates. */
 	private static final long MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8L;
+
+	/**
+	 * How much of the destination's name a download's staging file keeps: 64 UTF-16 units are at
+	 * most 192 bytes in UTF-8, so {@code <name>.<random>.part} stays under the 255-byte limit.
+	 */
+	private static final int MAX_PART_PREFIX_LENGTH = 64;
 
 	private final WinRMClient client;
 	private final String path;
@@ -109,7 +139,7 @@ public final class RemoteFile {
 	 * {@code max(0, size - n)}, the size being read by the same remote invocation that seeks (so a
 	 * growing log is tailed from its current end); a file shorter than {@code n} is read whole. An
 	 * offset past the end of the file reads nothing — it is not an error. Applies to every read
-	 * terminal, not to {@link #digest(String)}.
+	 * terminal, not to {@link #downloadTo(Path)} or {@link #digest(String)}.
 	 *
 	 * @param offset the byte position; negative counts from the end of the file
 	 * @return this request
@@ -123,7 +153,7 @@ public final class RemoteFile {
 	 * Read at most the given number of bytes (from the {@link #offset(long)}, once resolved)
 	 * instead of reading to the end of the file. A length beyond the end of the file reads what
 	 * exists; a zero length reads nothing. Applies to every read terminal, not to
-	 * {@link #digest(String)}.
+	 * {@link #downloadTo(Path)} or {@link #digest(String)}.
 	 *
 	 * @param length how many bytes to read at most (zero or more)
 	 * @return this request
@@ -159,8 +189,9 @@ public final class RemoteFile {
 
 	/**
 	 * Override the client's timeout for this request. For the blocking terminals
-	 * ({@link #readBytes()}, {@link #readText(Charset)}, {@link #digest(String)}) it is a
-	 * wall-clock deadline for the whole read; for {@link #openStream()} and
+	 * ({@link #readBytes()}, {@link #readText(Charset)}, {@link #downloadTo(Path)},
+	 * {@link #digest(String)}, {@link #info()}, {@link #exists()}) it is a wall-clock deadline for
+	 * the whole operation; for {@link #openStream()} and
 	 * {@link #openReader(Charset)} it is an <i>inactivity</i> timeout, the longest silence
 	 * tolerated from the host between two chunks of content.
 	 *
@@ -261,6 +292,237 @@ public final class RemoteFile {
 	}
 
 	/**
+	 * Download the whole file to a local file — the counterpart of
+	 * {@link WinRMClient#uploadFile(Path, String)}, with the same guarantees:
+	 * <ul>
+	 * <li><b>verified</b>: the host first reports the size and the SHA-256 digest of the file, and
+	 * the received bytes must match both, so the local file is exactly one version of the remote
+	 * file, never a mix of two: a change that reaches bytes not transferred yet fails the download;
+	 * <li><b>no wasted transfer</b>: when the local file already has that digest, nothing is
+	 * transferred;
+	 * <li><b>atomic</b>: the content goes to a temporary file next to the destination
+	 * ({@code <name>.<random>.part}), which is flushed to disk, then moved onto the destination in
+	 * one step. The destination is never seen truncated: a failure or a timeout leaves it as it
+	 * was, and the temporary file is deleted as the transfer stops. A replaced file keeps its POSIX
+	 * permissions; on Windows, the new file gets the permissions the directory gives new files.
+	 * </ul>
+	 * When {@code localFile} is an existing directory, the file is written into it under its remote
+	 * name, like {@code cp} — so the remote name must not contain a colon (an alternate data stream,
+	 * or a drive-relative path): name the local file explicitly for those. The destination's
+	 * directory is created when needed. Memory is bounded
+	 * whatever the size of the file. The {@link #offset(long)}, {@link #length(long)} and
+	 * {@link #maxBytes(long)} settings do not apply.
+	 * <p>
+	 * The timeout is a wall-clock deadline for the whole download, and the transfer runs at about
+	 * 1.5 MB/s: a large file needs a raised {@link #timeout(Duration)}. A deadline that fires while
+	 * the verified file is being moved onto the destination lets that move complete: the download
+	 * then succeeds. Downloads are not resumable — one that fails or times out starts over.
+	 *
+	 * @param localFile the local file to write, or an existing directory to write the file into
+	 * @return the number of bytes transferred: the size of the file, or 0 when the local file
+	 *         already had the same content
+	 * @throws WinRMClientException when the file cannot be read, the integrity check fails, or the
+	 *         local file cannot be written
+	 * @throws WinRMTimeoutException when the timeout elapses first; the message tells how much was
+	 *         transferred
+	 * @throws IllegalArgumentException when {@code localFile} is a directory and the remote name
+	 *         contains a colon
+	 */
+	public long downloadTo(final Path localFile) {
+		Utils.checkNonNull(localFile, "localFile");
+		final AtomicLong size = new AtomicLong(-1);
+		final AtomicLong transferred = new AtomicLong();
+		final Publication publication = new Publication();
+		try {
+			return blocking(() -> {
+				try {
+					return download(localFile, size, transferred, publication);
+				} catch (final IOException e) {
+					throw new WinRMClientException(
+						String.format("Download of %s from %s failed: %s", path, client.hostname(), e),
+						e
+					);
+				}
+			});
+		} catch (final WinRMClientException e) {
+			// The deadline, or an interruption, may fire while the worker moves the verified file
+			// into place: that move then completes, and so does the download.
+			if (!publication.abandon()) {
+				return transferred.get();
+			}
+			if (!(e instanceof WinRMTimeoutException)) {
+				throw e;
+			}
+			throw new WinRMTimeoutException(
+				String.format(
+					"Download of %s from %s timed out after %s, %s: raise the timeout for large files",
+					path,
+					client.hostname(),
+					timeout,
+					size.get() < 0
+						? "while the host computed its digest"
+						: transferred.get() + " of " + size.get() + " bytes transferred"
+				),
+				e
+			);
+		}
+	}
+
+	/**
+	 * Probe the size and the digest of the remote file, skip the transfer when the local file
+	 * already has that digest, else stream the file into a temporary file next to the destination,
+	 * verify it, flush it to disk, and move it onto the destination.
+	 *
+	 * @param localFile the local file, or an existing directory to write the file into
+	 * @param size receives the size of the remote file, for the timeout message
+	 * @param transferred counts the bytes transferred, for the timeout message
+	 * @param publication decides between moving the file into place and abandoning the download
+	 * @return the number of bytes transferred
+	 */
+	private long download(
+		final Path localFile,
+		final AtomicLong size,
+		final AtomicLong transferred,
+		final Publication publication
+	) throws IOException, NoSuchAlgorithmException {
+		final Path target = Files.isDirectory(localFile) ? localFile.resolve(localName()) : localFile;
+
+		final ByteBuffer probe;
+		try (InputStream in = RemoteFiles.open(client, path, RemoteFiles.probeScript(path), timeout)) {
+			probe = ByteBuffer.wrap(in.readAllBytes()).order(ByteOrder.LITTLE_ENDIAN);
+		}
+		if (probe.remaining() != RemoteFiles.PROBE_LENGTH) {
+			throw new WinRMClientException(
+				String.format("Unexpected output while probing remote file %s on %s", path, client.hostname())
+			);
+		}
+		size.set(probe.getLong());
+		final byte[] digest = new byte[probe.remaining()];
+		probe.get(digest);
+
+		final boolean replacing = Files.isRegularFile(target);
+		if (replacing && Files.size(target) == size.get()) {
+			try (InputStream in = Files.newInputStream(target)) {
+				if (MessageDigest.isEqual(copy(in, OutputStream.nullOutputStream(), new AtomicLong()), digest)) {
+					return 0;
+				}
+			}
+		}
+		// A replaced file keeps its POSIX permissions (a 0600 file must not become 0644). The staging
+		// file is created with them: set afterward, a reader could open it in between and keep its
+		// descriptor. Windows has no such mode bits.
+		final Set<PosixFilePermission> permissions = replacing
+			&&
+			target.getFileSystem().supportedFileAttributeViews().contains("posix")
+				? Files.getPosixFilePermissions(target) : null;
+		final FileAttribute<?>[] attributes = permissions == null
+			? new FileAttribute<?>[0] : new FileAttribute<?>[]
+			{ PosixFilePermissions.asFileAttribute(permissions) };
+
+		final Path absolute = target.toAbsolutePath();
+		final Path directory = absolute.getParent();
+		final Path name = absolute.getFileName();
+		if (directory == null || name == null) {
+			// A root that is not a directory, e.g. a drive with no media
+			throw new NoSuchFileException(target.toString());
+		}
+		// Not unconditionally: before Java 21, createDirectories() rejects an existing symbolic link
+		// to a directory (e.g. /tmp on macOS).
+		if (!Files.isDirectory(directory)) {
+			Files.createDirectories(directory);
+		}
+		// The name is cut so the staging name fits the file-name limits (255 UTF-16 units on NTFS,
+		// 255 bytes on ext4) whatever the length of the destination's name.
+		final Path part = directory.resolve(
+			ShellFileCopy.truncateAtCodePoint(name.toString(), MAX_PART_PREFIX_LENGTH) + "." +
+				Long.toHexString(ThreadLocalRandom.current().nextLong()) + ".part"
+		);
+		try {
+			try (
+				InputStream in = RemoteFiles.open(client, path, RemoteFiles.readScript(path, 0, -1), timeout);
+				FileChannel out = FileChannel.open(
+					part,
+					EnumSet.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
+					attributes
+				)) {
+				if (permissions != null) {
+					// The umask can only have narrowed the creation mode: restore the exact permissions.
+					Files.setPosixFilePermissions(part, permissions);
+				}
+				final byte[] received = copy(in, Channels.newOutputStream(out), transferred);
+				if (transferred.get() != size.get() || !MessageDigest.isEqual(received, digest)) {
+					throw new WinRMClientException(
+						String.format(
+							"Integrity check failed after downloading %s from %s to %s (%d bytes received, %d expected): " +
+								"the file changed during the transfer, or its content was corrupted",
+							path,
+							client.hostname(),
+							target,
+							transferred.get(),
+							size.get()
+						)
+					);
+				}
+				out.force(true);
+			}
+			if (!publication.publish(part, target)) {
+				// The caller already reported the failure: the destination must stay as it was.
+				throw new CancellationException("Download abandoned by its deadline");
+			}
+			return transferred.get();
+		} catch (final IOException | RuntimeException e) {
+			try {
+				Files.deleteIfExists(part);
+			} catch (final IOException ignored) {
+				// Best effort: the failure that triggered the cleanup matters more
+			}
+			throw e;
+		}
+	}
+
+	/**
+	 * The name of the file in a local destination directory: the last element of the remote path.
+	 *
+	 * @return the name
+	 * @throws IllegalArgumentException when the name contains a colon: an alternate data stream
+	 *         ({@code a.txt:meta}), whose name alone would collide with other streams, or a
+	 *         drive-relative path ({@code C:a.txt}), which a Windows client resolves outside the
+	 *         directory
+	 */
+	private String localName() {
+		final String name = path.substring(Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/')) + 1);
+		if (name.indexOf(':') >= 0) {
+			throw new IllegalArgumentException(
+				String.format(
+					"Remote path %s is an alternate data stream or drive-relative: give the local file name, not a directory",
+					path
+				)
+			);
+		}
+		return name;
+	}
+
+	/**
+	 * Copy a stream with bounded memory, counting the bytes copied.
+	 *
+	 * @param in the stream to copy
+	 * @param out where to copy it
+	 * @param copied counts the bytes copied
+	 * @return the SHA-256 digest of the bytes copied
+	 */
+	private static byte[] copy(final InputStream in, final OutputStream out, final AtomicLong copied)
+		throws IOException, NoSuchAlgorithmException {
+		final MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+		final byte[] buffer = new byte[RemoteFiles.BLOCK_SIZE];
+		for (int n = in.read(buffer); n != -1; n = in.read(buffer)) {
+			sha256.update(buffer, 0, n);
+			out.write(buffer, 0, n);
+			copied.addAndGet(n);
+		}
+		return sha256.digest();
+	}
+
+	/**
 	 * Compute the digest of the whole file on the host — nothing but the digest is transferred.
 	 * The {@link #offset(long)} and {@link #length(long)} settings do not apply.
 	 *
@@ -348,5 +610,42 @@ public final class RemoteFile {
 
 	private <T> T blocking(final Callable<T> task) {
 		return RemoteFiles.blocking(client, path, timeout, task);
+	}
+
+	/**
+	 * Decides, once, between the worker moving a download's verified file into place and the
+	 * caller abandoning the download when its deadline fires, so the outcome the caller reports
+	 * always matches the destination: a move in progress completes before the caller decides.
+	 */
+	static final class Publication {
+
+		private boolean abandoned;
+		private boolean published;
+
+		/**
+		 * Move the verified file onto the destination, unless the download was abandoned.
+		 *
+		 * @param part the verified staging file
+		 * @param target the destination
+		 * @return whether the file was moved onto the destination
+		 * @throws IOException when the move fails
+		 */
+		synchronized boolean publish(final Path part, final Path target) throws IOException {
+			if (!abandoned) {
+				Files.move(part, target, StandardCopyOption.ATOMIC_MOVE);
+				published = true;
+			}
+			return published;
+		}
+
+		/**
+		 * Abandon the download, unless its file was already moved onto the destination.
+		 *
+		 * @return whether the download was abandoned
+		 */
+		synchronized boolean abandon() {
+			abandoned = !published;
+			return abandoned;
+		}
 	}
 }

@@ -272,7 +272,7 @@ separately:
 | **Remote commands** (`client.command(...)`) | Remote access to the listener, remote shell access on the host (`AllowRemoteShellAccess`, `True` by default), and whatever rights **the command itself** needs once it runs. |
 | **Transfer-and-run** (`upload(...)`) | Both of the above, plus write access to `<windir>\Temp\winrm-upload-<CLIENT>`, and `certutil` and `forfiles` present on the host. See [File Transfers](file-transfers.html). |
 | **`uploadFile(...)`** to an explicit path | Remote shell access, write access to the destination directory, and `certutil` on the host (the same transfer engine, minus the transfer directory and its `forfiles` housekeeping). |
-| **Remote file access** (`client.file(...)`: reads, `info()`, `list()`) | Remote shell access, **PowerShell 2.0 or later in `FullLanguage` mode** (not constrained by AppLocker or WDAC), and read access to the files and directories themselves. Nothing is written on the host. See [Remote Files](files.html). |
+| **Remote file access** (`client.file(...)`: reads, downloads, `info()`, `list()`) | Remote shell access, **PowerShell 2.0 or later in `FullLanguage` mode** (not constrained by AppLocker or WDAC), and read access to the files and directories themselves. Nothing is written on the host. See [Remote Files](files.html). |
 
 So an account can perfectly well run WQL queries and fail to run commands, or the reverse. When
 diagnosing, test the two independently — as in [Checking from the client](#Checking_from_the_client)

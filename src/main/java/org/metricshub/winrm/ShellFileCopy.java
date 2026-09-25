@@ -114,14 +114,14 @@ public class ShellFileCopy {
 	private static final String FAULT_OPERATION_QUOTA = "2150859174";
 
 	/** How many times a transfer command is retried after an operation-quota rejection. */
-	private static final int QUOTA_RETRIES = 4;
+	static final int QUOTA_RETRIES = 4;
 
 	/**
 	 * Base delay before retrying after an operation-quota rejection; each retry waits one step
 	 * longer. Measured on Windows 2008 R2 (quota 15 per user): the budget fully recovers within
 	 * 30 seconds, so the escalating delays (5+10+15+20&nbsp;s) comfortably bridge it.
 	 */
-	private static final long QUOTA_RETRY_DELAY_MILLIS = 5_000L;
+	static final long QUOTA_RETRY_DELAY_MILLIS = 5_000L;
 
 	/**
 	 * Copy the specified local files to a temporary directory on the remote host through the
@@ -912,7 +912,7 @@ public class ShellFileCopy {
 	 * @param maxLength Maximum length, in UTF-16 chars
 	 * @return the truncated string
 	 */
-	private static String truncateAtCodePoint(final String value, final int maxLength) {
+	static String truncateAtCodePoint(final String value, final int maxLength) {
 		if (value.length() <= maxLength) {
 			return value;
 		}
