@@ -29,15 +29,29 @@ import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellCreation
 import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellDeletion;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.ConnectException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.metricshub.winrm.light.FakeWsmanResponses;
 import org.metricshub.winrm.light.FakeWsmanServer;
 
@@ -47,6 +61,13 @@ class WinRmCliTest {
 	private static final String INSECURE_TLS_PROPERTY = "org.metricshub.winrm.tls.insecure";
 	private static final String KERBEROS_KDC_PROPERTY = "java.security.krb5.kdc";
 	private static final String KERBEROS_REALM_PROPERTY = "java.security.krb5.realm";
+
+	private static final String COMMAND_ID = "CMD-1";
+	private static final String DIR = "C:\\inetpub\\logs";
+
+	/** 2026-01-02T03:04:05.6789012Z as a Windows file time, and as the CLI prints it. */
+	private static final long FILETIME = 134_117_966_456_789_012L;
+	private static final String TIMESTAMP = "2026-01-02T03:04:05.6789012Z";
 
 	@Test
 	void helpAndVersionDoNotConnect() throws Exception {
@@ -59,6 +80,9 @@ class WinRmCliTest {
 		assertTrue(help.stdout.contains("--env <NAME=VALUE>"));
 		assertTrue(help.stdout.contains("--kerberos-kdc"));
 		assertTrue(help.stdout.contains("--kerberos-realm"));
+		assertTrue(help.stdout.contains("[options] ls <directory>"));
+		assertTrue(help.stdout.contains("[options] get <file> [<local path>]"));
+		assertTrue(help.stdout.contains("--modified-after <date>"));
 		// The details (streaming behavior, password files, exit codes) live in the online manual.
 		assertTrue(help.stdout.contains("https://metricshub.org/winrm-java/cli.html"));
 		assertEquals("", help.stderr);
@@ -602,6 +626,433 @@ class WinRmCliTest {
 		}
 	}
 
+	@Test
+	void lsStreamsTheLongFormatAndExitsWith1WhenADirectoryCannotBeRead() throws Exception {
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			final String denied = "! " + b64(DIR + "\\W3SVC1\\private") + " " + b64("Access is denied.") + "\n";
+			enqueueShellCreation(server);
+			// The second entry arrives in a later Receive than the first.
+			enqueueScript(
+				server,
+				0,
+				directoryRecord(DIR + "\\W3SVC1") + denied.substring(0, 10),
+				denied.substring(10) + fileRecord(DIR + "\\W3SVC1\\u_ex260101.log", 5_000_000_000L)
+			);
+			enqueueShellDeletion(server);
+
+			// Record how far the exchange had gone when the first entry reached standard output.
+			final int[] requestsAtFirstEntry = { -1 };
+			final ByteArrayOutputStream stdout = new ByteArrayOutputStream() {
+				@Override
+				public synchronized void write(final byte[] bytes, final int offset, final int length) {
+					if (requestsAtFirstEntry[0] < 0) {
+						requestsAtFirstEntry[0] = server.decryptedRequests().size();
+					}
+					super.write(bytes, offset, length);
+				}
+			};
+			final Invocation invocation = invokeAgainst(server, stdout, "ls", DIR, "--recursive");
+
+			assertEquals(WinRmCli.EXIT_PARTIAL, invocation.exitCode);
+			assertEquals(
+				"d-----            0 " + TIMESTAMP + " " + DIR + "\\W3SVC1" + System.lineSeparator() +
+					"-a----   5000000000 " + TIMESTAMP + " " + DIR + "\\W3SVC1\\u_ex260101.log" + System.lineSeparator(),
+				invocation.stdout
+			);
+			assertEquals(
+				"winrm-java: cannot read directory " + DIR + "\\W3SVC1\\private" + System.lineSeparator(),
+				invocation.stderr
+			);
+			// Streamed: the first entry was written before the second Receive was even sent
+			// (Create, Command, one Receive).
+			assertEquals(3, requestsAtFirstEntry[0]);
+			assertTrue(sentScripts(server).get(0).contains(";$md=" + Integer.MAX_VALUE + ";"), sentScripts(server).get(0));
+		}
+	}
+
+	@Test
+	void lsFiltersReachTheHostAndJsonCarriesEveryField() throws Exception {
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			enqueueShellCreation(server);
+			enqueueScript(server, 0, fileRecord(DIR + "\\a.log", 10) + "\n");
+			enqueueShellDeletion(server);
+
+			final Invocation invocation = invokeAgainst(
+				server,
+				"ls",
+				"--glob",
+				"*.log",
+				DIR,
+				"--depth=3",
+				"--files-only",
+				"--modified-after",
+				"2026-01-01",
+				"--min-size",
+				"1024",
+				"--json"
+			);
+
+			assertEquals(0, invocation.exitCode);
+			assertEquals(json(DIR + "\\a.log", "-a----", 32, 10) + System.lineSeparator(), invocation.stdout);
+			assertEquals("", invocation.stderr);
+			final long after = 116_444_736_000_000_000L
+				+ Instant.parse("2026-01-01T00:00:00Z").getEpochSecond() * 10_000_000L;
+			final String script = sentScripts(server).get(0);
+			assertTrue(script.contains(b64(DIR)), script);
+			assertTrue(
+				script.contains(
+					"FromBase64String('" + b64("^.*\\.log$") + "'));$k=1;$mn=1024;$mx=" + Long.MAX_VALUE + ";$ta=" + after +
+						";$tb=" + Long.MAX_VALUE + ";$md=3;"
+				),
+				script
+			);
+		}
+	}
+
+	@Test
+	void statPrintsOneFieldPerLineOrJson() throws Exception {
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			enqueueShellCreation(server);
+			enqueueScript(server, 0, directoryRecord(DIR).replace("F 16 ", "F 1046 "));
+			enqueueShellDeletion(server);
+
+			final Invocation invocation = invokeAgainst(server, "stat", DIR);
+
+			assertEquals(0, invocation.exitCode);
+			// 1046 = 0x416: a hidden system directory that is a reparse point (a junction)
+			assertEquals(
+				String.join(
+					System.lineSeparator(),
+					"path: " + DIR,
+					"mode: d--hsl",
+					"attributes: 1046",
+					"size: 0",
+					"lastModified: " + TIMESTAMP,
+					"created: " + TIMESTAMP,
+					"lastAccessed: " + TIMESTAMP
+				) +
+					System.lineSeparator(),
+				invocation.stdout
+			);
+			assertTrue(sentScripts(server).get(0).contains(b64(DIR)), sentScripts(server).get(0));
+		}
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			enqueueShellCreation(server);
+			enqueueScript(server, 0, fileRecord(DIR + "\\a.log", 10));
+			enqueueShellDeletion(server);
+
+			final Invocation invocation = invokeAgainst(server, "stat", DIR + "\\a.log", "--json");
+
+			assertEquals(0, invocation.exitCode);
+			assertEquals(json(DIR + "\\a.log", "-a----", 32, 10) + System.lineSeparator(), invocation.stdout);
+		}
+	}
+
+	@Test
+	void aMissingRemotePathExitsWith66() throws Exception {
+		// stat: the library reports a missing path as an empty result
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			enqueueShellCreation(server);
+			enqueueScript(server, 2, "");
+			enqueueShellDeletion(server);
+
+			final Invocation invocation = invokeAgainst(server, "stat", DIR + "\\missing.log");
+
+			assertEquals(WinRmCli.EXIT_NOT_FOUND, invocation.exitCode);
+			assertEquals("", invocation.stdout);
+			assertEquals(
+				"winrm-java: Remote path not found on 127.0.0.1: " + DIR + "\\missing.log" + System.lineSeparator(),
+				invocation.stderr
+			);
+		}
+		// cat, ls, get: as a failure
+		for (final String subcommand : List.of("cat", "ls", "get")) {
+			try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+				enqueueShellCreation(server);
+				enqueueScript(server, 2, "");
+				enqueueShellDeletion(server);
+
+				final Invocation invocation = invokeAgainst(server, subcommand, DIR + "\\missing.log");
+
+				assertEquals(WinRmCli.EXIT_NOT_FOUND, invocation.exitCode, subcommand);
+				assertEquals(
+					"winrm-java: Remote path not found on 127.0.0.1: " + DIR + "\\missing.log" + System.lineSeparator(),
+					invocation.stderr,
+					subcommand
+				);
+			}
+		}
+	}
+
+	@Test
+	void catWritesTheRemoteBytesUnconverted() throws Exception {
+		// Every byte value, then sequences any text round trip would alter: CRLF, lone LF and CR,
+		// invalid UTF-8, a UTF-16 byte order mark, Ctrl+Z.
+		final byte[] content = new byte[256 + 9];
+		for (int i = 0; i < 256; i++) {
+			content[i] = (byte) i;
+		}
+		System
+			.arraycopy(new byte[]
+			{ '\r', '\n', '\n', '\r', (byte) 0xC3, 0x28, (byte) 0xFF, (byte) 0xFE, 0x1A }, 0, content, 256, 9);
+		final String lines = b64(Arrays.copyOfRange(content, 0, 200)) + "\r\n"
+			+ b64(Arrays.copyOfRange(content, 200, content.length)) +
+			"\r\n";
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			enqueueShellCreation(server);
+			enqueueScript(server, 0, lines.substring(0, 100), lines.substring(100));
+			enqueueShellDeletion(server);
+
+			final Invocation invocation = invokeAgainst(server, "cat", "C:\\Windows\\Temp\\collect.bin");
+
+			assertEquals(0, invocation.exitCode);
+			assertArrayEquals(content, invocation.stdoutBytes);
+			assertEquals("", invocation.stderr);
+			// The whole file
+			assertTrue(sentScripts(server).get(0).contains("$n=[long]0;$l=[long]-1;"), sentScripts(server).get(0));
+		}
+	}
+
+	@Test
+	void catReadsARangeAndDecodesTextWithTheGivenCharset() throws Exception {
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			enqueueShellCreation(server);
+			enqueueScript(server, 0, b64(new byte[] { 'c', 'a', 'f', (byte) 0xE9 }) + "\r\n");
+			enqueueShellDeletion(server);
+
+			final Invocation invocation = invokeAgainst(
+				server,
+				"cat",
+				"C:\\legacy\\report.txt",
+				"--offset",
+				"-8192",
+				"--length",
+				"1024",
+				"--charset",
+				"windows-1252"
+			);
+
+			assertEquals(0, invocation.exitCode);
+			// Decoded as windows-1252, printed in the local console's encoding (UTF-8 here)
+			assertEquals("café", invocation.stdout);
+			assertTrue(sentScripts(server).get(0).contains("$n=[long]-8192;$l=[long]1024;"), sentScripts(server).get(0));
+		}
+	}
+
+	@Test
+	void aClosedStandardOutputStopsTheRemoteRead() throws Exception {
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			enqueueShellCreation(server);
+			// The first block of a longer file: the read is still running...
+			server
+				.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.commandResponse(COMMAND_ID)))
+				.enqueue(
+					200,
+					FakeWsmanResponses.envelope(FakeWsmanResponses.receiveResponse(stdoutStream(b64(new byte[]
+					{ 1, 2, 3 }) + "\r\n"), null))
+				)
+				// ...when the closed output makes the CLI stop it: the terminate Signal, which a real
+				// host answers only when its OperationTimeout expires, the read being blocked writing
+				.enqueue(
+					500,
+					FakeWsmanResponses
+						.fault(
+							"2150858793",
+							"The WS-Management service cannot complete the operation within the time specified in OperationTimeout."
+						)
+				);
+			enqueueShellDeletion(server);
+
+			// What "| head" does to the standard output once it has seen enough
+			final OutputStream closed = new OutputStream() {
+				@Override
+				public void write(final int b) throws IOException {
+					throw new IOException("The pipe is being closed");
+				}
+			};
+			final Invocation invocation = invokeAgainst(server, closed, "cat", "D:\\logs\\huge.log");
+
+			assertEquals(WinRmCli.EXIT_IO, invocation.exitCode);
+			assertEquals("winrm-java: cannot write to standard output" + System.lineSeparator(), invocation.stderr);
+			assertEquals(1, server.decryptedRequests().stream().filter(r -> r.contains("<rsp:Receive>")).count());
+			assertTrue(server.decryptedRequests().stream().anyMatch(r -> r.contains("<rsp:Signal ")));
+		}
+	}
+
+	@Test
+	void getDownloadsIntoAnExistingDirectoryUnderTheRemoteName(@TempDir final Path directory) throws Exception {
+		final byte[] content = "the log content".getBytes(StandardCharsets.US_ASCII);
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			enqueueShellCreation(server);
+			enqueueScript(server, 0, probe(content));
+			enqueueScript(server, 0, b64(content) + "\r\n");
+			enqueueShellDeletion(server);
+
+			final Invocation invocation = invokeAgainst(
+				server,
+				"get",
+				"C:\\Windows\\Temp\\collect.log",
+				directory.toString()
+			);
+
+			assertEquals(0, invocation.exitCode);
+			assertEquals("", invocation.stdout);
+			assertEquals("", invocation.stderr);
+			assertArrayEquals(content, Files.readAllBytes(directory.resolve("collect.log")));
+		}
+	}
+
+	@Test
+	void aLocalFileThatCannotBeWrittenExitsWith74(@TempDir final Path directory) throws Exception {
+		// The destination's parent is a regular file: its directory cannot be created.
+		final Path blocker = Files.write(directory.resolve("blocker"), new byte[0]);
+		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
+			enqueueShellCreation(server);
+			enqueueScript(server, 0, probe("remote".getBytes(StandardCharsets.US_ASCII)));
+			enqueueShellDeletion(server);
+
+			final Invocation invocation = invokeAgainst(
+				server,
+				"get",
+				"C:\\Windows\\Temp\\collect.log",
+				blocker.resolve("collect.log").toString()
+			);
+
+			// A local failure, not a connection failure
+			assertEquals(WinRmCli.EXIT_IO, invocation.exitCode, invocation.stderr);
+			assertTrue(
+				invocation.stderr.startsWith("winrm-java: Download of C:\\Windows\\Temp\\collect.log"),
+				invocation.stderr
+			);
+		}
+	}
+
+	private static String b64(final byte[] bytes) {
+		return Base64.getEncoder().encodeToString(bytes);
+	}
+
+	private static String b64(final String text) {
+		return b64(text.getBytes(StandardCharsets.UTF_8));
+	}
+
+	/** The record the metadata scripts write for a file (attributes 32: archive). */
+	private static String fileRecord(final String path, final long size) {
+		return "F 32 " + size + " " + FILETIME + " " + FILETIME + " " + FILETIME + " " + b64(path) + "\n";
+	}
+
+	/** The record the metadata scripts write for a directory (attributes 16). */
+	private static String directoryRecord(final String path) {
+		return "F 16 0 " + FILETIME + " " + FILETIME + " " + FILETIME + " " + b64(path) + "\n";
+	}
+
+	/** The --json line of an entry whose three timestamps are {@link #TIMESTAMP}. */
+	private static String json(final String path, final String mode, final int attributes, final long size) {
+		return "{\"path\":\"" + path.replace("\\", "\\\\") + "\",\"mode\":\"" + mode + "\",\"attributes\":" + attributes
+			+ ",\"size\":" +
+			size + ",\"lastModified\":\"" + TIMESTAMP + "\",\"created\":\"" + TIMESTAMP + "\",\"lastAccessed\":\"" + TIMESTAMP
+			+ "\"}";
+	}
+
+	/** The probe output of a download: the size (8 bytes, little-endian), then the SHA-256 digest. */
+	private static String probe(final byte[] content) throws Exception {
+		return b64(
+			ByteBuffer
+				.allocate(40)
+				.order(ByteOrder.LITTLE_ENDIAN)
+				.putLong(content.length)
+				.put(MessageDigest.getInstance("SHA-256").digest(content))
+				.array()
+		) +
+			"\r\n";
+	}
+
+	private static String stdoutStream(final String text) {
+		return FakeWsmanResponses.stream("stdout", COMMAND_ID, text.getBytes(StandardCharsets.US_ASCII));
+	}
+
+	/**
+	 * Script one remote file script on the existing shell: the command, one Receive per stdout
+	 * chunk (the last one completes with the exit code), and the Signal ending it.
+	 */
+	private static void enqueueScript(final FakeWsmanServer server, final int exitCode, final String... chunks) {
+		server.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.commandResponse(COMMAND_ID)));
+		for (int i = 0; i < chunks.length; i++) {
+			final boolean last = i == chunks.length - 1;
+			server.enqueue(
+				200,
+				FakeWsmanResponses
+					.envelope(
+						FakeWsmanResponses
+							.receiveResponse(stdoutStream(chunks[i]), last ? FakeWsmanResponses.done(COMMAND_ID, exitCode) : null)
+					)
+			);
+		}
+		server.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.signalResponse()));
+	}
+
+	/** The PowerShell scripts the client sent, in order, decoded from their -EncodedCommand. */
+	private static List<String> sentScripts(final FakeWsmanServer server) {
+		final Pattern encoded = Pattern.compile("-EncodedCommand ([A-Za-z0-9+/=]+)");
+		return server
+			.decryptedRequests()
+			.stream()
+			.map(encoded::matcher)
+			.filter(Matcher::find)
+			.map(m -> new String(Base64.getDecoder().decode(m.group(1)), StandardCharsets.UTF_16LE))
+			.collect(Collectors.toList());
+	}
+
+	private static String[] fakeServerOptions(final FakeWsmanServer server) {
+		return new String[] {
+				"-h",
+				"127.0.0.1",
+				"-P",
+				String.valueOf(server.port()),
+				"-u",
+				"FAKE\\user",
+				"-p",
+				"secret",
+				"-t",
+				"30000" };
+	}
+
+	/** Run the CLI through its real connect factory against the fake server. */
+	private static Invocation invokeAgainst(final FakeWsmanServer server, final String... subcommand) throws Exception {
+		return invokeAgainst(server, new ByteArrayOutputStream(), subcommand);
+	}
+
+	/**
+	 * Run the CLI through its real connect factory against the fake server, writing its standard output to the given
+	 * stream.
+	 */
+	private static Invocation invokeAgainst(
+		final FakeWsmanServer server,
+		final OutputStream stdoutTarget,
+		final String... subcommand
+	)
+		throws Exception {
+		final ByteArrayOutputStream stderrBytes = new ByteArrayOutputStream();
+		try (
+			PrintStream stdout = new PrintStream(stdoutTarget, true, StandardCharsets.UTF_8.name());
+			PrintStream stderr = new PrintStream(stderrBytes, true, StandardCharsets.UTF_8.name())) {
+			final int exitCode = WinRmCli.run(
+				concat(fakeServerOptions(server), subcommand),
+				stdout,
+				stderr,
+				WinRmCli::connect,
+				() -> {
+					throw new AssertionError("No password prompt expected");
+				}
+			);
+			return new Invocation(
+				exitCode,
+				stdoutTarget instanceof ByteArrayOutputStream
+					? ((ByteArrayOutputStream) stdoutTarget).toByteArray() : new byte[0],
+				stderrBytes.toString(StandardCharsets.UTF_8.name())
+			);
+		}
+	}
+
 	private static WinRmCli.RemoteOperations failingRemote() {
 		throw new AssertionError("No connection expected");
 	}
@@ -627,11 +1078,7 @@ class WinRmCliTest {
 			PrintStream stdout = new PrintStream(stdoutBytes, true, StandardCharsets.UTF_8.name());
 			PrintStream stderr = new PrintStream(stderrBytes, true, StandardCharsets.UTF_8.name())) {
 			final int exitCode = WinRmCli.run(arguments, stdout, stderr, factory, passwordReader);
-			return new Invocation(
-				exitCode,
-				stdoutBytes.toString(StandardCharsets.UTF_8.name()),
-				stderrBytes.toString(StandardCharsets.UTF_8.name())
-			);
+			return new Invocation(exitCode, stdoutBytes.toByteArray(), stderrBytes.toString(StandardCharsets.UTF_8.name()));
 		}
 	}
 
@@ -655,11 +1102,7 @@ class WinRmCliTest {
 				},
 				localInput
 			);
-			return new Invocation(
-				exitCode,
-				stdoutBytes.toString(StandardCharsets.UTF_8.name()),
-				stderrBytes.toString(StandardCharsets.UTF_8.name())
-			);
+			return new Invocation(exitCode, stdoutBytes.toByteArray(), stderrBytes.toString(StandardCharsets.UTF_8.name()));
 		}
 	}
 
@@ -681,12 +1124,14 @@ class WinRmCliTest {
 	private static final class Invocation {
 
 		private final int exitCode;
+		private final byte[] stdoutBytes;
 		private final String stdout;
 		private final String stderr;
 
-		private Invocation(final int exitCode, final String stdout, final String stderr) {
+		private Invocation(final int exitCode, final byte[] stdoutBytes, final String stderr) {
 			this.exitCode = exitCode;
-			this.stdout = stdout;
+			this.stdoutBytes = stdoutBytes;
+			this.stdout = new String(stdoutBytes, StandardCharsets.UTF_8);
 			this.stderr = stderr;
 		}
 	}
@@ -751,6 +1196,11 @@ class WinRmCliTest {
 				out.flush();
 			});
 			return commandExitCode;
+		}
+
+		@Override
+		public org.metricshub.winrm.RemoteFile file(final String path) {
+			throw new AssertionError("No remote file access expected");
 		}
 
 		@Override

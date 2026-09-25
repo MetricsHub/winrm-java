@@ -9,7 +9,8 @@ WinRM has no file-access operation of its own (nothing like SFTP's `READ`), so t
 remote files and lists directories **through the WinRM command shell**: a small PowerShell script
 does the work on the host and writes the result in an encoding-proof form, and the client decodes
 it as it arrives. No SMB, no extra port, no share. This is the reverse direction of
-[File Transfers](file-transfers.html).
+[File Transfers](file-transfers.html). The standalone jar exposes it as the `ls`, `stat`, `cat`,
+and `get` subcommands — see the [Command-Line Client](cli.html#remote-files) manual.
 
 ## Reading a file
 

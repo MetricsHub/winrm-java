@@ -18,6 +18,8 @@ class JsonLinesWriterTest {
 		row.put("Label", "Café 東京");
 		row.put("Path", "C:\\Windows\nSystem32");
 		row.put("Missing", null);
+		// Numbers (file sizes, attributes) are JSON numbers; WQL values are always strings
+		row.put("Size", 5_000_000_000L);
 		final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
 
 		try (PrintStream output = new PrintStream(bytes, true, StandardCharsets.US_ASCII.name())) {
@@ -25,7 +27,8 @@ class JsonLinesWriterTest {
 		}
 
 		assertEquals(
-			"{\"Name\":\"Spooler\",\"Label\":\"Café 東京\",\"Path\":\"C:\\\\Windows\\nSystem32\",\"Missing\":null}" +
+			"{\"Name\":\"Spooler\",\"Label\":\"Café 東京\",\"Path\":\"C:\\\\Windows\\nSystem32\",\"Missing\":null,\"Size\":5000000000}"
+				+
 				System.lineSeparator(),
 			bytes.toString(StandardCharsets.UTF_8.name())
 		);

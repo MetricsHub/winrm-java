@@ -41,6 +41,8 @@ final class JsonLinesWriter {
 			final Object value = entry.getValue();
 			if (value == null) {
 				json.append("null");
+			} else if (value instanceof Number) {
+				json.append(value);
 			} else {
 				writeString(String.valueOf(value), json);
 			}
