@@ -315,6 +315,9 @@ final class CliArguments implements AutoCloseable {
 		case "--glob":
 			requireSubcommand(builder, option, Operation.LS);
 			builder.glob = optionValue(arguments, index, option);
+			if (isBlank(builder.glob)) {
+				throw new CliUsageException(option + " requires a value");
+			}
 			return nextIndex(argument, index);
 		case "--recursive":
 			requireSubcommand(builder, option, Operation.LS);

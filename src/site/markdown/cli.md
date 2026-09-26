@@ -353,7 +353,7 @@ See [Timeouts and Errors](timeouts-and-errors.html) for the underlying semantics
 | `66` | Remote path not found (`ls`, `stat`, `cat`, `get`). |
 | `69` | Connection, DNS, socket, or TLS failure. |
 | `70` | WinRM protocol or other remote failure (including access denied to a remote path, and a remote exit code not representable in 0–255). |
-| `74` | Local I/O failure: stdout closed or not writable, or the local file of `get` cannot be written. |
+| `74` | Local I/O failure: stdout closed or not writable, or a file-system error on the local file of `get` (access denied, a missing drive). |
 | `77` | Authentication failure. |
 | `124` | Operation timeout. |
 

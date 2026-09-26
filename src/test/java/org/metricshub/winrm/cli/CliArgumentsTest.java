@@ -440,6 +440,7 @@ class CliArgumentsTest {
 						concat(base, "ls", "C:\\a", "--files-only", "--directories-only")
 				},
 				{ "--glob requires a value", concat(base, "ls", "C:\\a", "--glob") },
+				{ "--glob requires a value", concat(base, "ls", "C:\\a", "--glob", " ") },
 				{ "--glob requires the ls subcommand", concat(base, "cat", "C:\\a", "--glob", "*.log") },
 				{ "--json requires the ls or stat subcommand", concat(base, "cat", "C:\\a", "--json") },
 				{ "--offset requires the cat subcommand", concat(base, "get", "C:\\a", "--offset", "1") },

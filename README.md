@@ -260,14 +260,6 @@ java -jar target/winrm-java-<version>-standalone.jar \
   -h server.example.net -u 'DOMAIN\user' -pf password.txt shell
 ```
 
-Print the last 8 KiB of a remote log (`ls`, `stat`, and `get` list, describe, and download
-remote files):
-
-```bash
-java -jar target/winrm-java-<version>-standalone.jar \
-  -h server.example.net -u 'DOMAIN\user' -pf password.txt cat 'D:\logs\app.log' --offset -8192
-```
-
 Use `--help` for the option list and `--version` for the build version. The CLI is built on the
 streaming API: WQL rows are written to stdout as UTF-8 [JSON Lines](https://jsonlines.org/) **as
 the enumeration pages arrive**, and remote command stdout and stderr are forwarded **live** to the
