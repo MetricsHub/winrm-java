@@ -193,6 +193,56 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final int connectRetries,
 		final long retryDelay
 	) throws WinRMException {
+		return createInstance(
+			winRMEndpoint,
+			timeout,
+			ticketCache,
+			authentications,
+			false,
+			sslContext,
+			trustAllCertificates,
+			consoleCodePage,
+			connectRetries,
+			retryDelay
+		);
+	}
+
+	/**
+	 * Create a light WinRM executor that may delegate the caller's Kerberos credentials to the host,
+	 * so remote commands can authenticate onward as the caller (the second hop).
+	 *
+	 * @param winRMEndpoint endpoint with credentials (mandatory)
+	 * @param timeout timeout in milliseconds (must be &gt; 0)
+	 * @param ticketCache Kerberos ticket cache path (used by the Kerberos scheme; {@code null} logs
+	 *        in with the password)
+	 * @param authentications requested authentication schemes, tried in order (NTLM, Kerberos, and/or Basic);
+	 *        {@code null}/empty means NTLM only
+	 * @param allowDelegation whether Kerberos forwards the caller's ticket-granting ticket to the
+	 *        host (which must then be forwardable); requires Kerberos among {@code authentications}
+	 * @param sslContext the {@link SSLContext} providing the HTTPS socket factory (hostname
+	 *        verification stays on); {@code null} uses the default configuration
+	 * @param trustAllCertificates when {@code true} (and no {@code sslContext} is given), trust every
+	 *        server certificate and skip hostname verification — insecure, testing only
+	 * @param consoleCodePage the console code page of the command shell; 0 keeps the default 65001,
+	 *        which makes command output UTF-8 whatever the remote locale
+	 * @param connectRetries how many times one round trip may re-attempt to connect and authenticate
+	 *        (must be &gt;= 0); 0 keeps the historical fail-fast behavior
+	 * @param retryDelay the pause in milliseconds before each retry (must be &gt;= 0)
+	 * @return a new {@code LightWinRMService}
+	 * @throws WinRMException on invalid arguments or an unsupported authentication request
+	 */
+	public static LightWinRMService createInstance(
+		final WinRMEndpoint winRMEndpoint,
+		final long timeout,
+		final java.nio.file.Path ticketCache,
+		final List<AuthenticationEnum> authentications,
+		final boolean allowDelegation,
+		final SSLContext sslContext,
+		final boolean trustAllCertificates,
+		final int consoleCodePage,
+		final int connectRetries,
+		final long retryDelay
+	) throws WinRMException {
 		Utils.checkNonNull(winRMEndpoint, "winRMEndpoint");
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
 		if (connectRetries < 0) {
@@ -222,7 +272,13 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			verifyHostname = LightTls.verifyHostname();
 		}
 
-		final AuthScheme authScheme = resolveAuthScheme(winRMEndpoint, authentications, https, ticketCache);
+		final AuthScheme authScheme = resolveAuthScheme(
+			winRMEndpoint,
+			authentications,
+			https,
+			ticketCache,
+			allowDelegation
+		);
 
 		// Use the endpoint's own validated host/port rather than re-parsing the URL: URI.getHost()/getPort()
 		// return null/-1 for names URI cannot classify (underscores, Unicode) that WinRMEndpoint accepts,
@@ -250,17 +306,26 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	 * for EVERY list that contains it over HTTP — not just a Kerberos-only request: silently dropping
 	 * it from a fallback list (e.g. {@code [KERBEROS, NTLM]}) would downgrade the client to another
 	 * scheme without the caller's consent, contradicting the builder's "Kerberos requested over HTTP
-	 * is rejected" contract.
+	 * is rejected" contract. Delegation without Kerberos is rejected just as firmly: ignoring it would
+	 * leave the caller believing the second hop is enabled.
 	 */
 	private static AuthScheme resolveAuthScheme(
 		final WinRMEndpoint winRMEndpoint,
 		final List<AuthenticationEnum> authentications,
 		final boolean https,
-		final java.nio.file.Path ticketCache
+		final java.nio.file.Path ticketCache,
+		final boolean allowDelegation
 	) throws WinRMException {
 		final List<AuthenticationEnum> requested = authentications == null || authentications.isEmpty()
 			? List.of(AuthenticationEnum.NTLM)
 			: authentications;
+		if (allowDelegation && !requested.contains(AuthenticationEnum.KERBEROS)) {
+			throw new WinRMException(
+				"Credential delegation requires Kerberos authentication (requested: " +
+					requested +
+					"): NTLM and Basic credentials cannot be delegated."
+			);
+		}
 
 		final String domain = winRMEndpoint.getDomain();
 		final String username = winRMEndpoint.getUsername();
@@ -275,7 +340,9 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			} else if (auth == AuthenticationEnum.KERBEROS) {
 				if (https) {
 					// The SPN is HTTP/<hostname>, so the caller must connect by the FQDN the KDC knows.
-					schemes.add(new KerberosAuthScheme(winRMEndpoint.getHostname(), username, password, ticketCache));
+					schemes.add(
+						new KerberosAuthScheme(winRMEndpoint.getHostname(), username, password, ticketCache, allowDelegation)
+					);
 				} else {
 					// Fail closed: Kerberos cannot be protected over plain HTTP, so reject it for any
 					// list rather than silently downgrading to the remaining schemes.
