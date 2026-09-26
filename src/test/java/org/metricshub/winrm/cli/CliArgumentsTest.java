@@ -46,6 +46,7 @@ class CliArgumentsTest {
 		assertEquals(5985, parsed.port());
 		assertEquals(CliArguments.DEFAULT_TIMEOUT, parsed.timeout());
 		assertEquals(List.of(AuthenticationEnum.NTLM), parsed.authentications());
+		assertFalse(parsed.allowDelegate());
 
 		final char[] password = parsed.password();
 		parsed.close();
@@ -66,6 +67,7 @@ class CliArgumentsTest {
 						"--kerberos",
 						"--kerberos-kdc=kdc.example.net",
 						"--kerberos-realm=CORP.EXAMPLE.NET",
+						"--allow-delegate",
 						"--port=1234",
 						"--timeout=9876",
 						"wql",
@@ -83,6 +85,7 @@ class CliArgumentsTest {
 			assertEquals("kdc.example.net", parsed.kerberosKdc());
 			assertEquals("CORP.EXAMPLE.NET", parsed.kerberosRealm());
 			assertFalse(parsed.kerberosRealmInferred());
+			assertTrue(parsed.allowDelegate());
 			assertEquals("SELECT Name FROM Win32_Service", parsed.input());
 		}
 	}
@@ -371,6 +374,10 @@ class CliArgumentsTest {
 				{
 						"--kerberos-kdc and --kerberos-realm require --kerberos",
 						concat(base, "--kerberos-kdc", "kdc.example.net", "command", "whoami")
+				},
+				{
+						"--allow-delegate requires --kerberos",
+						concat(base, "--https", "--allow-delegate", "command", "whoami")
 				},
 				{
 						"--kerberos-realm requires --kerberos-kdc",

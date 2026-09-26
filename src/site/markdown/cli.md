@@ -60,6 +60,7 @@ own options, in any order.
 | `--basic` | Authenticate with HTTP Basic. Use with `--https` so the credential is not sent in the clear. |
 | `--kerberos-kdc <host>` | Set the Kerberos KDC for this invocation; the realm is inferred from its DNS suffix (see below). |
 | `--kerberos-realm <realm>` | Override the realm inferred from `--kerberos-kdc`. |
+| `--allow-delegate` | Let the remote command use your Kerberos credentials to reach a further host (a UNC path, another server), like `winrs -allowdelegate`. Requires `--kerberos` and a forwardable ticket (see [Kerberos](#kerberos)). |
 | `--help` | Print the usage summary. |
 | `--version` | Print the build version. |
 
@@ -103,6 +104,13 @@ common Active Directory DNS naming convention; it is not guaranteed by Kerberos,
 `--kerberos-realm` when the realm does not match the KDC's DNS suffix or when the KDC is not a
 fully qualified DNS name. Both options are valid only with `--kerberos`, and `--kerberos-realm`
 requires `--kerberos-kdc`.
+
+`--allow-delegate` forwards your Kerberos ticket to the host, so the remote command can reach a
+further host as you — a UNC path, another server — where it would otherwise get *access denied*.
+The ticket must be forwardable, which the JDK asks for only when a `krb5.conf` says
+`forwardable = true` in its `[libdefaults]` section (`--kerberos-kdc` does not): otherwise the CLI
+exits with an authentication error (77) saying so. Only delegate to hosts you trust; see
+[Credential delegation](authentication.html#credential-delegation) for the details.
 
 ## Basic
 
@@ -383,6 +391,16 @@ java -jar ${project.artifactId}-${project.version}-standalone.jar \
   -h server.internal.example.net -u 'DOMAIN\user' -pf password.txt \
   --https --kerberos --kerberos-kdc camus.internal.example.net \
   command whoami
+```
+
+List a share on a third machine from the remote host, with Kerberos credential delegation (the
+`krb5.conf` says `forwardable = true`):
+
+```bash
+java -Djava.security.krb5.conf=krb5.conf -jar ${project.artifactId}-${project.version}-standalone.jar \
+  -h server.internal.example.net -u 'DOMAIN\user' -pf password.txt \
+  --https --kerberos --allow-delegate \
+  exec dir '\\fileserver\share'
 ```
 
 Follow a long-running command live and capture the streamed WQL rows with `jq`:

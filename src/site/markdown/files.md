@@ -267,9 +267,9 @@ DMTF strings.
   characters (see [the requirements](#errors-and-requirements)); the entries a
   listing reports can be of any length.
 * **UNC paths** (`\\server\share\...`) are a *second hop*: the host must authenticate to the file
-  server with your credentials, which NTLM does not allow. They need Kerberos credential
-  delegation ([#141](https://github.com/MetricsHub/winrm-java/issues/141)), which this client does
-  not provide yet: until then, access to a UNC path typically fails with access denied.
+  server with your credentials, which NTLM does not allow. They need Kerberos
+  [credential delegation](authentication.html#credential-delegation) (`allowDelegation()`):
+  without it, access to a UNC path typically fails with access denied.
 * `lastAccessed()` is only as good as the host keeps it: many Windows versions disable or delay
   last-access updates.
 

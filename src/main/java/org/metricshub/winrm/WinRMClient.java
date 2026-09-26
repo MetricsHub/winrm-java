@@ -32,8 +32,8 @@ import org.metricshub.winrm.exceptions.WinRMClientException;
 import org.metricshub.winrm.exceptions.WinRMException;
 import org.metricshub.winrm.exceptions.WinRMTimeoutException;
 import org.metricshub.winrm.exceptions.WindowsRemoteException;
+import org.metricshub.winrm.light.LightWinRMService;
 import org.metricshub.winrm.service.WinRMEndpoint;
-import org.metricshub.winrm.service.WinRMExecutorFactory;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
 
 /**
@@ -326,6 +326,7 @@ public final class WinRMClient implements AutoCloseable {
 		private String namespace;
 		private List<AuthScheme> authentication;
 		private Path ticketCache;
+		private boolean allowDelegation;
 		private boolean trustAllCertificates;
 		private int consoleCodePage;
 		private SSLContext sslContext;
@@ -453,6 +454,31 @@ public final class WinRMClient implements AutoCloseable {
 		}
 
 		/**
+		 * Let remote commands use the caller's credentials to reach a further host — a UNC path on a
+		 * file server, a database, another server — like {@code winrs -allowdelegate}. Without it,
+		 * the remote logon cannot authenticate onward, and such access fails with "access denied"
+		 * (the second hop).
+		 * <p>
+		 * Kerberos only: the caller's ticket-granting ticket is forwarded to the host, so it must be
+		 * forwardable — {@code forwardable = true} in the {@code [libdefaults]} section of
+		 * {@code krb5.conf}, or a forwardable ticket in the {@link #ticketCache(Path) ticket cache};
+		 * otherwise the first operation fails with a message saying so. {@link #build()} rejects
+		 * this option unless {@link AuthScheme#KERBEROS} is among the
+		 * {@link #authentication(AuthScheme...) schemes}; in an ordered fallback, a connection that
+		 * falls back to another scheme is not delegated.
+		 * <p>
+		 * Unlike {@code winrs}, the ticket is forwarded whether or not Active Directory trusts the
+		 * host for delegation: only delegate to hosts you trust, since the host can act as the
+		 * caller on the network until the ticket expires.
+		 *
+		 * @return this builder
+		 */
+		public Builder allowDelegation() {
+			this.allowDelegation = true;
+			return this;
+		}
+
+		/**
 		 * Trust every server certificate and skip hostname verification over HTTPS — for
 		 * self-signed test hosts. Insecure: do not use in production. This per-client setting
 		 * replaces the global {@code org.metricshub.winrm.tls.insecure} system property.
@@ -567,7 +593,7 @@ public final class WinRMClient implements AutoCloseable {
 		 *
 		 * @return the client, to use with try-with-resources
 		 * @throws org.metricshub.winrm.exceptions.WinRMClientException when the configuration is
-		 *         rejected (e.g. Kerberos requested over HTTP)
+		 *         rejected (e.g. Kerberos requested over HTTP, or delegation without Kerberos)
 		 */
 		public WinRMClient build() {
 			if (username == null || password == null) {
@@ -598,11 +624,12 @@ public final class WinRMClient implements AutoCloseable {
 			}
 
 			try {
-				final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
+				final WindowsRemoteExecutor executor = LightWinRMService.createInstance(
 					endpoint,
 					toMillis(timeout),
 					ticketCache,
 					authentications,
+					allowDelegation,
 					sslContext,
 					trustAllCertificates,
 					consoleCodePage,
