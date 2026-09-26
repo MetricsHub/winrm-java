@@ -24,17 +24,24 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
 import org.metricshub.winrm.service.WinRMEndpoint;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
@@ -46,7 +53,11 @@ final class CliArguments implements AutoCloseable {
 		VERSION,
 		WQL,
 		COMMAND,
-		SHELL
+		SHELL,
+		LS,
+		STAT,
+		CAT,
+		GET
 	}
 
 	static final long DEFAULT_TIMEOUT = 60_000L;
@@ -74,6 +85,18 @@ final class CliArguments implements AutoCloseable {
 	private final String directory;
 	private final Map<String, String> environment;
 	private final String input;
+	private final Path localFile;
+	private final String glob;
+	private final boolean recursive;
+	private final int depth;
+	private final boolean filesOnly;
+	private final boolean directoriesOnly;
+	private final Instant modifiedAfter;
+	private final long minSize;
+	private final boolean json;
+	private final long offset;
+	private final long length;
+	private final Charset charset;
 
 	private CliArguments(final Builder builder) {
 		operation = builder.operation;
@@ -94,6 +117,18 @@ final class CliArguments implements AutoCloseable {
 		directory = builder.directory;
 		environment = builder.environment;
 		input = builder.input;
+		localFile = builder.localFile;
+		glob = builder.glob;
+		recursive = builder.recursive;
+		depth = builder.depth;
+		filesOnly = builder.filesOnly;
+		directoriesOnly = builder.directoriesOnly;
+		modifiedAfter = builder.modifiedAfter;
+		minSize = builder.minSize;
+		json = builder.json;
+		offset = builder.offset;
+		length = builder.length;
+		charset = builder.charset;
 	}
 
 	static CliArguments parse(final String[] arguments) throws CliUsageException {
@@ -215,6 +250,11 @@ final class CliArguments implements AutoCloseable {
 
 	private static void parseOperation(final Builder builder, final String name, final List<String> values)
 		throws CliUsageException {
+		if (isFileSubcommand(name)) {
+			builder.operation = Operation.valueOf(name.toUpperCase(Locale.ROOT));
+			parseFileArguments(builder, name, values.toArray(new String[0]));
+			return;
+		}
 		if ("shell".equals(name)) {
 			builder.operation = Operation.SHELL;
 			if (!values.isEmpty()) {
@@ -234,12 +274,142 @@ final class CliArguments implements AutoCloseable {
 		}
 	}
 
+	/**
+	 * Parse what follows a file subcommand: its remote path (and, for {@code get}, an optional
+	 * local path), passed through untouched, and its own options, in any order. Anything starting
+	 * with {@code -} is an option.
+	 */
+	private static void parseFileArguments(final Builder builder, final String name, final String[] arguments)
+		throws CliUsageException {
+		final List<String> paths = new ArrayList<>(2);
+		int index = 0;
+		while (index < arguments.length) {
+			if (arguments[index].startsWith("-")) {
+				index = parseFileOption(builder, arguments, index);
+			} else {
+				paths.add(arguments[index]);
+				index++;
+			}
+		}
+		final boolean get = builder.operation == Operation.GET;
+		if (paths.isEmpty() || paths.size() > (get ? 2 : 1) || isBlank(paths.get(0))) {
+			throw new CliUsageException(
+				get ? "get requires a remote path and an optional local path" : name + " requires one remote path"
+			);
+		}
+		builder.input = paths.get(0);
+		if (paths.size() == 2) {
+			try {
+				builder.localFile = Path.of(paths.get(1));
+			} catch (final InvalidPathException e) {
+				throw new CliUsageException("get: invalid local path", e);
+			}
+		}
+	}
+
+	private static int parseFileOption(final Builder builder, final String[] arguments, final int index)
+		throws CliUsageException {
+		final String argument = arguments[index];
+		final String option = optionName(argument);
+		switch (option) {
+		case "--glob":
+			requireSubcommand(builder, option, Operation.LS);
+			builder.glob = optionValue(arguments, index, option);
+			if (isBlank(builder.glob)) {
+				throw new CliUsageException(option + " requires a value");
+			}
+			return nextIndex(argument, index);
+		case "--recursive":
+			requireSubcommand(builder, option, Operation.LS);
+			builder.recursive = true;
+			return index + 1;
+		case "--depth":
+			requireSubcommand(builder, option, Operation.LS);
+			builder.depth = (int) Math
+				.min(Integer.MAX_VALUE, parsePositiveNumber(optionValue(arguments, index, option), option));
+			return nextIndex(argument, index);
+		case "--files-only":
+			requireSubcommand(builder, option, Operation.LS);
+			builder.filesOnly = true;
+			return index + 1;
+		case "--directories-only":
+			requireSubcommand(builder, option, Operation.LS);
+			builder.directoriesOnly = true;
+			return index + 1;
+		case "--modified-after":
+			requireSubcommand(builder, option, Operation.LS);
+			builder.modifiedAfter = parseInstant(optionValue(arguments, index, option), option);
+			return nextIndex(argument, index);
+		case "--min-size":
+			requireSubcommand(builder, option, Operation.LS);
+			builder.minSize = parsePositiveNumber(optionValue(arguments, index, option), option);
+			return nextIndex(argument, index);
+		case "--json":
+			requireSubcommand(builder, option, Operation.LS, Operation.STAT);
+			builder.json = true;
+			return index + 1;
+		case "--offset":
+			requireSubcommand(builder, option, Operation.CAT);
+			builder.offset = parseNumber(optionValue(arguments, index, option), option);
+			return nextIndex(argument, index);
+		case "--length":
+			requireSubcommand(builder, option, Operation.CAT);
+			builder.length = parsePositiveNumber(optionValue(arguments, index, option), option);
+			return nextIndex(argument, index);
+		case "--charset":
+			requireSubcommand(builder, option, Operation.CAT);
+			builder.charset = parseCharset(optionValue(arguments, index, option), option);
+			return nextIndex(argument, index);
+		default:
+			throw new CliUsageException("unknown option " + safeOptionName(argument));
+		}
+	}
+
+	private static void requireSubcommand(final Builder builder, final String option, final Operation... operations)
+		throws CliUsageException {
+		if (!Arrays.asList(operations).contains(builder.operation)) {
+			throw new CliUsageException(
+				option + " requires the " +
+					Arrays.stream(operations).map(o -> o.name().toLowerCase(Locale.ROOT)).collect(Collectors.joining(" or ")) +
+					" subcommand"
+			);
+		}
+	}
+
+	/**
+	 * An ISO-8601 date-time with an offset ({@code 2026-01-31T12:00:00Z}), or a date
+	 * ({@code 2026-01-31}), which stands for midnight UTC. A date-time without an offset is refused:
+	 * its time zone would be a guess.
+	 */
+	private static Instant parseInstant(final String value, final String option) throws CliUsageException {
+		try {
+			return OffsetDateTime.parse(value).toInstant();
+		} catch (final DateTimeParseException e) {
+			try {
+				return LocalDate.parse(value).atStartOfDay(ZoneOffset.UTC).toInstant();
+			} catch (final DateTimeParseException notADate) {
+				throw new CliUsageException(
+					option + " must be an ISO-8601 date or date-time with an offset, e.g. 2026-01-31 or 2026-01-31T12:00:00Z",
+					e
+				);
+			}
+		}
+	}
+
+	private static Charset parseCharset(final String value, final String option) throws CliUsageException {
+		try {
+			return Charset.forName(value);
+		} catch (final IllegalArgumentException e) {
+			throw new CliUsageException(option + " must name a charset known to Java, e.g. UTF-8 or windows-1252", e);
+		}
+	}
+
 	private static void validate(final Builder builder) throws CliUsageException {
 		if (builder.operation == Operation.HELP || builder.operation == Operation.VERSION) {
 			return;
 		}
 		if (builder.operation == null) {
-			throw new CliUsageException("missing subcommand (wql, command, or shell)");
+			throw new CliUsageException("missing subcommand (wql, command, shell, ls, stat, cat, or get)");
 		}
 		if (builder.operation != Operation.SHELL && isBlank(builder.input)) {
 			throw new CliUsageException(
@@ -285,11 +455,15 @@ final class CliArguments implements AutoCloseable {
 		if (builder.directory != null && builder.directory.trim().isEmpty()) {
 			throw new CliUsageException("--directory requires a value");
 		}
-		if (builder.directory != null && builder.operation == Operation.WQL) {
+		final boolean runsInShell = builder.operation == Operation.COMMAND || builder.operation == Operation.SHELL;
+		if (builder.directory != null && !runsInShell) {
 			throw new CliUsageException("--directory requires the command or shell subcommand");
 		}
-		if (!builder.environment.isEmpty() && builder.operation == Operation.WQL) {
+		if (!builder.environment.isEmpty() && !runsInShell) {
 			throw new CliUsageException("--env requires the command or shell subcommand");
+		}
+		if (builder.filesOnly && builder.directoriesOnly) {
+			throw new CliUsageException("--files-only and --directories-only are mutually exclusive");
 		}
 		if (builder.operation == Operation.SHELL && builder.timeout < MIN_SHELL_TIMEOUT) {
 			throw new CliUsageException("shell requires --timeout of at least " + MIN_SHELL_TIMEOUT + " milliseconds");
@@ -421,12 +595,16 @@ final class CliArguments implements AutoCloseable {
 	}
 
 	private static long parsePositiveNumber(final String value, final String option) throws CliUsageException {
+		final long number = parseNumber(value, option);
+		if (number <= 0) {
+			throw new CliUsageException(option + " must be greater than zero");
+		}
+		return number;
+	}
+
+	private static long parseNumber(final String value, final String option) throws CliUsageException {
 		try {
-			final long number = Long.parseLong(value);
-			if (number <= 0) {
-				throw new CliUsageException(option + " must be greater than zero");
-			}
-			return number;
+			return Long.parseLong(value);
 		} catch (final NumberFormatException e) {
 			throw new CliUsageException(option + " must be a number", e);
 		}
@@ -459,7 +637,13 @@ final class CliArguments implements AutoCloseable {
 			||
 			"run".equals(value)
 			||
-			"shell".equals(value);
+			"shell".equals(value)
+			||
+			isFileSubcommand(value);
+	}
+
+	private static boolean isFileSubcommand(final String value) {
+		return "ls".equals(value) || "stat".equals(value) || "cat".equals(value) || "get".equals(value);
 	}
 
 	private static boolean isBlank(final String value) {
@@ -535,8 +719,61 @@ final class CliArguments implements AutoCloseable {
 		return environment;
 	}
 
+	/** The query, the command line, or the remote path of a file subcommand. */
 	String input() {
 		return input;
+	}
+
+	/** The local destination of {@code get}, or {@code null} for the current directory. */
+	Path localFile() {
+		return localFile;
+	}
+
+	String glob() {
+		return glob;
+	}
+
+	boolean recursive() {
+		return recursive;
+	}
+
+	/** The deepest level {@code ls} lists, or 0 when not set. */
+	int depth() {
+		return depth;
+	}
+
+	boolean filesOnly() {
+		return filesOnly;
+	}
+
+	boolean directoriesOnly() {
+		return directoriesOnly;
+	}
+
+	Instant modifiedAfter() {
+		return modifiedAfter;
+	}
+
+	long minSize() {
+		return minSize;
+	}
+
+	boolean json() {
+		return json;
+	}
+
+	long offset() {
+		return offset;
+	}
+
+	/** How many bytes {@code cat} reads at most, or -1 to read to the end. */
+	long length() {
+		return length;
+	}
+
+	/** The charset {@code cat} decodes the file with, or {@code null} to copy the bytes. */
+	Charset charset() {
+		return charset;
 	}
 
 	@Override
@@ -568,6 +805,18 @@ final class CliArguments implements AutoCloseable {
 		private Integer port;
 		private long timeout = DEFAULT_TIMEOUT;
 		private String input;
+		private Path localFile;
+		private String glob;
+		private boolean recursive;
+		private int depth;
+		private boolean filesOnly;
+		private boolean directoriesOnly;
+		private Instant modifiedAfter;
+		private long minSize;
+		private boolean json;
+		private long offset;
+		private long length = -1;
+		private Charset charset;
 
 		private void replacePassword(final char[] replacement) {
 			clearPassword();

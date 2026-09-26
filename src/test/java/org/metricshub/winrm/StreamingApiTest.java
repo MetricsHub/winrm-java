@@ -400,6 +400,37 @@ class StreamingApiTest {
 	}
 
 	@Test
+	void anEarlyTerminateAnsweredByTheExpiryOfItsShortHoldIsNotAFailure() throws Exception {
+		// A command blocked writing a block larger than its output pipe (a remote file read) is
+		// killed by the terminate Signal, but a real service answers only when the Signal's
+		// OperationTimeout expires: the Signal asks for a short hold, whose expiry is no failure.
+		enqueueCommandStartup();
+		server
+			.enqueue(200, envelope(receiveResponse(stdoutChunk("block\n"), null)))
+			.enqueue(
+				500,
+				fault(
+					"2150858793",
+					"The WS-Management service cannot complete the operation within the time specified in OperationTimeout."
+				)
+			);
+
+		try (WinRMClient client = builder().build()) {
+			final RemoteProcess process = client.command("type huge.bin").charset(StandardCharsets.UTF_8).start();
+			assertEquals("block", process.stdout().readLine());
+			process.close();
+
+			final String signal = server.decryptedRequests().get(3);
+			assertTrue(signal.contains("signal/terminate"), signal);
+			assertTrue(signal.contains("<wsman:OperationTimeout>PT1S</wsman:OperationTimeout>"), signal);
+
+			// The fault was a complete exchange: the connection is still in sync.
+			server.enqueue(200, envelope(enumerationDone(service("WinRM", "Running"))));
+			assertEquals(1, client.wql("SELECT Name FROM Win32_Service").execute().size());
+		}
+	}
+
+	@Test
 	void closingAfterTheFinalChunkStillExposesTheExitCode() throws Exception {
 		enqueueCommandStartup();
 		server

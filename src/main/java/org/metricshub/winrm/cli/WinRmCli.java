@@ -25,7 +25,9 @@ import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.PrintStream;
+import java.io.Reader;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -34,10 +36,18 @@ import java.net.NoRouteToHostException;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.nio.charset.Charset;
+import java.nio.file.FileSystemException;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -45,6 +55,9 @@ import java.util.stream.Stream;
 import javax.net.ssl.SSLException;
 import org.metricshub.winrm.AuthScheme;
 import org.metricshub.winrm.CommandRequest;
+import org.metricshub.winrm.RemoteDirectoryListing;
+import org.metricshub.winrm.RemoteFile;
+import org.metricshub.winrm.RemoteFileInfo;
 import org.metricshub.winrm.RemoteProcess;
 import org.metricshub.winrm.WinRMClient;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
@@ -63,7 +76,9 @@ import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
  * stream while the command runs; when the local standard input is not an interactive console
  * (piped or redirected), it is forwarded as the remote command's standard input. The {@code shell}
  * subcommand starts {@code cmd.exe} on the remote host and bridges it to the local terminal,
- * line by line, until the remote shell exits. Diagnostics are written only to standard error.
+ * line by line, until the remote shell exits. The {@code ls}, {@code stat}, {@code cat} and
+ * {@code get} subcommands list, describe, print and download remote files; {@code cat} copies the
+ * file's bytes to standard output unconverted. Diagnostics are written only to standard error.
  * <p>
  * NTLM is the default authentication scheme. Kerberos requires HTTPS. HTTPS validates certificates
  * and hostnames unless the explicitly insecure {@code --https-permissive} option is used.
@@ -71,20 +86,40 @@ import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
  * arguments can be visible to other local processes and should be avoided in automation. When
  * neither password option is supplied, the password is read securely from the interactive console.
  * <p>
- * Usage errors exit with 64, connection/TLS errors with 69, WinRM protocol errors with 70,
- * authentication errors with 77, and timeouts with 124. Representable remote command exit codes
- * (0 through 255) are propagated directly.
+ * Usage errors exit with 64, a remote path not found with 66, connection/TLS errors with 69, WinRM
+ * protocol and other remote errors with 70, local I/O errors with 74, authentication errors with
+ * 77, and timeouts with 124; an {@code ls} that could not read some directories exits with 1.
+ * Representable remote command exit codes (0 through 255) are propagated directly.
  */
 public final class WinRmCli {
 
+	static final int EXIT_PARTIAL = 1;
 	static final int EXIT_USAGE = 64;
+	static final int EXIT_NOT_FOUND = 66;
 	static final int EXIT_PROTOCOL = 70;
 	static final int EXIT_CONNECTION = 69;
+	static final int EXIT_IO = 74;
 	static final int EXIT_AUTHENTICATION = 77;
 	static final int EXIT_TIMEOUT = 124;
 
 	private static final String KERBEROS_KDC_PROPERTY = "java.security.krb5.kdc";
 	private static final String KERBEROS_REALM_PROPERTY = "java.security.krb5.realm";
+
+	/**
+	 * How the library's remote file access reports a missing path (see
+	 * {@code RemoteFiles.failure}): the message is all that tells it apart.
+	 */
+	private static final String REMOTE_PATH_NOT_FOUND = "Remote path not found";
+
+	/**
+	 * The timestamps of the file subcommands: ISO-8601 UTC with the 100 ns precision of Windows
+	 * file times, always 28 characters, so they align in a listing and sort as strings.
+	 */
+	private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter
+		.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSS'Z'", Locale.ROOT)
+		.withZone(ZoneOffset.UTC);
+
+	private static final int COPY_BUFFER_SIZE = 65_536;
 
 	private WinRmCli() {}
 
@@ -250,6 +285,9 @@ public final class WinRmCli {
 				if (arguments.operation() == CliArguments.Operation.SHELL) {
 					return interactiveShell(arguments, standardOutput, standardError, remote, localInput);
 				}
+				if (arguments.operation() != CliArguments.Operation.COMMAND) {
+					return fileOperation(arguments, remote.file(arguments.input()), standardOutput, standardError);
+				}
 				// Forward each output chunk as it arrives, so a long-running command can be followed live.
 				// Piped/redirected local standard input travels the other way, as the command's stdin —
 				// automatically when detected, unconditionally with --stdin.
@@ -311,6 +349,183 @@ public final class WinRmCli {
 		} finally {
 			restoreInterruptHandler.run();
 		}
+	}
+
+	/** Run {@code ls}, {@code stat}, {@code cat} or {@code get} on the given remote path. */
+	private static int fileOperation(
+		final CliArguments arguments,
+		final RemoteFile file,
+		final PrintStream standardOutput,
+		final PrintStream standardError
+	) throws IOException {
+		switch (arguments.operation()) {
+		case LS:
+			return list(arguments, file.list(), standardOutput, standardError);
+		case STAT:
+			final Optional<RemoteFileInfo> info = file.info();
+			if (info.isEmpty()) {
+				diagnostic(standardError, REMOTE_PATH_NOT_FOUND + " on " + arguments.hostname() + ": " + file.path());
+				return EXIT_NOT_FOUND;
+			}
+			if (arguments.json()) {
+				JsonLinesWriter.write(fields(info.get()), standardOutput);
+			} else {
+				fields(info.get()).forEach((name, value) -> standardOutput.println(name + ": " + value));
+			}
+			return standardOutput.checkError() ? outputFailed(standardError) : 0;
+		case CAT:
+			file.offset(arguments.offset());
+			if (arguments.length() >= 0) {
+				file.length(arguments.length());
+			}
+			return cat(file, arguments.charset(), standardOutput, standardError);
+		default:
+			// get: into the current directory, under the remote name, unless told otherwise
+			file.downloadTo(arguments.localFile() == null ? Path.of("") : arguments.localFile());
+			return 0;
+		}
+	}
+
+	/**
+	 * Write each entry as the host reports it, and each directory that could not be read to
+	 * standard error; such a directory makes the listing partial, hence a nonzero exit code.
+	 */
+	private static int list(
+		final CliArguments arguments,
+		final RemoteDirectoryListing listing,
+		final PrintStream standardOutput,
+		final PrintStream standardError
+	) {
+		if (arguments.glob() != null) {
+			listing.glob(arguments.glob());
+		}
+		if (arguments.depth() > 0) {
+			listing.maxDepth(arguments.depth());
+		} else if (arguments.recursive()) {
+			listing.recursive();
+		}
+		if (arguments.filesOnly()) {
+			listing.filesOnly();
+		}
+		if (arguments.directoriesOnly()) {
+			listing.directoriesOnly();
+		}
+		if (arguments.modifiedAfter() != null) {
+			listing.modifiedAfter(arguments.modifiedAfter());
+		}
+		listing.minSize(arguments.minSize());
+		final AtomicBoolean partial = new AtomicBoolean();
+		listing.onInaccessible(path -> {
+			partial.set(true);
+			diagnostic(standardError, "cannot read directory " + path);
+		});
+		try (Stream<RemoteFileInfo> entries = listing.stream()) {
+			for (final Iterator<RemoteFileInfo> iterator = entries.iterator(); iterator.hasNext();) {
+				final RemoteFileInfo entry = iterator.next();
+				if (arguments.json()) {
+					JsonLinesWriter.write(fields(entry), standardOutput);
+				} else {
+					standardOutput.println(line(entry));
+				}
+				// Also flushes, so a downstream pipe sees each entry as it arrives. A closed output
+				// (e.g. "| head") stops the remote walk instead of finishing it for nobody.
+				if (standardOutput.checkError()) {
+					return outputFailed(standardError);
+				}
+			}
+		}
+		return partial.get() ? EXIT_PARTIAL : 0;
+	}
+
+	/**
+	 * Copy the file to standard output as it arrives: its bytes unconverted, or, with a charset,
+	 * its text decoded with that charset and encoded for the local console.
+	 */
+	private static int cat(
+		final RemoteFile file,
+		final Charset charset,
+		final PrintStream standardOutput,
+		final PrintStream standardError
+	) throws IOException {
+		try (InputStream in = file.openStream()) {
+			if (charset == null) {
+				final byte[] buffer = new byte[COPY_BUFFER_SIZE];
+				for (int n = in.read(buffer); n != -1; n = in.read(buffer)) {
+					standardOutput.write(buffer, 0, n);
+					// Closing the stream early stops the remote read (e.g. "| head")
+					if (standardOutput.checkError()) {
+						return outputFailed(standardError);
+					}
+				}
+				return 0;
+			}
+			try (Reader reader = new InputStreamReader(in, charset)) {
+				final char[] buffer = new char[COPY_BUFFER_SIZE];
+				for (int n = reader.read(buffer); n != -1; n = reader.read(buffer)) {
+					standardOutput.print(new String(buffer, 0, n));
+					if (standardOutput.checkError()) {
+						return outputFailed(standardError);
+					}
+				}
+				return 0;
+			}
+		}
+	}
+
+	private static int outputFailed(final PrintStream standardError) {
+		diagnostic(standardError, "cannot write to standard output");
+		return EXIT_IO;
+	}
+
+	/**
+	 * The fields of an entry, as {@code stat} and {@code --json} report them: the path, the
+	 * attributes as a PowerShell-style mode string ({@code darhsl}) and as the raw Windows
+	 * {@code FileAttributes} value, the size, and the timestamps.
+	 */
+	private static Map<String, Object> fields(final RemoteFileInfo info) {
+		final Map<String, Object> fields = new LinkedHashMap<>();
+		fields.put("path", info.path());
+		fields.put("mode", mode(info));
+		fields.put("attributes", info.attributes());
+		fields.put("size", info.size());
+		fields.put("lastModified", timestamp(info.lastModified()));
+		fields.put("created", timestamp(info.created()));
+		fields.put("lastAccessed", timestamp(info.lastAccessed()));
+		return fields;
+	}
+
+	/** The {@code ls} line of an entry: mode, size, last modification time, path. */
+	private static String line(final RemoteFileInfo info) {
+		return String.format(
+			Locale.ROOT,
+			"%s %12d %s %s",
+			mode(info),
+			info.size(),
+			timestamp(info.lastModified()),
+			info.path()
+		);
+	}
+
+	/**
+	 * The attributes the way Windows PowerShell's {@code Mode} column shows them: directory,
+	 * archive, read-only, hidden, system, reparse point ({@code l}), or {@code -}.
+	 */
+	private static String mode(final RemoteFileInfo info) {
+		return new String(
+			new char[]
+			{
+					info.isDirectory() ? 'd' : '-',
+					info.isArchive() ? 'a' : '-',
+					info.isReadOnly() ? 'r' : '-',
+					info.isHidden() ? 'h' : '-',
+					info.isSystem() ? 's' : '-',
+					info.isReparsePoint() ? 'l' : '-'
+			}
+		);
+	}
+
+	private static String timestamp(final Instant instant) {
+		return TIMESTAMP.format(instant);
 	}
 
 	/**
@@ -420,6 +635,13 @@ public final class WinRmCli {
 		for (Throwable current = throwable; current != null; current = current.getCause()) {
 			final String className = current.getClass().getName();
 			final String message = current.getMessage();
+			if (message != null && message.startsWith(REMOTE_PATH_NOT_FOUND)) {
+				return EXIT_NOT_FOUND;
+			}
+			// A local file (the destination of get): not a connection problem
+			if (current instanceof FileSystemException) {
+				return EXIT_IO;
+			}
 			if (className.startsWith("javax.security.auth.login.")
 				||
 				className.startsWith("org.ietf.jgss.")
@@ -495,6 +717,10 @@ public final class WinRmCli {
 			"  winrm-java [options] wql <query>\n" +
 			"  winrm-java [options] command|cmd|exec|run <command line...>\n" +
 			"  winrm-java [options] shell\n" +
+			"  winrm-java [options] ls <directory> [ls options]\n" +
+			"  winrm-java [options] stat <path> [--json]\n" +
+			"  winrm-java [options] cat <file> [cat options]\n" +
+			"  winrm-java [options] get <file> [<local path>]\n" +
 			"\n" +
 			"Connection options:\n" +
 			"  -h, --hostname <host>       Target hostname or IP address (required)\n" +
@@ -515,6 +741,19 @@ public final class WinRmCli {
 			"      --kerberos-realm <realm> Override the realm inferred from --kerberos-kdc\n" +
 			"      --help                  Show this help\n" +
 			"      --version               Show the project version\n" +
+			"\n" +
+			"File options (after the subcommand):\n" +
+			"      --glob <pattern>        ls: only names matching a wildcard pattern (* and ?)\n" +
+			"      --recursive             ls: list the whole tree\n" +
+			"      --depth <n>             ls: list the tree down to depth n (1: the directory's own entries)\n" +
+			"      --files-only            ls: list files only\n" +
+			"      --directories-only      ls: list directories only\n" +
+			"      --modified-after <date> ls: only entries modified after an ISO-8601 date or date-time\n" +
+			"      --min-size <bytes>      ls: only files of at least this size\n" +
+			"      --json                  ls, stat: print JSON Lines instead of text\n" +
+			"      --offset <bytes>        cat: start at this byte (negative: from the end)\n" +
+			"      --length <bytes>        cat: read at most this many bytes\n" +
+			"      --charset <name>        cat: print the text decoded with this charset, not the raw bytes\n" +
 			"\n" +
 			"If neither password option is given, the password is requested from the interactive console.\n" +
 			"\n" +
@@ -579,6 +818,9 @@ public final class WinRmCli {
 			PrintStream err,
 			AtomicBoolean interruptRequested
 		) throws Exception;
+
+		/** Designate a file or directory on the remote host, with the connection's timeout. */
+		RemoteFile file(String path);
 
 		@Override
 		void close();
@@ -789,6 +1031,11 @@ public final class WinRmCli {
 				// No WMI access, or an answer that is not a code page number: fall back below.
 			}
 			return DEFAULT_SHELL_CODE_PAGE;
+		}
+
+		@Override
+		public RemoteFile file(final String path) {
+			return client.file(path);
 		}
 
 		@Override
