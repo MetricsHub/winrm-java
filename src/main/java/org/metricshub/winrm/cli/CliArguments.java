@@ -81,6 +81,7 @@ final class CliArguments implements AutoCloseable {
 	private final String kerberosKdc;
 	private final String kerberosRealm;
 	private final boolean kerberosRealmInferred;
+	private final boolean allowDelegate;
 	private final boolean forwardStdin;
 	private final String directory;
 	private final Map<String, String> environment;
@@ -113,6 +114,7 @@ final class CliArguments implements AutoCloseable {
 		kerberosKdc = builder.kerberosKdc;
 		kerberosRealm = builder.kerberosRealm;
 		kerberosRealmInferred = builder.kerberosRealmInferred;
+		allowDelegate = builder.allowDelegate;
 		forwardStdin = builder.forwardStdin;
 		directory = builder.directory;
 		environment = builder.environment;
@@ -219,6 +221,9 @@ final class CliArguments implements AutoCloseable {
 		case "--kerberos-realm":
 			builder.kerberosRealm = optionValue(arguments, index, option);
 			return nextIndex(argument, index);
+		case "--allow-delegate":
+			builder.allowDelegate = true;
+			return index + 1;
 		case "--https":
 			builder.https = true;
 			return index + 1;
@@ -439,6 +444,9 @@ final class CliArguments implements AutoCloseable {
 		}
 		if (!builder.kerberos && (builder.kerberosKdc != null || builder.kerberosRealm != null)) {
 			throw new CliUsageException("--kerberos-kdc and --kerberos-realm require --kerberos");
+		}
+		if (builder.allowDelegate && !builder.kerberos) {
+			throw new CliUsageException("--allow-delegate requires --kerberos");
 		}
 		if (builder.kerberosRealm != null && builder.kerberosKdc == null) {
 			throw new CliUsageException("--kerberos-realm requires --kerberos-kdc");
@@ -707,6 +715,10 @@ final class CliArguments implements AutoCloseable {
 		return kerberosRealmInferred;
 	}
 
+	boolean allowDelegate() {
+		return allowDelegate;
+	}
+
 	boolean forwardStdin() {
 		return forwardStdin;
 	}
@@ -799,6 +811,7 @@ final class CliArguments implements AutoCloseable {
 		private String kerberosKdc;
 		private String kerberosRealm;
 		private boolean kerberosRealmInferred;
+		private boolean allowDelegate;
 		private boolean forwardStdin;
 		private String directory;
 		private final Map<String, String> environment = new LinkedHashMap<>();

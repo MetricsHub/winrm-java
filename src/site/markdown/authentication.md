@@ -93,6 +93,52 @@ java -Djava.security.krb5.realm=EXAMPLE.COM \
 The optional `ticketCache(Path)` builder option points at a Kerberos ticket cache to use for the
 connection; without it, Kerberos logs in with the user name and password.
 
+### Credential delegation
+
+A remote command runs under a network logon that cannot use your credentials to reach a *further*
+host — a UNC path on a file server, an Active Directory query, a database — so such access fails
+with *access denied*: the second hop (see
+[Preparing the Windows Host](preparing-the-host.html#the-second-hop)). `allowDelegation()` lifts
+that limit, like `winrs -allowdelegate`: Kerberos forwards your ticket-granting ticket (TGT) to the
+host, and the commands of the connection authenticate onward as you.
+
+```java
+try (WinRMClient client = WinRMClient.builder("server.internal.example.com")
+        .https()
+        .authentication(AuthScheme.KERBEROS)
+        .allowDelegation()                       // Kerberos only
+        .credentials("DOMAIN\\user", password)
+        .build()) {
+    client.command("dir \\\\fileserver\\share").execute();
+}
+```
+
+The TGT must be **forwardable**, and the JDK asks the KDC for a forwardable one only when told to:
+set `forwardable = true` in the `[libdefaults]` section of the JDK's `krb5.conf` (see
+[Kerberos configuration](#kerberos-configuration)) — or, with `ticketCache(Path)`, get the cached
+ticket with `kinit -f`. The `java.security.krb5.realm` and `java.security.krb5.kdc` properties
+cannot say it, but the file is read in addition to them, so next to them a file with only these
+lines is enough:
+
+```ini
+[libdefaults]
+  forwardable = true
+```
+
+Otherwise the first operation fails with a message saying so, instead of the command failing later
+on the second hop. An account that Active Directory never lets be delegated (*Account is sensitive
+and cannot be delegated*, or a member of *Protected Users*) fails the same way.
+
+Unlike `winrs`, which delegates only to hosts that Active Directory trusts for delegation, the
+client forwards the ticket to any host it is enabled for (verified with a host that is not trusted
+for delegation). The host then holds a ticket that lets it act as you on the network until the
+ticket expires: enable delegation only for hosts you trust.
+
+`build()` rejects `allowDelegation()` when Kerberos is not among the schemes: NTLM and Basic
+credentials cannot be delegated. In an ordered fallback such as `(KERBEROS, NTLM)`, a connection
+that falls back to NTLM is not delegated. CredSSP, the other way `winrs` delegates, is not
+supported.
+
 ## Basic
 
 HTTP Basic sends the credential in the `Authorization` header of **every** request — there is no
@@ -172,6 +218,10 @@ Here the realm is inferred as `INTERNAL.EXAMPLE.COM` by dropping the KDC's first
 upper-casing the rest. This follows a common Active Directory naming convention but is not
 guaranteed by Kerberos — pass `--kerberos-realm` when the realm does not match the KDC's DNS suffix,
 or when the KDC is not a fully qualified DNS name.
+
+`--allow-delegate` turns on [credential delegation](#credential-delegation) for the invocation. It
+requires `--kerberos`, and the ticket must still be forwardable: `--kerberos-kdc` sets the KDC and
+the realm, not `forwardable = true`.
 
 ## See also
 

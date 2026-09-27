@@ -3,6 +3,7 @@ package org.metricshub.winrm;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStream;
@@ -124,6 +125,10 @@ class WinRMLiveTest {
 	}
 
 	private static WinRMClient client() {
+		return builder().build();
+	}
+
+	private static WinRMClient.Builder builder() {
 		final WinRMClient.Builder builder = WinRMClient.builder(host).credentials(username, password)
 			.timeout(Duration.ofSeconds(60));
 		if (protocol == WinRMHttpProtocolEnum.HTTPS) {
@@ -132,7 +137,25 @@ class WinRMLiveTest {
 		if (port != null) {
 			builder.port(port);
 		}
-		return builder.build();
+		return builder;
+	}
+
+	/**
+	 * Kerberos credential delegation, the second hop: with {@code -Dwinrm.live.delegation.unc} set
+	 * to a UNC path the account can read on a third machine (over HTTPS, with a {@code krb5.conf}
+	 * saying {@code forwardable = true}), the host reaches it with delegation and is denied without.
+	 */
+	@Test
+	@EnabledIfSystemProperty(named = "winrm.live.delegation.unc", matches = ".+")
+	void kerberosDelegationReachesTheSecondHop() {
+		final String unc = System.getProperty("winrm.live.delegation.unc");
+		try (WinRMClient client = builder().authentication(AuthScheme.KERBEROS).allowDelegation().build()) {
+			final CommandResult result = client.command("dir " + unc).execute();
+			assertEquals(0, result.exitCode(), result::stderr);
+		}
+		try (WinRMClient client = builder().authentication(AuthScheme.KERBEROS).build()) {
+			assertNotEquals(0, client.command("dir " + unc).execute().exitCode());
+		}
 	}
 
 	@Test

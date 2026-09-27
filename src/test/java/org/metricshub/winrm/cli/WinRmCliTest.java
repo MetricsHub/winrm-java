@@ -80,6 +80,7 @@ class WinRmCliTest {
 		assertTrue(help.stdout.contains("--env <NAME=VALUE>"));
 		assertTrue(help.stdout.contains("--kerberos-kdc"));
 		assertTrue(help.stdout.contains("--kerberos-realm"));
+		assertTrue(help.stdout.contains("--allow-delegate"));
 		assertTrue(help.stdout.contains("[options] ls <directory>"));
 		assertTrue(help.stdout.contains("[options] get <file> [<local path>]"));
 		assertTrue(help.stdout.contains("--modified-after <date>"));

@@ -122,6 +122,30 @@ class WinRMClientBuilderTest {
 	}
 
 	@Test
+	void delegationRequiresKerberos() {
+		// NTLM (the default) and Basic credentials cannot be delegated: refused, never silently ignored
+		for (final WinRMClient.Builder builder : new WinRMClient.Builder[] {
+				validBuilder().https().allowDelegation(),
+				validBuilder().https().authentication(AuthScheme.NTLM, AuthScheme.BASIC).allowDelegation() }) {
+			final WinRMClientException e = assertThrows(WinRMClientException.class, builder::build);
+			assertTrue(e.getMessage().contains("delegation requires Kerberos"), e.getMessage());
+		}
+		// Kerberos alone, or in an ordered fallback: accepted (build() does not connect)
+		try (
+			WinRMClient client = validBuilder().https().authentication(AuthScheme.KERBEROS).allowDelegation().build()) {
+			assertEquals("host", client.hostname());
+		}
+		try (
+			WinRMClient client = validBuilder()
+				.https()
+				.authentication(AuthScheme.KERBEROS, AuthScheme.NTLM)
+				.allowDelegation()
+				.build()) {
+			assertEquals("host", client.hostname());
+		}
+	}
+
+	@Test
 	void basicIsAcceptedOverHttpAndHttps() {
 		// Unlike Kerberos, Basic is a plain-HTTP scheme (the credential rides the Authorization
 		// header), so a Basic-only client must build over both transports. build() does not connect.

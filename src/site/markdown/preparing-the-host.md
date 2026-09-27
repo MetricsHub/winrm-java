@@ -361,10 +361,12 @@ mapped drive — fails with access denied, even though the same command works wh
 the host. The same goes for a UNC path given to [`client.file(...)`](files.html), which runs as a
 remote command too.
 
-Windows solves this with CredSSP or Kerberos constrained delegation. This client **does not support
-CredSSP** ([Authentication](authentication.html)), so the workaround is to avoid the second hop:
-copy what you need onto the host first ([File Transfers](file-transfers.html)), or have the command
-use credentials it supplies itself.
+Windows solves this with CredSSP or Kerberos delegation. This client supports **Kerberos
+delegation**: `allowDelegation()` on the builder, or `--allow-delegate` on the command line (see
+[Credential delegation](authentication.html#credential-delegation)). It **does not support
+CredSSP**, so with NTLM the workaround is to avoid the second hop: copy what you need onto the
+host first ([File Transfers](file-transfers.html)), or have the command use credentials it supplies
+itself.
 
 ## Host quotas worth knowing about
 

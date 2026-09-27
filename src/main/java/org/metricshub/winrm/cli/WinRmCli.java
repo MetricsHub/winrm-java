@@ -607,6 +607,9 @@ public final class WinRmCli {
 		if (consoleCodePage > 0) {
 			builder.consoleCodePage(consoleCodePage);
 		}
+		if (arguments.allowDelegate()) {
+			builder.allowDelegation();
+		}
 		final List<AuthenticationEnum> authentications = arguments.authentications();
 		if (authentications != null && !authentications.isEmpty()) {
 			builder.authentication(
@@ -739,6 +742,7 @@ public final class WinRmCli {
 			"      --basic                 Use HTTP Basic authentication (use HTTPS to protect the credential)\n" +
 			"      --kerberos-kdc <host>   Set the Kerberos KDC; infer realm from its DNS suffix\n" +
 			"      --kerberos-realm <realm> Override the realm inferred from --kerberos-kdc\n" +
+			"      --allow-delegate        Let the remote side use your Kerberos credentials (second hop)\n" +
 			"      --help                  Show this help\n" +
 			"      --version               Show the project version\n" +
 			"\n" +
