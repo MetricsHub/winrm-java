@@ -610,6 +610,9 @@ public final class WinRmCli {
 		if (arguments.allowDelegate()) {
 			builder.allowDelegation();
 		}
+		if (arguments.loadUserProfile()) {
+			builder.loadUserProfile();
+		}
 		final List<AuthenticationEnum> authentications = arguments.authentications();
 		if (authentications != null && !authentications.isEmpty()) {
 			builder.authentication(
@@ -734,6 +737,7 @@ public final class WinRmCli {
 			"  -t, --timeout <ms>          Operation timeout in milliseconds (default: 60000)\n" +
 			"  -d, --directory <path>      Working directory of the remote command or shell\n" +
 			"      --env <NAME=VALUE>      Environment variable of the remote command or shell (repeatable)\n" +
+			"      --profile               Load the user profile in the remote command or shell\n" +
 			"  -i, --stdin                 Forward the local standard input to the remote command\n" +
 			"      --https                 Use HTTPS\n" +
 			"      --https-permissive      Trust any HTTPS certificate and hostname (insecure)\n" +

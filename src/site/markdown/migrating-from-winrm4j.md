@@ -156,6 +156,10 @@ the switch:
   which mangles any non-ASCII output on non-English hosts. This client creates the remote shell
   with code page **65001 (UTF-8)**, so accented and non-Latin output decodes correctly whatever
   the remote locale — no configuration needed ([Character encoding](commands.html#character-encoding)).
+* **The user profile is not loaded by default.** winrm4j hardcodes `WINRS_NOPROFILE=FALSE`, so its
+  commands see the user's profile: `%APPDATA%`, the user's `HKEY_CURRENT_USER` hive. This client
+  does not load it unless the builder calls `loadUserProfile()`
+  ([Loading the user profile](commands.html#loading-the-user-profile)).
 * **Timeout semantics.** winrm4j's `operationTimeout` is the WSMan `Receive` polling timeout (how
   long each poll waits for output), and separate CXF settings govern connect/receive at the HTTP
   level. Here a single `timeout(Duration)` (default 30&nbsp;s) is a **wall-clock deadline for the

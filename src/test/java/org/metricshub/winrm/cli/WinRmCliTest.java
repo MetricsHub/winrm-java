@@ -78,6 +78,7 @@ class WinRmCliTest {
 		assertTrue(help.stdout.contains("-P, --port"));
 		assertTrue(help.stdout.contains("-d, --directory"));
 		assertTrue(help.stdout.contains("--env <NAME=VALUE>"));
+		assertTrue(help.stdout.contains("--profile"));
 		assertTrue(help.stdout.contains("--kerberos-kdc"));
 		assertTrue(help.stdout.contains("--kerberos-realm"));
 		assertTrue(help.stdout.contains("--allow-delegate"));
@@ -201,6 +202,7 @@ class WinRmCliTest {
 						"C:\\build",
 						"--env",
 						"BUILD_NUMBER=42",
+						"--profile",
 						"exec",
 						"build.cmd"
 				},
@@ -216,6 +218,8 @@ class WinRmCliTest {
 				create.contains("<rsp:Environment><rsp:Variable Name=\"BUILD_NUMBER\">42</rsp:Variable></rsp:Environment>"),
 				create
 			);
+			// And --profile, as the WINRS_NOPROFILE option.
+			assertTrue(create.contains("<wsman:Option Name=\"WINRS_NOPROFILE\">FALSE</wsman:Option>"), create);
 		}
 	}
 
@@ -288,6 +292,7 @@ class WinRmCliTest {
 						"C:\\build",
 						"--env",
 						"CONFIG=release",
+						"--profile",
 						"shell"
 				},
 				WinRmCli::connect,
@@ -304,6 +309,8 @@ class WinRmCliTest {
 				create.contains("<rsp:Environment><rsp:Variable Name=\"CONFIG\">release</rsp:Variable></rsp:Environment>"),
 				create
 			);
+			// The session's own connection carries --profile too.
+			assertTrue(create.contains("<wsman:Option Name=\"WINRS_NOPROFILE\">FALSE</wsman:Option>"), create);
 			final String command = requests.get(2);
 			assertTrue(command.contains("<rsp:Command>cmd.exe /Q</rsp:Command>"), command);
 			assertTrue(command.contains("<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">FALSE</wsman:Option>"), command);

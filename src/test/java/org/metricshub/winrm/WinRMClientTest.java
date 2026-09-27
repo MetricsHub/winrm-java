@@ -833,7 +833,7 @@ class WinRMClientTest {
 			)
 			.enqueue(200, envelope(signalResponse()));
 
-		try (WinRMClient client = builder(PASSWORD).build()) {
+		try (WinRMClient client = builder(PASSWORD).loadUserProfile().build()) {
 			assertEquals(
 				"first",
 				client
@@ -868,6 +868,10 @@ class WinRMClientTest {
 				.contains("<rsp:Environment><rsp:Variable Name=\"BUILD_NUMBER\">42</rsp:Variable></rsp:Environment>"),
 			creates.get(1)
 		);
+		// The client's loadUserProfile() rides every shell it creates, the recreated one included.
+		for (final String create : creates) {
+			assertTrue(create.contains("<wsman:Option Name=\"WINRS_NOPROFILE\">FALSE</wsman:Option>"), create);
+		}
 	}
 
 	@Test

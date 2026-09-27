@@ -50,8 +50,9 @@ own options, in any order.
 | `-pf, --password-file <file>` | Read the password from a UTF-8 file (preferred for automation, see below). |
 | `-P, --port <port>` | Target port. Default: 5985 for HTTP, 5986 for HTTPS. |
 | `-t, --timeout <ms>` | Operation timeout in milliseconds. Default: 60000. See [Timeout semantics](#timeout-semantics). |
-| `-d, --directory <path>` | Working directory the remote command or interactive shell starts in, like `winrs -d` (only with `command` and `shell`). Default: the remote user's profile directory. |
+| `-d, --directory <path>` | Working directory the remote command or interactive shell starts in, like `winrs -d` (only with `command` and `shell`). Default: the user's profile directory, or `C:\Users\Default` when that profile is not loaded (see `--profile`). |
 | `--env <NAME=VALUE>` | Environment variable set in the remote shell, like `winrs -env` (only with `command` and `shell`). Repeatable — one occurrence per variable; the value is split on the first `=`, so it may itself contain `=`. |
+| `--profile` | Load the user profile in the remote shell (only with `command` and `shell`): `%APPDATA%`, the user's `HKEY_CURRENT_USER` hive. Not loaded by default, the reverse of `winrs`, where `-noprofile` turns it off; see [Loading the user profile](commands.html#loading-the-user-profile). |
 | `-i, --stdin` | Forward the local standard input to the remote command (only with `command`); see below. |
 | `--https` | Connect over HTTPS. |
 | `--https-permissive` | Trust any HTTPS certificate and hostname. Intentionally insecure: testing and isolated hosts only. Requires `--https`. |
