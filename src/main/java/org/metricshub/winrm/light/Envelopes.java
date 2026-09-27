@@ -149,16 +149,19 @@ final class Envelopes {
 	 *        empty omits the {@code rsp:Environment} block
 	 * @param codePage the console code page of the shell ({@code WINRS_CODEPAGE}); 0 uses
 	 *        {@link #CODEPAGE_UTF8}, the default that makes every command's output UTF-8
+	 * @param loadUserProfile whether the shell loads the user profile ({@code WINRS_NOPROFILE} is
+	 *        its negation)
 	 */
 	static String createShell(
 		final String url,
 		final String workingDirectory,
 		final Map<String, String> environment,
 		final long timeoutMs,
-		final int codePage
+		final int codePage,
+		final boolean loadUserProfile
 	) {
 		final String optionSet = "<wsman:OptionSet>" +
-			"<wsman:Option Name=\"WINRS_NOPROFILE\">TRUE</wsman:Option>" +
+			"<wsman:Option Name=\"WINRS_NOPROFILE\">" + (loadUserProfile ? "FALSE" : "TRUE") + "</wsman:Option>" +
 			"<wsman:Option Name=\"WINRS_CODEPAGE\">" + (codePage > 0 ? String.valueOf(codePage) : CODEPAGE_UTF8)
 			+ "</wsman:Option>" +
 			"</wsman:OptionSet>";

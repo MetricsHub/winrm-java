@@ -85,6 +85,7 @@ final class CliArguments implements AutoCloseable {
 	private final boolean forwardStdin;
 	private final String directory;
 	private final Map<String, String> environment;
+	private final boolean loadUserProfile;
 	private final String input;
 	private final Path localFile;
 	private final String glob;
@@ -118,6 +119,7 @@ final class CliArguments implements AutoCloseable {
 		forwardStdin = builder.forwardStdin;
 		directory = builder.directory;
 		environment = builder.environment;
+		loadUserProfile = builder.loadUserProfile;
 		input = builder.input;
 		localFile = builder.localFile;
 		glob = builder.glob;
@@ -206,6 +208,9 @@ final class CliArguments implements AutoCloseable {
 		case "--env":
 			parseEnvironmentVariable(builder, optionValue(arguments, index, option), option);
 			return nextIndex(argument, index);
+		case "--profile":
+			builder.loadUserProfile = true;
+			return index + 1;
 		case "--ntlm":
 			builder.ntlm = true;
 			return index + 1;
@@ -470,6 +475,9 @@ final class CliArguments implements AutoCloseable {
 		if (!builder.environment.isEmpty() && !runsInShell) {
 			throw new CliUsageException("--env requires the command or shell subcommand");
 		}
+		if (builder.loadUserProfile && !runsInShell) {
+			throw new CliUsageException("--profile requires the command or shell subcommand");
+		}
 		if (builder.filesOnly && builder.directoriesOnly) {
 			throw new CliUsageException("--files-only and --directories-only are mutually exclusive");
 		}
@@ -731,6 +739,10 @@ final class CliArguments implements AutoCloseable {
 		return environment;
 	}
 
+	boolean loadUserProfile() {
+		return loadUserProfile;
+	}
+
 	/** The query, the command line, or the remote path of a file subcommand. */
 	String input() {
 		return input;
@@ -815,6 +827,7 @@ final class CliArguments implements AutoCloseable {
 		private boolean forwardStdin;
 		private String directory;
 		private final Map<String, String> environment = new LinkedHashMap<>();
+		private boolean loadUserProfile;
 		private Integer port;
 		private long timeout = DEFAULT_TIMEOUT;
 		private String input;

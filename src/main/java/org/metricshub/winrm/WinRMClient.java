@@ -329,6 +329,7 @@ public final class WinRMClient implements AutoCloseable {
 		private boolean allowDelegation;
 		private boolean trustAllCertificates;
 		private int consoleCodePage;
+		private boolean loadUserProfile;
 		private SSLContext sslContext;
 		private Duration timeout = DEFAULT_TIMEOUT;
 		private int retries;
@@ -588,6 +589,27 @@ public final class WinRMClient implements AutoCloseable {
 		}
 
 		/**
+		 * Load the user profile in the remote command shell — the opposite of
+		 * {@code winrs -noprofile}. Default: the profile is not loaded, and unless something else
+		 * already loaded it on the host (an interactive session, for example), commands run with
+		 * the default profile: {@code %USERPROFILE%} is {@code C:\Users\Default}, {@code %APPDATA%}
+		 * is not set, and {@code HKEY_CURRENT_USER} is not the user's own registry hive.
+		 * <p>
+		 * The setting applies to every shell this client creates — for commands, file transfers and
+		 * remote file operations — including a shell silently recreated after the server reaped the
+		 * previous one. {@code winrs} documents that loading the profile requires the user to be a
+		 * local administrator on the host; when the host refuses it, the shell creation fails with a
+		 * {@link org.metricshub.winrm.exceptions.WinRMFaultException} carrying the fault code and
+		 * detail.
+		 *
+		 * @return this builder
+		 */
+		public Builder loadUserProfile() {
+			this.loadUserProfile = true;
+			return this;
+		}
+
+		/**
 		 * Build the client. This does not connect yet: the connection is established and
 		 * authenticated by the first operation.
 		 *
@@ -633,6 +655,7 @@ public final class WinRMClient implements AutoCloseable {
 					sslContext,
 					trustAllCertificates,
 					consoleCodePage,
+					loadUserProfile,
 					retries,
 					toMillis(retryDelay)
 				);

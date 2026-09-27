@@ -86,6 +86,7 @@ final class WsmanClient implements AutoCloseable {
 
 	private final long timeoutMs;
 	private final int consoleCodePage;
+	private final boolean loadUserProfile;
 	private final String url;
 	private final String rawUsername;
 	private final AuthScheme auth;
@@ -183,11 +184,13 @@ final class WsmanClient implements AutoCloseable {
 		final AuthScheme auth,
 		final String rawUsername,
 		final int consoleCodePage,
+		final boolean loadUserProfile,
 		final int connectRetries,
 		final long retryDelayMs
 	) {
 		this.timeoutMs = timeoutMs;
 		this.consoleCodePage = consoleCodePage;
+		this.loadUserProfile = loadUserProfile;
 		this.connectRetries = connectRetries;
 		this.retryDelayMs = retryDelayMs;
 		// A non-null socket factory selects HTTPS: TLS wraps the transport and the SOAP travels plaintext.
@@ -962,7 +965,7 @@ final class WsmanClient implements AutoCloseable {
 		final boolean failOnQuietTimeout
 	) throws Exception {
 		final Document doc = exchange(
-			Envelopes.createShell(url, workingDirectory, environment, timeoutMs, consoleCodePage),
+			Envelopes.createShell(url, workingDirectory, environment, timeoutMs, consoleCodePage, loadUserProfile),
 			"Create shell",
 			timeoutMs,
 			failOnQuietTimeout

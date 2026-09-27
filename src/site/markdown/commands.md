@@ -53,6 +53,33 @@ Everything between `command(...)` and `execute()` is optional:
 | `stdinCharset(Charset)` | the output charset | The charset used to *encode* standard input, when it differs from the output charset (see below). |
 | `onStdout(Consumer<String>)` / `onStderr(Consumer<String>)` | none | Callbacks receiving each chunk of output live while `execute()` runs (see below). |
 
+### Loading the user profile
+
+By default the remote shell does **not** load the user profile, the equivalent of
+`winrs -noprofile`. A command then sees the user's own profile only if something else already
+loaded it on the host, such as an interactive or disconnected session. Otherwise the shell runs
+with the default profile: `%USERPROFILE%` and the starting directory are `C:\Users\Default`,
+`%APPDATA%` and `%LOCALAPPDATA%` are not set, `%TEMP%` is `C:\Windows\Temp`, and
+`HKEY_CURRENT_USER` is not the user's registry hive. When a command needs them, build the client
+with `loadUserProfile()`:
+
+```java
+try (WinRMClient client = WinRMClient.builder("server.example.com")
+        .credentials("DOMAIN\\user", password)
+        .loadUserProfile()
+        .build()) {
+    client.command("reg query HKCU\\Software\\Vendor").execute();
+}
+```
+
+The profile is loaded when the remote shell is created, so this is a client setting. It applies
+to every shell the client creates, for commands, file transfers and remote file operations alike,
+including a shell recreated after the server reaped the previous one. Microsoft's `winrs`
+documentation warns that loading the profile fails for a user who is not a local administrator on
+the host: the command then fails with a
+[`WinRMFaultException`](apidocs/org/metricshub/winrm/exceptions/WinRMFaultException.html) carrying
+the fault code and detail. The CLI's `--profile` option does the same.
+
 ## Running PowerShell
 
 `powerShell(...)` prepares a PowerShell script execution the same way `command(...)` prepares a

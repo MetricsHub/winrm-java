@@ -47,6 +47,7 @@ class CliArgumentsTest {
 		assertEquals(CliArguments.DEFAULT_TIMEOUT, parsed.timeout());
 		assertEquals(List.of(AuthenticationEnum.NTLM), parsed.authentications());
 		assertFalse(parsed.allowDelegate());
+		assertFalse(parsed.loadUserProfile());
 
 		final char[] password = parsed.password();
 		parsed.close();
@@ -421,6 +422,10 @@ class CliArgumentsTest {
 				{
 						"--env requires the command or shell subcommand",
 						concat(base, "--env", "A=b", "wql", "SELECT Name FROM Win32_Service")
+				},
+				{
+						"--profile requires the command or shell subcommand",
+						concat(base, "--profile", "wql", "SELECT Name FROM Win32_Service")
 				},
 				{ "-P must be between 1 and 65535", concat(base, "-P", "65536", "command", "whoami") },
 				{ "-t must be greater than zero", concat(base, "-t", "0", "command", "whoami") },

@@ -202,6 +202,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			sslContext,
 			trustAllCertificates,
 			consoleCodePage,
+			false,
 			connectRetries,
 			retryDelay
 		);
@@ -209,7 +210,8 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 
 	/**
 	 * Create a light WinRM executor that may delegate the caller's Kerberos credentials to the host,
-	 * so remote commands can authenticate onward as the caller (the second hop).
+	 * so remote commands can authenticate onward as the caller (the second hop), and may load the
+	 * user profile in the command shell.
 	 *
 	 * @param winRMEndpoint endpoint with credentials (mandatory)
 	 * @param timeout timeout in milliseconds (must be &gt; 0)
@@ -225,6 +227,8 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	 *        server certificate and skip hostname verification — insecure, testing only
 	 * @param consoleCodePage the console code page of the command shell; 0 keeps the default 65001,
 	 *        which makes command output UTF-8 whatever the remote locale
+	 * @param loadUserProfile whether the command shell loads the user profile (registry hive,
+	 *        per-user environment variables); {@code false} is the historical behavior
 	 * @param connectRetries how many times one round trip may re-attempt to connect and authenticate
 	 *        (must be &gt;= 0); 0 keeps the historical fail-fast behavior
 	 * @param retryDelay the pause in milliseconds before each retry (must be &gt;= 0)
@@ -240,6 +244,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final SSLContext sslContext,
 		final boolean trustAllCertificates,
 		final int consoleCodePage,
+		final boolean loadUserProfile,
 		final int connectRetries,
 		final long retryDelay
 	) throws WinRMException {
@@ -292,6 +297,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			authScheme,
 			winRMEndpoint.getRawUsername(),
 			consoleCodePage,
+			loadUserProfile,
 			connectRetries,
 			retryDelay
 		);
