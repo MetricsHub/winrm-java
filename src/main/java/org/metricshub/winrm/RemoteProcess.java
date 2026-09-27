@@ -182,6 +182,12 @@ public final class RemoteProcess implements AutoCloseable {
 	 * {@link CommandRequest#stdin()} on the builder. Without it the remote stdin keeps the
 	 * historical console semantics, where writes are delivered but the end of input is not.
 	 * <p>
+	 * Input the command does not read (it exited, or closed its standard input, before the input
+	 * arrived) is discarded: {@code flush()} and {@code close()} do not fail for it, and the output
+	 * and exit code remain available. Unlike a {@link java.lang.Process} pipe, which throws an
+	 * {@link IOException} in this case, the writer stays silent: whether the input beats the
+	 * command's exit varies from host to host, and so would the failure.
+	 * <p>
 	 * Failures while sending are reported through the unchecked
 	 * {@link org.metricshub.winrm.exceptions.WinRMClientException} hierarchy; writing after the end
 	 * of input or after the command completed throws {@link IllegalStateException}.

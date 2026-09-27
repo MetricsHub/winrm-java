@@ -165,7 +165,9 @@ Points to know:
 
 ## Standard input
 
-Commands that read their standard input can be fed in two ways.
+Commands that read their standard input can be fed in two ways. Either way, input the command
+does not read (it exits without reading it, or before the input arrives) is discarded without
+error, and the command's output and exit code are reported as usual.
 
 ### Pre-supplied input
 

@@ -50,6 +50,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.metricshub.winrm.exceptions.WinRMClientException;
+import org.metricshub.winrm.exceptions.WinRMFaultException;
 import org.metricshub.winrm.exceptions.WinRMTimeoutException;
 import org.metricshub.winrm.light.FakeWsmanServer;
 
@@ -57,8 +58,8 @@ import org.metricshub.winrm.light.FakeWsmanServer;
  * End-to-end tests of command standard input (issue #136, phase 1) against
  * {@link FakeWsmanServer}: pre-supplied input on the builders ({@code stdin(...)}), the
  * process-style {@code RemoteProcess.stdin()} writer, the {@code ctrl_c} interrupt, the
- * console-mode option on the wire, chunking, the {@code End} flag, and the cleanup discipline
- * (early close, stdin after completion).
+ * console-mode option on the wire, chunking, the {@code End} flag, input the command does not
+ * read, and the cleanup discipline (early close, stdin after completion).
  */
 class CommandStdinTest {
 
@@ -68,6 +69,9 @@ class CommandStdinTest {
 
 	private static final String SHELL_ID = "SHELL-1";
 	private static final String COMMAND_ID = "CMD-1";
+
+	/** How a Send is answered when the command no longer reads its standard input. */
+	private static final String PIPE_CLOSING = fault("232", "The pipe is being closed.");
 
 	private FakeWsmanServer server;
 
@@ -264,6 +268,114 @@ class CommandStdinTest {
 			);
 			assertTrue(failure.getCause() instanceof java.nio.file.NoSuchFileException, String.valueOf(failure.getCause()));
 			assertEquals(1, failure.getCause().getSuppressed().length);
+		}
+	}
+
+	@Test
+	void inputTheCommandDoesNotReadIsDiscardedByExecute() throws Exception {
+		// Three read buffers' worth of input for a command that exits without reading it: the very
+		// first Send finds its stdin closing (issue #183).
+		final char[] input = new char[150_000];
+		java.util.Arrays.fill(input, 'x');
+
+		enqueueStartup();
+		server
+			.enqueue(500, PIPE_CLOSING)
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(
+						stream("stdout", COMMAND_ID, "HOST\r\n".getBytes(StandardCharsets.UTF_8)),
+						done(COMMAND_ID, 0)
+					)
+				)
+			)
+			.enqueue(200, envelope(signalResponse()));
+		enqueueShellDeletion(server);
+
+		try (WinRMClient client = builder().build()) {
+			final CommandResult result = client.command("hostname").stdin(new String(input)).execute();
+
+			assertEquals(0, result.exitCode());
+			assertEquals("HOST\r\n", result.stdout());
+		}
+
+		// The rest of the input was discarded, never sent.
+		assertEquals(1, server.stdinChunks().size());
+	}
+
+	@Test
+	void inputTheCommandDoesNotReadIsDiscardedByStart() throws Exception {
+		enqueueStartup();
+		server
+			.enqueue(500, PIPE_CLOSING)
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(
+						stream("stdout", COMMAND_ID, "HOST\r\n".getBytes(StandardCharsets.UTF_8)),
+						done(COMMAND_ID, 0)
+					)
+				)
+			)
+			.enqueue(200, envelope(signalResponse()));
+		enqueueShellDeletion(server);
+
+		try (WinRMClient client = builder().build()) {
+			try (RemoteProcess process = client.command("hostname").stdin("x\n").start()) {
+				assertEquals("HOST", process.stdout().readLine());
+				assertEquals(0, process.waitFor());
+			}
+		}
+	}
+
+	@Test
+	void remoteProcessStdinDiscardsInputTheCommandDoesNotRead() throws Exception {
+		enqueueStartup();
+		server
+			// the command exits before the flushed input arrives
+			.enqueue(500, PIPE_CLOSING)
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(stream("stdout", COMMAND_ID, "bye\r\n".getBytes(StandardCharsets.UTF_8)), done(COMMAND_ID, 1))
+				)
+			)
+			.enqueue(200, envelope(signalResponse()));
+		enqueueShellDeletion(server);
+
+		try (WinRMClient client = builder().build()) {
+			try (RemoteProcess process = client.command("repl.exe").stdin().start()) {
+				final BufferedWriter stdin = process.stdin();
+				// Neither the refused flush nor the later input fails: it is all discarded, and
+				// nothing more is sent.
+				writeAndFlush(stdin, "quit\n");
+				final int requestsAfterRefusal = server.decryptedRequests().size();
+				writeAndFlush(stdin, "ignored\n");
+				stdin.close();
+				assertEquals(requestsAfterRefusal, server.decryptedRequests().size());
+
+				assertEquals("bye", process.stdout().readLine());
+				assertEquals(1, process.waitFor());
+			}
+		}
+	}
+
+	@Test
+	void anyOtherSendFaultStillFailsTheCommand() throws Exception {
+		enqueueStartup();
+		server
+			.enqueue(500, fault("5", "Access is denied."))
+			// the failed command is terminated
+			.enqueue(200, envelope(signalResponse()));
+		enqueueShellDeletion(server);
+
+		try (WinRMClient client = builder().build()) {
+			final WinRMFaultException failure = assertThrows(
+				WinRMFaultException.class,
+				() -> client.command("sort").stdin("x\n").execute()
+			);
+			assertEquals("5", failure.getFaultCode());
 		}
 	}
 
