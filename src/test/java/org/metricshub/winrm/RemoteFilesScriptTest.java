@@ -25,7 +25,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
@@ -53,14 +52,14 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Runs the PowerShell scripts of {@link RemoteFiles} in the <b>local</b> {@code powershell.exe},
- * exactly as the remote shell would ({@code -EncodedCommand}), and decodes their output the way
- * the client does: the actual script semantics (seek, negative offsets, share mode, exit codes)
- * are only testable against a real PowerShell. Windows only.
+ * exactly as the remote shell would ({@code -EncodedCommand}), and reads their output the way the
+ * client does: the actual script semantics (seek, negative offsets, share mode, exit codes, raw
+ * output) are only testable against a real PowerShell. Windows only.
  */
 @EnabledOnOs(OS.WINDOWS)
 class RemoteFilesScriptTest {
 
-	/** Every byte value, then enough random bytes to span several transfer blocks. */
+	/** Every byte value, then enough random bytes to span several transfer blocks, ending with a CR. */
 	private static byte[] content;
 
 	@TempDir
@@ -77,11 +76,12 @@ class RemoteFilesScriptTest {
 		final byte[] random = new byte[content.length - 256];
 		new Random(42).nextBytes(random);
 		System.arraycopy(random, 0, content, 256, random.length);
+		content[content.length - 1] = '\r';
 		file = directory.resolve("données-漢字.bin");
 		Files.write(file, content);
 	}
 
-	/** The outcome of a script: the decoded bytes and the exit code. */
+	/** The outcome of a script: the bytes it wrote on stdout and the exit code. */
 	private static final class Outcome {
 
 		final byte[] bytes;
@@ -94,12 +94,23 @@ class RemoteFilesScriptTest {
 	}
 
 	private static Outcome run(final String script) throws Exception {
-		final Listing raw = exec(script);
-		final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-		for (final String line : raw.lines) {
-			bytes.write(Base64.getDecoder().decode(line));
+		final String encoded = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
+		final Process process = new ProcessBuilder(
+			"powershell.exe",
+			"-NoProfile",
+			"-NonInteractive",
+			"-EncodedCommand",
+			encoded
+		)
+			.redirectError(ProcessBuilder.Redirect.DISCARD)
+			.start();
+		process.getOutputStream().close();
+		final byte[] stdout = process.getInputStream().readAllBytes();
+		if (!process.waitFor(60, TimeUnit.SECONDS)) {
+			process.destroyForcibly();
+			throw new AssertionError("powershell.exe did not complete");
 		}
-		return new Outcome(bytes.toByteArray(), raw.exitCode);
+		return new Outcome(stdout, process.exitValue());
 	}
 
 	/** The outcome of a metadata script: its non-blank stdout lines and the exit code. */
@@ -139,28 +150,13 @@ class RemoteFilesScriptTest {
 	}
 
 	private static Listing exec(final String script) throws Exception {
-		final String encoded = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
-		final Process process = new ProcessBuilder(
-			"powershell.exe",
-			"-NoProfile",
-			"-NonInteractive",
-			"-EncodedCommand",
-			encoded
-		)
-			.redirectError(ProcessBuilder.Redirect.DISCARD)
-			.start();
-		process.getOutputStream().close();
-		final String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.US_ASCII);
-		if (!process.waitFor(60, TimeUnit.SECONDS)) {
-			process.destroyForcibly();
-			throw new AssertionError("powershell.exe did not complete");
-		}
+		final Outcome outcome = run(script);
 		final List<String> lines = Arrays
-			.stream(stdout.split("\r?\n"))
+			.stream(new String(outcome.bytes, StandardCharsets.US_ASCII).split("\r?\n"))
 			.filter(l -> !l.isBlank())
 			.map(String::strip)
 			.collect(Collectors.toList());
-		return new Listing(lines, process.exitValue());
+		return new Listing(lines, outcome.exitCode);
 	}
 
 	private static byte[] read(final long offset, final long length) throws Exception {

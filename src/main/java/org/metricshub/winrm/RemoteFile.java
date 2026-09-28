@@ -72,15 +72,16 @@ import org.metricshub.winrm.exceptions.WinRMTimeoutException;
  * }</pre>
  * <p>
  * The content travels through the WinRM connection itself (no SMB, no extra port): a small
- * PowerShell script on the host writes the bytes base64-encoded, which is binary-safe and
- * independent of the remote console code page. It is designed for configuration files, logs and
- * small data files — <b>not a bulk transport</b>: base64 through a command shell is far slower
- * than SMB. The host needs PowerShell (2.0 or later) in {@code FullLanguage} mode.
+ * PowerShell script on the host writes the file's raw bytes to its standard output stream, past
+ * any text conversion, so every byte arrives as stored whatever the remote console code page. It
+ * is designed for configuration files, logs and small data files — <b>not a bulk transport</b>:
+ * the WinRM service forwards a command's output at about 2 MB/s, far slower than SMB. The host
+ * needs PowerShell (2.0 or later) in {@code FullLanguage} mode.
  * <p>
  * The file is opened with a share mode that tolerates other writers, so a log being written by a
  * running service can be read; a file held with an exclusive lock (e.g. {@code pagefile.sys})
  * fails with a sharing violation. A read writes nothing on the host: its script travels on the
- * command line, which limits the path to about 1,450 characters (fewer with non-Latin
+ * command line, which limits the path to about 1,500 characters (fewer with non-Latin
  * characters) — a longer path fails before anything is sent. Ranges are <b>byte</b> ranges, and
  * reads are not snapshots: a
  * file that grows or shrinks between two reads is read as it is at each read.
@@ -257,10 +258,10 @@ public final class RemoteFile {
 	}
 
 	/**
-	 * Open the content (the whole file, or the configured range) as a stream, decoded as it
-	 * arrives: memory is bounded by one transfer block, not by the file, and there is no size cap.
-	 * The file is opened before this method returns, so a file that cannot be read fails here; a
-	 * failure midway is reported by {@code read()} (never as a silently short read).
+	 * Open the content (the whole file, or the configured range) as a stream, passed on as it
+	 * arrives: memory is bounded by one protocol response, not by the file, and there is no size
+	 * cap. The file is opened before this method returns, so a file that cannot be read fails here;
+	 * a failure midway is reported by {@code read()} (never as a silently short read).
 	 * <p>
 	 * <b>The stream must be closed</b> — use try-with-resources. It holds the client's connection
 	 * until it reaches its end or is closed; closing it early stops the remote read. Failures are
@@ -314,7 +315,7 @@ public final class RemoteFile {
 	 * {@link #maxBytes(long)} settings do not apply.
 	 * <p>
 	 * The timeout is a wall-clock deadline for the whole download, and the transfer runs at about
-	 * 1.5 MB/s: a large file needs a raised {@link #timeout(Duration)}. A deadline that fires while
+	 * 1.8 MB/s: a large file needs a raised {@link #timeout(Duration)}. A deadline that fires while
 	 * the verified file is being moved onto the destination lets that move complete: the download
 	 * then succeeds. Downloads are not resumable — one that fails or times out starts over.
 	 *

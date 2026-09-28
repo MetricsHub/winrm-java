@@ -310,7 +310,7 @@ there, or run the redirection in cmd.exe. PowerShell 7.4 and later keep the byte
 
 When the output is closed early — `... cat 'D:\logs\huge.log' | head` — `cat` stops the remote
 read instead of transferring the rest of the file for nobody, and exits with `74`. The transfer
-runs at about 1.5 MB/s (see [Read performance](files.html#read-performance)): logs and
+runs at about 2 MB/s (see [Read performance](files.html#read-performance)): logs and
 configuration files, not bulk data.
 
 ### `get`
@@ -319,8 +319,8 @@ configuration files, not bulk data.
 [digest-verified, atomic, and skipped when the local copy is already identical](file-transfers.html#downloading-a-file).
 Without a local path, the file is written in the current directory under its remote name; an
 existing directory receives it under its remote name too. Nothing is printed on success.
-`--timeout` is the deadline of the whole download: at about 1.5 MB/s, the default 60 seconds
-covers files up to about 80 MB — raise it for larger ones.
+`--timeout` is the deadline of the whole download: at about 1.8 MB/s, the default 60 seconds
+covers files up to about 100 MB — raise it for larger ones.
 
 ### Quoting remote paths
 
