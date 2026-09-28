@@ -101,6 +101,10 @@ public interface CommandCursor extends AutoCloseable {
 	 * connection: it alternates with {@link #next()}/{@link #poll(long)} on the caller's thread,
 	 * it never runs concurrently with them.
 	 * <p>
+	 * Input the command no longer reads (it exited, or closed its standard input, before the input
+	 * arrived) is discarded, and so is any input sent after it: this is not a failure, and the
+	 * output and exit code are still received.
+	 * <p>
 	 * The default implementation throws {@link UnsupportedOperationException}: only executors that
 	 * support command input (such as the built-in lightweight backend) implement this method.
 	 *

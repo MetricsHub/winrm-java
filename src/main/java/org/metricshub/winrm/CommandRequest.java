@@ -310,7 +310,9 @@ public final class CommandRequest {
 	 * Feed the given text to the command's standard input. The text is encoded with the same
 	 * charset used to decode the output (see {@link #charset(Charset)}) and delivered in full —
 	 * split into protocol-sized chunks when large — right after the command starts, ending with
-	 * the end-of-input mark so the remote stdin reaches EOF.
+	 * the end-of-input mark so the remote stdin reaches EOF. Input the command does not read (it
+	 * exits without reading it, or before it arrives) is discarded, and the command's output and
+	 * exit code are reported as usual.
 	 * <p>
 	 * Supplying input switches the remote stdin to <b>pipe semantics</b>
 	 * ({@code WINRS_CONSOLEMODE_STDIN=FALSE}): tools like {@code sort} or {@code findstr} consume

@@ -158,7 +158,8 @@ even when only the *output* is redirected (`... command hostname > result.txt`).
 undetectable case is a pipe whose producer has written nothing by the time the CLI starts: pass
 `-i`/`--stdin` to force forwarding there. The input is delivered in full before the output is
 read: piping a large input into a command that floods its output at the same time can deadlock
-both sides (the classic pipe deadlock), exactly as with `java.lang.Process`.
+both sides (the classic pipe deadlock), exactly as with `java.lang.Process`. Input the command
+does not read, because it exits first, is discarded, as with a local pipe.
 
 ### `ls`, `stat`, `cat`, `get`
 

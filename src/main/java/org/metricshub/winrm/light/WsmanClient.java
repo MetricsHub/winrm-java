@@ -58,6 +58,10 @@ final class WsmanClient implements AutoCloseable {
 	private static final String FAULT_OPERATION_TIMEOUT = "2150858793";
 	private static final String FAULT_SHELL_NOT_FOUND = "2150858843";
 
+	// A Send answered with this Windows error (ERROR_NO_DATA, "The pipe is being closed") found the
+	// command no longer reading its standard input: it exited, or closed its stdin, first.
+	private static final String FAULT_PIPE_CLOSING = "232";
+
 	// The WSMan service clamps an OperationTimeout below 500 ms UP to 500 ms (MS-WSMV; measured on
 	// Windows Server 2008 R2): a bounded Receive's "nothing yet" fault never arrives before this
 	// floor, however early the header asks for it.
@@ -617,6 +621,10 @@ final class WsmanClient implements AutoCloseable {
 		// caller bug and are rejected locally instead of drawing a server fault.
 		private boolean stdinEnded;
 
+		// A Send drew FAULT_PIPE_CLOSING: the command no longer reads its input, so nothing more is
+		// sent — like writes to a broken pipe, the rest of the input is discarded.
+		private boolean stdinRefused;
+
 		private RemoteCommand(final String commandId, final long operationTimeoutMs, final boolean failOnQuietTimeout) {
 			this.commandId = commandId;
 			this.operationTimeoutMs = operationTimeoutMs;
@@ -738,6 +746,10 @@ final class WsmanClient implements AutoCloseable {
 		 * A Send is an ordinary request under this handle's connection permit: it does not interleave
 		 * with the Receive loop, it alternates with it on the caller's thread — the same discipline
 		 * {@link java.lang.Process} pipes require.
+		 * <p>
+		 * A Send refused because the command no longer reads its input (fault 232: it exited, or
+		 * closed its stdin, before the input arrived) is not a failure: that input and any later one
+		 * are discarded, and the output and exit code are still received.
 		 *
 		 * @param data the input bytes (may be empty, e.g. for a pure end-of-input Send)
 		 * @param end whether this is the last input the command will get
@@ -754,24 +766,36 @@ final class WsmanClient implements AutoCloseable {
 				return;
 			}
 			int offset = 0;
-			do {
+			while (!stdinRefused) {
 				checkNotCancelled();
 				final int length = Math.min(Envelopes.MAX_STDIN_CHUNK, data.length - offset);
 				final boolean last = offset + length >= data.length;
 				final String base64 = length == 0
 					? ""
 					: Base64.getEncoder().encodeToString(Arrays.copyOfRange(data, offset, offset + length));
-				// The same streaming timeout translation as the Receive loop: a server staying
-				// quiet for a whole inactivity timeout is the documented TimeoutException, not a
-				// raw socket failure or fault.
-				exchange(
-					Envelopes.send(url, shellId, commandId, base64, end && last, operationTimeoutMs),
-					"Send",
-					operationTimeoutMs,
-					failOnQuietTimeout
-				);
+				try {
+					// The same streaming timeout translation as the Receive loop: a server staying
+					// quiet for a whole inactivity timeout is the documented TimeoutException, not a
+					// raw socket failure or fault.
+					exchange(
+						Envelopes.send(url, shellId, commandId, base64, end && last, operationTimeoutMs),
+						"Send",
+						operationTimeoutMs,
+						failOnQuietTimeout
+					);
+				} catch (final WinRMFaultException e) {
+					if (!FAULT_PIPE_CLOSING.equals(e.getFaultCode())) {
+						throw e;
+					}
+					// A race the caller cannot win, which must not hide the command's output and exit
+					// code: they are still to be received.
+					stdinRefused = true;
+				}
+				if (last) {
+					break;
+				}
 				offset += length;
-			} while (offset < data.length);
+			}
 			if (end) {
 				stdinEnded = true;
 			}
