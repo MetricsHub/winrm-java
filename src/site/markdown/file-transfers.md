@@ -243,7 +243,7 @@ reads need — PowerShell 2.0 or later in `FullLanguage` mode, and read access t
 
 The timeout of a download is a **wall-clock deadline for the whole transfer**: the client's
 timeout for `downloadFile(...)` (30 seconds by default), or `timeout(Duration)` on the request.
-A large file needs a raised timeout — at the speed below, 30 seconds is about 40 MB. When the
+A large file needs a raised timeout — at the speed below, 30 seconds is about 50 MB. When the
 deadline fires, the exception says how far the transfer got:
 
 ```text
@@ -257,9 +257,9 @@ place lets the move complete, and the download succeeds.
 
 ### Download performance
 
-Measured over HTTP with NTLM encryption, a download runs at about **1.35–1.45 MB/s**: 20 MiB in
-14.7 seconds on Windows Server 2022, 15.6 seconds on Windows Server 2008 R2 (PowerShell 2.0), and
-64 MiB in 46 seconds on 2022 — probe included. A small file costs under a second (two PowerShell
+Measured over HTTP with NTLM encryption, a download runs at about **1.7–1.9 MB/s**: 20 MiB in
+12 seconds on Windows Server 2022 and 2008 R2 (PowerShell 2.0), 13 seconds on 2019, and 64 MiB in
+35 seconds on 2022 — probe included. A small file costs under a second (two PowerShell
 invocations: the probe and the read), and skipping an identical copy about 0.4 seconds. The limit
 is on the host, in the way the WinRM service forwards a command's output — see
 [Read performance](files.html#read-performance).

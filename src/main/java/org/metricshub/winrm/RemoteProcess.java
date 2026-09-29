@@ -29,6 +29,7 @@ import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.nio.charset.Charset;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.concurrent.TimeoutException;
 import org.metricshub.winrm.exceptions.WinRMTimeoutException;
 import org.metricshub.winrm.exceptions.WindowsRemoteException;
@@ -98,6 +99,10 @@ public final class RemoteProcess implements AutoCloseable {
 	private final StringBuilder stdoutPending = new StringBuilder();
 	private final StringBuilder stderrPending = new StringBuilder();
 
+	// Undecoded stdout chunks not read yet, once readStdoutChunk() took stdout as raw bytes: null
+	// while stdout is decoded text.
+	private ArrayDeque<byte[]> stdoutChunks;
+
 	// Written input that has not been flushed to the host yet.
 	private final StringBuilder stdinPending = new StringBuilder();
 
@@ -164,6 +169,26 @@ public final class RemoteProcess implements AutoCloseable {
 	 */
 	public BufferedReader stderr() {
 		return stderr;
+	}
+
+	/**
+	 * Read the next chunk of the standard output as raw bytes, bypassing the charset decoder: for
+	 * output that is not text, like the content of a remote file (see {@link RemoteFiles}). The
+	 * first call switches stdout to raw bytes for good, so make it before anything reads or waits
+	 * for output; the {@link #stdout()} reader then stays empty.
+	 *
+	 * @return the bytes as they arrived, never empty, or {@code null} at the end of the output
+	 * @throws WinRMTimeoutException when the command stays silent for a whole inactivity timeout
+	 * @throws org.metricshub.winrm.exceptions.WinRMClientException for any other failure
+	 */
+	synchronized byte[] readStdoutChunk() {
+		if (stdoutChunks == null) {
+			stdoutChunks = new ArrayDeque<>();
+		}
+		while (stdoutChunks.isEmpty() && !finished) {
+			fetchOnce();
+		}
+		return stdoutChunks.poll();
 	}
 
 	/**
@@ -410,7 +435,11 @@ public final class RemoteProcess implements AutoCloseable {
 			stdoutPending.append(stdoutDecoder.finish());
 			stderrPending.append(stderrDecoder.finish());
 		} else {
-			stdoutPending.append(stdoutDecoder.decode(chunk.stdout()));
+			if (stdoutChunks == null) {
+				stdoutPending.append(stdoutDecoder.decode(chunk.stdout()));
+			} else if (chunk.stdout().length > 0) {
+				stdoutChunks.add(chunk.stdout());
+			}
 			stderrPending.append(stderrDecoder.decode(chunk.stderr()));
 		}
 	}

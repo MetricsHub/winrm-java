@@ -64,9 +64,9 @@ import org.metricshub.winrm.exceptions.WinRMTimeoutException;
 import org.metricshub.winrm.light.FakeWsmanServer;
 
 /**
- * Client-side tests of {@link RemoteFile} against {@link FakeWsmanServer}: the scripted
- * base64-line output is decoded incrementally, exit codes become the documented exceptions, and
- * the request settings reach the script. The scripts themselves run in
+ * Client-side tests of {@link RemoteFile} against {@link FakeWsmanServer}: the scripted raw
+ * output is passed on as it arrives, exit codes become the documented exceptions, and the request
+ * settings reach the script. The scripts themselves run in
  * {@link RemoteFilesScriptTest}.
  */
 class RemoteFileTest {
@@ -102,18 +102,22 @@ class RemoteFileTest {
 		return Base64.getEncoder().encodeToString(bytes);
 	}
 
-	private static String stdout(final String text) {
-		return stream("stdout", COMMAND_ID, text.getBytes(StandardCharsets.US_ASCII));
+	private static String stdout(final byte[] bytes) {
+		return stream("stdout", COMMAND_ID, bytes);
+	}
+
+	private static byte[] ascii(final String text) {
+		return text.getBytes(StandardCharsets.US_ASCII);
 	}
 
 	/** Script a whole read: shell creation, command, the given Receive chunks (the last one completes), Signal. */
-	private void enqueueRead(final int exitCode, final String stderr, final String... chunks) {
+	private void enqueueRead(final int exitCode, final String stderr, final byte[]... chunks) {
 		server.enqueue(200, envelope(resourceCreated("SHELL-1")));
 		enqueueCommand(exitCode, stderr, chunks);
 	}
 
 	/** Script a command on the existing shell: command, the given Receive chunks (the last one completes), Signal. */
-	private void enqueueCommand(final int exitCode, final String stderr, final String... chunks) {
+	private void enqueueCommand(final int exitCode, final String stderr, final byte[]... chunks) {
 		server.enqueue(200, envelope(commandResponse(COMMAND_ID)));
 		for (int i = 0; i < chunks.length; i++) {
 			final boolean last = i == chunks.length - 1;
@@ -144,21 +148,18 @@ class RemoteFileTest {
 	}
 
 	/** The probe output announcing the given content: its size (8 bytes, little-endian), then its SHA-256 digest. */
-	private static String probe(final byte[] content) throws Exception {
+	private static byte[] probe(final byte[] content) throws Exception {
 		return probe(content.length, content);
 	}
 
 	/** The probe output announcing the given size and the SHA-256 digest of the given content. */
-	private static String probe(final long size, final byte[] content) throws Exception {
-		return b64(
-			ByteBuffer
-				.allocate(RemoteFiles.PROBE_LENGTH)
-				.order(ByteOrder.LITTLE_ENDIAN)
-				.putLong(size)
-				.put(MessageDigest.getInstance("SHA-256").digest(content))
-				.array()
-		) +
-			"\r\n";
+	private static byte[] probe(final long size, final byte[] content) throws Exception {
+		return ByteBuffer
+			.allocate(RemoteFiles.PROBE_LENGTH)
+			.order(ByteOrder.LITTLE_ENDIAN)
+			.putLong(size)
+			.put(MessageDigest.getInstance("SHA-256").digest(content))
+			.array();
 	}
 
 	/** The files in the directory, sorted. */
@@ -169,15 +170,14 @@ class RemoteFileTest {
 	}
 
 	@Test
-	void readBytesDecodesLinesSplitAcrossReceiveChunks() {
+	void readBytesJoinsTheChunksWhereverTheyAreCut() {
 		final byte[] content = new byte[300];
 		for (int i = 0; i < content.length; i++) {
 			content[i] = (byte) i;
 		}
-		final String line1 = b64(Arrays.copyOfRange(content, 0, 150));
-		final String line2 = b64(Arrays.copyOfRange(content, 150, 300));
-		// The first line is cut in the middle by the protocol chunking.
-		enqueueRead(0, null, line1.substring(0, 17), line1.substring(17) + "\r\n" + line2 + "\r\n");
+		// One block written by the host, cut in the middle by the protocol chunking, with an empty
+		// Receive in between.
+		enqueueRead(0, null, Arrays.copyOfRange(content, 0, 17), new byte[0], Arrays.copyOfRange(content, 17, 300));
 
 		try (WinRMClient client = client()) {
 			assertArrayEquals(content, client.file(PATH).readBytes());
@@ -191,7 +191,7 @@ class RemoteFileTest {
 
 	@Test
 	void rangeSettingsReachTheScript() {
-		enqueueRead(0, null, b64("tail".getBytes(StandardCharsets.US_ASCII)) + "\r\n");
+		enqueueRead(0, null, ascii("tail"));
 		try (WinRMClient client = client()) {
 			assertEquals("tail", client.file(PATH).offset(-8192).length(1024).readText(StandardCharsets.US_ASCII));
 		}
@@ -200,7 +200,7 @@ class RemoteFileTest {
 
 	@Test
 	void openStreamHasNoCapAndReadsToTheEnd() throws Exception {
-		enqueueRead(0, null, b64(new byte[] { 1, 2, 3 }) + "\r\n", b64(new byte[] { 4, 5 }) + "\r\n");
+		enqueueRead(0, null, new byte[] { 1, 2, 3 }, new byte[] { 4, 5 });
 		try (WinRMClient client = client(); InputStream in = client.file(PATH).openStream()) {
 			assertArrayEquals(new byte[] { 1, 2, 3, 4, 5 }, in.readAllBytes());
 		}
@@ -208,17 +208,16 @@ class RemoteFileTest {
 	}
 
 	@Test
-	void readTextKeepsTheBomAndOpenReaderDecodesACharacterSplitAcrossLines() throws Exception {
-		final byte[] bom = { (byte) 0xEF, (byte) 0xBB, (byte) 0xBF };
-		enqueueRead(0, null, b64(bom) + "\r\n" + b64("é".getBytes(StandardCharsets.UTF_8)) + "\r\n");
+	void readTextKeepsTheBomAndOpenReaderDecodesACharacterSplitAcrossChunks() throws Exception {
+		enqueueRead(0, null, new byte[] { (byte) 0xEF, (byte) 0xBB, (byte) 0xBF, (byte) 0xC3, (byte) 0xA9 });
 		try (WinRMClient client = client()) {
 			assertEquals("\uFEFFé", client.file(PATH).readText(StandardCharsets.UTF_8));
 		}
 
-		// "é" is C3 A9: its two bytes arrive on two separate lines (two transfer blocks).
+		// "é" is C3 A9: its two bytes arrive in two separate chunks.
 		server.close();
 		server = new FakeWsmanServer(DOMAIN, USER, PASSWORD);
-		enqueueRead(0, null, b64(new byte[] { 'a', (byte) 0xC3 }) + "\r\n", b64(new byte[] { (byte) 0xA9, 'b' }) + "\r\n");
+		enqueueRead(0, null, new byte[] { 'a', (byte) 0xC3 }, new byte[] { (byte) 0xA9, 'b' });
 		try (WinRMClient client = client(); BufferedReader reader = client.file(PATH).openReader(StandardCharsets.UTF_8)) {
 			assertEquals("aéb", reader.readLine());
 		}
@@ -226,7 +225,7 @@ class RemoteFileTest {
 
 	@Test
 	void theSizeCapIsSentToTheHostAndEnforced() {
-		enqueueRead(0, null, b64(new byte[] { 1, 2, 3, 4, 5 }) + "\r\n");
+		enqueueRead(0, null, new byte[] { 1, 2, 3, 4, 5 });
 		try (WinRMClient client = client()) {
 			final WinRMClientException e = assertThrows(
 				WinRMClientException.class,
@@ -239,7 +238,7 @@ class RemoteFileTest {
 
 	@Test
 	void aMissingFileFailsWhenTheStreamIsOpened() {
-		enqueueRead(RemoteFiles.EXIT_NOT_FOUND, "Could not find file", "");
+		enqueueRead(RemoteFiles.EXIT_NOT_FOUND, "Could not find file", new byte[0]);
 		try (WinRMClient client = client()) {
 			final RemoteFile file = client.file(PATH);
 			final WinRMClientException e = assertThrows(WinRMClientException.class, file::openStream);
@@ -262,7 +261,7 @@ class RemoteFileTest {
 	void anExactLengthReadStillChecksTheExitCode() {
 		// The host sends exactly the requested bytes, then fails (e.g. while closing the file):
 		// readBytes() must drain to the end of the output instead of returning a full buffer.
-		enqueueRead(1, "The device is not ready", b64(new byte[] { 1, 2, 3 }) + "\r\n");
+		enqueueRead(1, "The device is not ready", new byte[] { 1, 2, 3 });
 		try (WinRMClient client = client()) {
 			final RemoteFile file = client.file(PATH).length(3);
 			final WinRMClientException e = assertThrows(WinRMClientException.class, file::readBytes);
@@ -273,18 +272,18 @@ class RemoteFileTest {
 	@Test
 	void aPathTooLongForTheCommandLineIsRefusedBeforeAnythingIsSent() {
 		try (WinRMClient client = client()) {
-			final RemoteFile file = client.file("C:\\" + "a".repeat(1500));
+			final RemoteFile file = client.file("C:\\" + "a".repeat(1550));
 			final WinRMClientException e = assertThrows(WinRMClientException.class, file::readBytes);
 			assertTrue(e.getMessage().contains("too long"), e.getMessage());
 			// Just under the limit still fits: the script is not uploaded as a file.
-			assertTrue(CommandRequest.encodePowerShell(RemoteFiles.readScript("C:\\" + "a".repeat(1450), -8192, 1)) != null);
+			assertTrue(CommandRequest.encodePowerShell(RemoteFiles.readScript("C:\\" + "a".repeat(1500), -8192, 1)) != null);
 		}
 		assertEquals(0, server.decryptedRequests().size());
 	}
 
 	@Test
 	void aFailureMidwayIsNotASilentlyShortRead() throws Exception {
-		enqueueRead(1, "The device is not ready", b64(new byte[] { 1, 2, 3 }) + "\r\n");
+		enqueueRead(1, "The device is not ready", new byte[] { 1, 2, 3 });
 		try (WinRMClient client = client(); InputStream in = client.file(PATH).openStream()) {
 			assertEquals(1, in.read());
 			final WinRMClientException e = assertThrows(WinRMClientException.class, in::readAllBytes);
@@ -293,17 +292,8 @@ class RemoteFileTest {
 	}
 
 	@Test
-	void unexpectedOutputIsReported() {
-		enqueueRead(0, null, "WARNING: not base64!\r\n");
-		try (WinRMClient client = client()) {
-			final WinRMClientException e = assertThrows(WinRMClientException.class, () -> client.file(PATH).readBytes());
-			assertTrue(e.getMessage().contains("Unexpected output"), e.getMessage());
-		}
-	}
-
-	@Test
 	void digestIsLowercaseHex() {
-		enqueueRead(0, null, b64(new byte[] { (byte) 0xAB, 0x01, (byte) 0xFF }) + "\r\n");
+		enqueueRead(0, null, new byte[] { (byte) 0xAB, 0x01, (byte) 0xFF });
 		try (WinRMClient client = client()) {
 			assertEquals("ab01ff", client.file(PATH).digest("SHA256"));
 		}
@@ -343,7 +333,7 @@ class RemoteFileTest {
 				500,
 				fault("2150859174", "The maximum number of concurrent operations for this user has been exceeded.")
 			);
-		enqueueCommand(0, null, b64("ok".getBytes(StandardCharsets.US_ASCII)) + "\r\n");
+		enqueueCommand(0, null, ascii("ok"));
 		try (WinRMClient client = client()) {
 			assertEquals("ok", client.file(PATH).readText(StandardCharsets.US_ASCII));
 		}
@@ -374,7 +364,7 @@ class RemoteFileTest {
 		final byte[] content = "the new content".getBytes(StandardCharsets.US_ASCII);
 		final Path local = Files.write(directory.resolve("copy.bin"), "previous".getBytes(StandardCharsets.US_ASCII));
 		enqueueRead(0, null, probe(content));
-		enqueueCommand(0, null, b64(content) + "\r\n");
+		enqueueCommand(0, null, content);
 		try (WinRMClient client = client()) {
 			assertEquals(content.length, client.downloadFile(PATH, local));
 		}
@@ -390,7 +380,7 @@ class RemoteFileTest {
 		Files.setPosixFilePermissions(local, ownerOnly);
 		final byte[] content = "password=new".getBytes(StandardCharsets.US_ASCII);
 		enqueueRead(0, null, probe(content));
-		enqueueCommand(0, null, b64(content) + "\r\n");
+		enqueueCommand(0, null, content);
 		try (WinRMClient client = client()) {
 			client.downloadFile(PATH, local);
 		}
@@ -414,7 +404,7 @@ class RemoteFileTest {
 	void aSizeMismatchFailsEvenWhenTheDigestMatches(@TempDir final Path directory) throws Exception {
 		final byte[] content = { 1, 2, 3 };
 		enqueueRead(0, null, probe(999, content));
-		enqueueCommand(0, null, b64(content) + "\r\n");
+		enqueueCommand(0, null, content);
 		final Path local = directory.resolve("copy.bin");
 		try (WinRMClient client = client()) {
 			final RemoteFile file = client.file(PATH);
@@ -431,7 +421,7 @@ class RemoteFileTest {
 		final byte[] content = { 1, 2, 3 };
 		final Path local = directory.resolve("a".repeat(240) + ".bin");
 		enqueueRead(0, null, probe(content));
-		enqueueCommand(0, null, b64(content) + "\r\n");
+		enqueueCommand(0, null, content);
 		try (WinRMClient client = client()) {
 			assertEquals(3, client.downloadFile(PATH, local));
 		}
@@ -461,12 +451,7 @@ class RemoteFileTest {
 			content[i] = (byte) i;
 		}
 		enqueueRead(0, null, probe(content));
-		enqueueCommand(
-			0,
-			null,
-			b64(Arrays.copyOfRange(content, 0, 150)) + "\r\n",
-			b64(Arrays.copyOfRange(content, 150, 300)) + "\r\n"
-		);
+		enqueueCommand(0, null, Arrays.copyOfRange(content, 0, 150), Arrays.copyOfRange(content, 150, 300));
 		final Path local = directory.resolve("copy.bin");
 		try (WinRMClient client = client()) {
 			// The range settings do not apply: the whole file is downloaded.
@@ -496,7 +481,7 @@ class RemoteFileTest {
 	void aDirectoryDestinationReceivesTheRemoteFileName(@TempDir final Path directory) throws Exception {
 		final byte[] content = { 1, 2, 3 };
 		enqueueRead(0, null, probe(content));
-		enqueueCommand(0, null, b64(content) + "\r\n");
+		enqueueCommand(0, null, content);
 		try (WinRMClient client = client()) {
 			assertEquals(3, client.downloadFile(PATH, directory));
 		}
@@ -507,7 +492,7 @@ class RemoteFileTest {
 	void aDigestMismatchFailsWithoutWritingTheDestination(@TempDir final Path directory) throws Exception {
 		// The file changed between the probe and the read.
 		enqueueRead(0, null, probe("expected".getBytes(StandardCharsets.US_ASCII)));
-		enqueueCommand(0, null, b64("modified".getBytes(StandardCharsets.US_ASCII)) + "\r\n");
+		enqueueCommand(0, null, ascii("modified"));
 		final Path local = directory.resolve("copy.bin");
 		try (WinRMClient client = client()) {
 			final RemoteFile file = client.file(PATH);
@@ -519,7 +504,7 @@ class RemoteFileTest {
 
 	@Test
 	void aMalformedProbeIsReported(@TempDir final Path directory) {
-		enqueueRead(0, null, b64(new byte[] { 1, 2, 3 }) + "\r\n");
+		enqueueRead(0, null, new byte[] { 1, 2, 3 });
 		try (WinRMClient client = client()) {
 			final RemoteFile file = client.file(PATH);
 			final WinRMClientException e = assertThrows(WinRMClientException.class, () -> file.downloadTo(directory));
@@ -548,10 +533,10 @@ class RemoteFileTest {
 		enqueueRead(0, null, probe(content));
 		server
 			.enqueue(200, envelope(commandResponse(COMMAND_ID)))
-			.enqueue(200, envelope(receiveResponse(stdout(b64(new byte[600]) + "\r\n"), null)))
+			.enqueue(200, envelope(receiveResponse(stdout(new byte[600]), null)))
 			.enqueueDelayed(
 				200,
-				envelope(receiveResponse(stdout(b64(new byte[400]) + "\r\n"), done(COMMAND_ID, 0))),
+				envelope(receiveResponse(stdout(new byte[400]), done(COMMAND_ID, 0))),
 				4_000
 			)
 			.enqueue(200, envelope(signalResponse()));

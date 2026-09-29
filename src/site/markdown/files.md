@@ -7,7 +7,7 @@ description: How the WinRM Java Client reads files and lists directories on the 
 
 WinRM has no file-access operation of its own (nothing like SFTP's `READ`), so the client reads
 remote files and lists directories **through the WinRM command shell**: a small PowerShell script
-does the work on the host and writes the result in an encoding-proof form, and the client decodes
+does the work on the host and writes the result in an encoding-proof form, and the client reads
 it as it arrives. No SMB, no extra port, no share. This is the reverse direction of
 [File Transfers](file-transfers.html). The standalone jar exposes it as the `ls`, `stat`, `cat`,
 and `get` subcommands — see the [Command-Line Client](cli.html#remote-files) manual.
@@ -70,11 +70,11 @@ try (BufferedReader reader = client.file("D:\\logs\\huge.log").openReader(Standa
 }
 ```
 
-The stream decodes the content block by block as it arrives (48 KiB per block): memory stays
-bounded whatever the file size. Like a [`RemoteProcess`](commands.html), **it must be closed** —
-it holds the client's connection until it reaches its end or is closed, and closing it early stops
-the remote read. The file is opened before `openStream()` returns, so a missing file fails there;
-a failure midway is reported by `read()`, never as a silently short read.
+The stream passes the content on as it arrives: memory stays bounded whatever the file size.
+Like a [`RemoteProcess`](commands.html), **it must be closed** — it holds the client's connection
+until it reaches its end or is closed, and closing it early stops the remote read. The file is
+opened before `openStream()` returns, so a missing file fails there; a failure midway is reported
+by `read()`, never as a silently short read.
 
 ## Downloading to a local file
 
@@ -115,10 +115,12 @@ operation. See [Timeouts and Errors](timeouts-and-errors.html).
 * The host needs **PowerShell 2.0 or later in `FullLanguage` mode** (Windows Server 2008 R2 and
   later ship it). When AppLocker or WDAC puts PowerShell in Constrained Language Mode, the .NET
   calls the scripts rely on are blocked: remote file access is then not available.
-* Non-ASCII paths and content are safe: the path travels base64-encoded (UTF-8) inside the script
-  and the content comes back base64-encoded, so neither depends on the remote console code page.
+* Non-ASCII paths and binary content are safe: the path travels base64-encoded (UTF-8) inside the
+  script, and the content comes back as the file's raw bytes, written straight to the standard
+  output stream, past any text conversion. Neither depends on the remote console code page: every
+  byte value arrives as stored, verified on Windows Server 2008 R2 (PowerShell 2.0), 2019 and 2022.
 * Remote file access never writes anything on the host: its scripts travel on the command line,
-  which limits the path to about **1,450 characters** for a read, **1,150** for `info()`, and
+  which limits the path to about **1,500 characters** for a read, **1,150** for `info()`, and
   **450** for `list()`, whose walker script is the largest (roughly half as many with accented
   letters, a third with CJK characters) — all above the classic 260-character `MAX_PATH`. A
   longer path fails with a `WinRMClientException` before anything is sent.
@@ -126,17 +128,18 @@ operation. See [Timeouts and Errors](timeouts-and-errors.html).
 ## Read performance
 
 The mechanism is designed for **configuration files, logs and small data files — not bulk data**.
-Measured over HTTP with NTLM encryption, `openStream()` reads about **1.4–1.5 MB/s**: a 20 MiB
-file in 14–15 seconds, on Windows Server 2008 R2 (PowerShell 2.0), 2019 and 2022 (PowerShell 5.1)
-alike. A small file costs about a second, mostly the PowerShell startup. For gigabytes, use SMB.
+Measured over HTTP with NTLM encryption, `openStream()` reads about **1.8–2.0 MB/s**: a 20 MiB
+file in 10.6–12 seconds, on Windows Server 2008 R2 (PowerShell 2.0), 2019 and 2022
+(PowerShell 5.1) alike. A small file costs about a second, mostly the PowerShell startup. For
+gigabytes, use SMB.
 
 The limit is on the host, not in the network or the client: the WinRM service reads a command's
 output pipe itself, **at most 32 KiB per read and about 60 reads per second** per output stream —
-about 2 MB/s of output whatever the command. The reader is shaped for it: each block of the file
-travels as one 65,533-byte base64 line that fills exactly two reads (a larger 77,825-byte line
-needing three reads was 20–25% slower). Neither the client's `MaxEnvelopeSize` nor the host's
-`MaxEnvelopeSizekb` changes the limit — raising them only makes each response larger and
-proportionally slower to come.
+about 2 MB/s of output whatever the command. The reader runs at that limit: the host writes the
+file's raw bytes 64 KiB at a time, so every read is a full one and carries nothing but content
+(base64 text would carry only 3 bytes of the file in 4, and measured a third slower). Neither the
+client's `MaxEnvelopeSize` nor the host's `MaxEnvelopeSizekb` changes the limit — raising them
+only makes each response larger and proportionally slower to come.
 
 The same limit applies to any command output: a command that writes its output in small pieces —
 line by line, like `Write-Output` or `type` — gets only what accumulated in the 4 KiB pipe at each

@@ -803,12 +803,9 @@ class WinRmCliTest {
 		System
 			.arraycopy(new byte[]
 			{ '\r', '\n', '\n', '\r', (byte) 0xC3, 0x28, (byte) 0xFF, (byte) 0xFE, 0x1A }, 0, content, 256, 9);
-		final String lines = b64(Arrays.copyOfRange(content, 0, 200)) + "\r\n"
-			+ b64(Arrays.copyOfRange(content, 200, content.length)) +
-			"\r\n";
 		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
 			enqueueShellCreation(server);
-			enqueueScript(server, 0, lines.substring(0, 100), lines.substring(100));
+			enqueueScript(server, 0, Arrays.copyOfRange(content, 0, 100), Arrays.copyOfRange(content, 100, content.length));
 			enqueueShellDeletion(server);
 
 			final Invocation invocation = invokeAgainst(server, "cat", "C:\\Windows\\Temp\\collect.bin");
@@ -825,7 +822,7 @@ class WinRmCliTest {
 	void catReadsARangeAndDecodesTextWithTheGivenCharset() throws Exception {
 		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
 			enqueueShellCreation(server);
-			enqueueScript(server, 0, b64(new byte[] { 'c', 'a', 'f', (byte) 0xE9 }) + "\r\n");
+			enqueueScript(server, 0, new byte[] { 'c', 'a', 'f', (byte) 0xE9 });
 			enqueueShellDeletion(server);
 
 			final Invocation invocation = invokeAgainst(
@@ -856,8 +853,8 @@ class WinRmCliTest {
 				.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.commandResponse(COMMAND_ID)))
 				.enqueue(
 					200,
-					FakeWsmanResponses.envelope(FakeWsmanResponses.receiveResponse(stdoutStream(b64(new byte[]
-					{ 1, 2, 3 }) + "\r\n"), null))
+					FakeWsmanResponses.envelope(FakeWsmanResponses.receiveResponse(stdoutStream(new byte[]
+					{ 1, 2, 3 }), null))
 				)
 				// ...when the closed output makes the CLI stop it: the terminate Signal, which a real
 				// host answers only when its OperationTimeout expires, the read being blocked writing
@@ -893,7 +890,7 @@ class WinRmCliTest {
 		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
 			enqueueShellCreation(server);
 			enqueueScript(server, 0, probe(content));
-			enqueueScript(server, 0, b64(content) + "\r\n");
+			enqueueScript(server, 0, content);
 			enqueueShellDeletion(server);
 
 			final Invocation invocation = invokeAgainst(
@@ -962,27 +959,33 @@ class WinRmCliTest {
 	}
 
 	/** The probe output of a download: the size (8 bytes, little-endian), then the SHA-256 digest. */
-	private static String probe(final byte[] content) throws Exception {
-		return b64(
-			ByteBuffer
-				.allocate(40)
-				.order(ByteOrder.LITTLE_ENDIAN)
-				.putLong(content.length)
-				.put(MessageDigest.getInstance("SHA-256").digest(content))
-				.array()
-		) +
-			"\r\n";
+	private static byte[] probe(final byte[] content) throws Exception {
+		return ByteBuffer
+			.allocate(40)
+			.order(ByteOrder.LITTLE_ENDIAN)
+			.putLong(content.length)
+			.put(MessageDigest.getInstance("SHA-256").digest(content))
+			.array();
 	}
 
-	private static String stdoutStream(final String text) {
-		return FakeWsmanResponses.stream("stdout", COMMAND_ID, text.getBytes(StandardCharsets.US_ASCII));
+	private static String stdoutStream(final byte[] bytes) {
+		return FakeWsmanResponses.stream("stdout", COMMAND_ID, bytes);
+	}
+
+	/** {@link #enqueueScript(FakeWsmanServer, int, byte[]...)} for a script writing text: the metadata records. */
+	private static void enqueueScript(final FakeWsmanServer server, final int exitCode, final String... chunks) {
+		enqueueScript(
+			server,
+			exitCode,
+			Arrays.stream(chunks).map(chunk -> chunk.getBytes(StandardCharsets.US_ASCII)).toArray(byte[][]::new)
+		);
 	}
 
 	/**
 	 * Script one remote file script on the existing shell: the command, one Receive per stdout
 	 * chunk (the last one completes with the exit code), and the Signal ending it.
 	 */
-	private static void enqueueScript(final FakeWsmanServer server, final int exitCode, final String... chunks) {
+	private static void enqueueScript(final FakeWsmanServer server, final int exitCode, final byte[]... chunks) {
 		server.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.commandResponse(COMMAND_ID)));
 		for (int i = 0; i < chunks.length; i++) {
 			final boolean last = i == chunks.length - 1;

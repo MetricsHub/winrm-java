@@ -38,15 +38,17 @@ import org.metricshub.winrm.exceptions.WinRMTimeoutException;
 
 /**
  * The remote file access primitive: small PowerShell scripts that open a remote file and write
- * what the caller asked for as <b>base64 lines</b> on stdout, and the {@link InputStream} that
- * decodes those lines as the output chunks arrive. The metadata scripts ({@link #infoScript},
- * {@link #listScript}) write one ASCII record per entry instead, parsed by {@link #parseEntry}
- * and {@link #parseInaccessible}: plain integers, and only the path base64-encoded.
+ * what the caller asked for (its bytes, its digest) <b>raw</b> on stdout, and the
+ * {@link InputStream} that passes those bytes on as the output chunks arrive. The metadata scripts
+ * ({@link #infoScript}, {@link #listScript}) write one ASCII record per entry instead, parsed by
+ * {@link #parseEntry} and {@link #parseInaccessible}: plain integers, and only the path
+ * base64-encoded.
  * <p>
- * Base64 is what makes a text console a binary-safe channel: every byte value survives, and the
- * output is pure ASCII, so recovering the exact bytes never depends on the remote console code
- * page. Each line is an independent base64 block, decoded on its own. The caller-supplied path is
- * embedded base64-encoded too (UTF-8), so no path ever needs quoting or escaping.
+ * The bytes are written to {@code [Console]::OpenStandardOutput()}, a stream no text writer, code
+ * page or byte order mark touches, and the WinRM service forwards a command's stdout as it is:
+ * every byte value arrives as written (verified on Windows Server 2008 R2 with PowerShell 2.0,
+ * 2019 and 2022). The caller-supplied path is embedded base64-encoded (UTF-8), so no path ever
+ * needs quoting or escaping.
  * <p>
  * Failures are reported by the script's exit code, checked when the output ends (see the
  * {@code EXIT_*} constants), and turned into a {@link WinRMClientException} naming the cause.
@@ -77,14 +79,11 @@ final class RemoteFiles {
 	static final int EXIT_COMMAND_NOT_FOUND = 9009;
 
 	/**
-	 * Bytes read and written per base64 line: 49,149, a multiple of 3 so a full block encodes
-	 * without padding, into 65,532 characters — with the newline, a 65,533-byte line that fits in
-	 * exactly two of the WinRM service's output reads. The service's shell plugin reads a
-	 * command's stdout pipe with at most one 32 KiB read per timer tick (64 per second at the
-	 * default 15.625 ms), so each line should fill whole reads: a 57 KiB block (a 77,825-byte
-	 * line) needs three, and is measurably slower.
+	 * Bytes read and written per block: 64 KiB, exactly two of the WinRM service's output reads.
+	 * The service's shell plugin reads a command's stdout pipe with at most one 32 KiB read per
+	 * timer tick (64 per second at the default 15.625 ms), so each write should fill whole reads.
 	 */
-	static final int BLOCK_SIZE = 49_149;
+	static final int BLOCK_SIZE = 64 * 1024;
 
 	/**
 	 * The hash algorithms {@link #digestScript(String, String)} accepts: the names .NET's
@@ -193,12 +192,12 @@ final class RemoteFiles {
 	/**
 	 * Read a byte range: resolve a negative offset from the size of the <i>open</i> stream (so a
 	 * growing log is tailed from its current end), seek, and write at most {@code length} bytes
-	 * ({@code -1}: to the end) as one base64 line per block. Seeking past the end is legal and
-	 * reads nothing. {@code %d} are the offset, the length and the block size.
+	 * ({@code -1}: to the end), block by block. Seeking past the end is legal and reads nothing.
+	 * {@code %d} are the offset, the length and the block size.
 	 * <p>
-	 * Each line goes to the raw stdout stream as ONE write: the WinRM service reads the pipe at
+	 * Each block goes to the raw stdout stream as ONE write: the WinRM service reads the pipe at
 	 * most once per timer tick, taking only what is in the pipe, and {@code [Console]::Out} (an
-	 * auto-flushing writer with a small buffer) cuts a line into 256-byte writes that leave each
+	 * auto-flushing writer with a small buffer) cuts its output into 256-byte writes that leave each
 	 * read with about 4 KiB — 5 to 6 times slower (measured on Windows 2008 R2 and 2022).
 	 */
 	private static final String READ_RANGE = "try{$n=[long]%d;$l=[long]%d;" +
@@ -206,24 +205,23 @@ final class RemoteFiles {
 		"$f.Position=$n;$b=New-Object byte[] %d;$o=[Console]::OpenStandardOutput();" +
 		"while($l -ne 0){$c=$b.Length;if($l -gt 0 -and $l -lt $c){$c=[int]$l};" +
 		"$r=$f.Read($b,0,$c);if($r -le 0){break};" +
-		"$a=[Text.Encoding]::ASCII.GetBytes([Convert]::ToBase64String($b,0,$r)+\"`n\");" +
-		"$o.Write($a,0,$a.Length);if($l -gt 0){$l-=$r}};" +
+		"$o.Write($b,0,$r);if($l -gt 0){$l-=$r}};" +
 		"$o.Flush()}catch{fail $_.Exception}finally{$f.Close()}";
 
-	/** Hash the whole file and write the raw digest as one base64 line. {@code %s} is the algorithm. */
+	/** Hash the whole file and write the raw digest. {@code %s} is the algorithm. */
 	private static final String DIGEST = "try{$h=[Security.Cryptography.HashAlgorithm]::Create('%s');" +
-		"[Console]::Out.WriteLine([Convert]::ToBase64String($h.ComputeHash($f)))}catch{fail $_.Exception}finally{$f.Close()}";
+		"$y=$h.ComputeHash($f);$o=[Console]::OpenStandardOutput();$o.Write($y,0,$y.Length)}" +
+		"catch{fail $_.Exception}finally{$f.Close()}";
 
 	/**
-	 * What a download is verified against, as one base64 line of {@link #PROBE_LENGTH} bytes: the
-	 * number of bytes hashed (8 bytes, little-endian), then their SHA-256 digest. The count is the
-	 * stream position after hashing, not the file length read beforehand, so both describe the same
-	 * bytes even when the file changes during the probe.
+	 * What a download is verified against, {@link #PROBE_LENGTH} raw bytes: the number of bytes
+	 * hashed (8 bytes, little-endian), then their SHA-256 digest. The count is the stream position
+	 * after hashing, not the file length read beforehand, so both describe the same bytes even when
+	 * the file changes during the probe.
 	 */
-	private static final String PROBE = "try{$h=[Security.Cryptography.HashAlgorithm]::Create('SHA256');$d=$h.ComputeHash($f);"
-		+
-		"[Console]::Out.WriteLine([Convert]::ToBase64String([byte[]]([BitConverter]::GetBytes($f.Position)+$d)))}" +
-		"catch{fail $_.Exception}finally{$f.Close()}";
+	private static final String PROBE = "try{$h=[Security.Cryptography.HashAlgorithm]::Create('SHA256');" +
+		"$d=$h.ComputeHash($f);$y=[byte[]]([BitConverter]::GetBytes($f.Position)+$d);" +
+		"$o=[Console]::OpenStandardOutput();$o.Write($y,0,$y.Length)}catch{fail $_.Exception}finally{$f.Close()}";
 
 	/** The length of the {@link #probeScript(String)} output: an 8-byte size and a 32-byte SHA-256 digest. */
 	static final int PROBE_LENGTH = 40;
@@ -432,19 +430,19 @@ final class RemoteFiles {
 	}
 
 	/**
-	 * Start the script and return the stream of the bytes it writes. The first line is fetched
+	 * Start the script and return the stream of the bytes it writes. The first bytes are fetched
 	 * before returning, so a file that cannot be opened fails here, not on the first read.
 	 *
 	 * @param client the client to run the script on
 	 * @param path the remote file, for the error messages
-	 * @param script the script, from {@link #readScript} or {@link #digestScript}
+	 * @param script the script, from {@link #readScript}, {@link #digestScript} or {@link #probeScript}
 	 * @param timeout the inactivity timeout of the stream
-	 * @return the decoded stream; it must be closed
+	 * @return the stream; it must be closed
 	 */
 	static InputStream open(final WinRMClient client, final String path, final String script, final Duration timeout) {
 		final RemoteProcess process = start(client, path, script, timeout);
 		try {
-			return new DecodingStream(process, path, client.hostname());
+			return new ContentStream(process, path, client.hostname());
 		} catch (final RuntimeException e) {
 			process.close();
 			throw e;
@@ -641,23 +639,21 @@ final class RemoteFiles {
 	}
 
 	/**
-	 * The bytes a script writes, decoded line by line as the output arrives: memory is bounded by
-	 * one line, not by the file. The exit code is checked when the output ends, so a failure
-	 * midway is reported instead of looking like a short file.
+	 * The bytes a script writes, passed on chunk by chunk as the output arrives: memory is bounded
+	 * by one protocol response, not by the file. The exit code is checked when the output ends, so
+	 * a failure midway is reported instead of looking like a short file.
 	 */
-	private static final class DecodingStream extends InputStream {
+	private static final class ContentStream extends InputStream {
 
 		private final RemoteProcess process;
-		private final BufferedReader stdout;
 		private final String path;
 		private final String hostname;
 		private byte[] block = new byte[0];
 		private int position;
 		private boolean ended;
 
-		private DecodingStream(final RemoteProcess process, final String path, final String hostname) {
+		private ContentStream(final RemoteProcess process, final String path, final String hostname) {
 			this.process = process;
-			this.stdout = process.stdout();
 			this.path = path;
 			this.hostname = hostname;
 			fill();
@@ -690,35 +686,16 @@ final class RemoteFiles {
 
 		/** Make sure unread bytes are buffered: {@code false} at the end of a successful output. */
 		private boolean fill() {
-			while (position == block.length) {
-				if (ended) {
-					return false;
-				}
-				final String line = readLine(stdout);
-				if (line == null) {
+			if (position == block.length && !ended) {
+				final byte[] chunk = process.readStdoutChunk();
+				if (chunk == null) {
 					end();
-					return false;
+				} else {
+					block = chunk;
+					position = 0;
 				}
-				final String data = line.strip();
-				if (data.isEmpty()) {
-					continue;
-				}
-				try {
-					block = Base64.getDecoder().decode(data);
-				} catch (final IllegalArgumentException e) {
-					throw new WinRMClientException(
-						String.format(
-							"Unexpected output while reading remote file %s on %s: %s",
-							path,
-							hostname,
-							data.length() > 80 ? data.substring(0, 80) + "..." : data
-						),
-						e
-					);
-				}
-				position = 0;
 			}
-			return true;
+			return position < block.length;
 		}
 
 		/** The output ended: collect the exit code, release the connection, report a failure. */
