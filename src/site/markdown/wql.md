@@ -140,7 +140,8 @@ SELECT Name FROM Win32_Process WHERE Name = 'explorer.exe'
 ```
 
 The grammar is a single `SELECT` of either `*` or a comma-separated property list, a `FROM` clause
-naming one class, and an optional `WHERE` clause. Anything else, such as `ASSOCIATORS OF`,
+naming one class, and an optional `WHERE` clause. Line breaks are accepted wherever whitespace is,
+so queries written as Java text blocks work as is. Anything else, such as `ASSOCIATORS OF`,
 `REFERENCES OF` or event queries (`WITHIN`), is rejected: an invalid query raises a
 [`WqlSyntaxException`](apidocs/org/metricshub/winrm/exceptions/WqlSyntaxException.html) before
 anything is sent to the host.
