@@ -737,6 +737,21 @@ final class WsmanClient implements AutoCloseable {
 		}
 
 		/**
+		 * Reject input once the command's standard input is closed: a caller bug, reported before any
+		 * protocol step.
+		 *
+		 * @throws IllegalStateException when the command has completed or its input was ended
+		 */
+		void checkStdinOpen() {
+			if (finished || exitCode != null) {
+				throw new IllegalStateException("The command has completed: its standard input is closed.");
+			}
+			if (stdinEnded) {
+				throw new IllegalStateException("The command's standard input has already been closed.");
+			}
+		}
+
+		/**
 		 * Feed standard input to the running command: one or more WSMan Send requests carrying the
 		 * bytes as base64 {@code stdin} streams, the last one flagged {@code End} when {@code end} is
 		 * set. Payloads larger than {@link Envelopes#MAX_STDIN_CHUNK} are split so no envelope
@@ -755,12 +770,7 @@ final class WsmanClient implements AutoCloseable {
 		 * @param end whether this is the last input the command will get
 		 */
 		void send(final byte[] data, final boolean end) throws Exception {
-			if (finished || exitCode != null) {
-				throw new IllegalStateException("The command has completed: its standard input is closed.");
-			}
-			if (stdinEnded) {
-				throw new IllegalStateException("The command's standard input has already been closed.");
-			}
+			checkStdinOpen();
 			if (data.length == 0 && !end) {
 				// Nothing to say and no EOF to announce: an empty Send would be a pure round trip.
 				return;

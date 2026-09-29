@@ -155,3 +155,15 @@ Consequences:
   parentheses and modifiers removed, empty catch blocks named and commented, and two loops
   restructured. The only signature change is the removal of the unused `target` parameter from the
   `CipherGen` constructor (an internal NTLM helper).
+
+### Fixed
+
+- **Streaming terminals now report protocol failures as `WinRMClientException`** (#188).
+  `WqlRequest.stream()`, `CommandRequest.start()`, `RemoteFile.openStream()`/`openReader()`,
+  `RemoteDirectoryListing.stream()` and the closing of a `RemoteProcess` let raw
+  `IllegalStateException`s escape for an unexpected HTTP status (e.g. a 503 from a proxy), an
+  authentication fallback that exhausted every scheme, or a malformed response. They are now
+  wrapped like the blocking terminals' failures, with the raw exception in the cause chain; the
+  typed exceptions (`WinRMFaultException`, `WinRMAuthenticationException`, `WinRMTimeoutException`)
+  pass through unchanged, and genuine caller errors (invalid options, closed client, input after
+  the end of stdin) stay `IllegalArgumentException` / `IllegalStateException`.
