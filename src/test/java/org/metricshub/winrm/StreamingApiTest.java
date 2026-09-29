@@ -47,6 +47,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.metricshub.winrm.exceptions.WinRMClientException;
 import org.metricshub.winrm.exceptions.WinRMTimeoutException;
 import org.metricshub.winrm.exceptions.WqlSyntaxException;
 import org.metricshub.winrm.light.FakeWsmanServer;
@@ -298,6 +299,53 @@ class StreamingApiTest {
 
 	private static String stderrChunk(final String text) {
 		return stream("stderr", COMMAND_ID, text.getBytes(StandardCharsets.UTF_8));
+	}
+
+	private static Throwable rootCause(final Throwable e) {
+		Throwable cause = e;
+		while (cause.getCause() != null) {
+			cause = cause.getCause();
+		}
+		return cause;
+	}
+
+	@Test
+	void streamReportsAnUnexpectedHttpStatusAsAClientException() {
+		// A 503 from a proxy, or a non-WinRM service on the port: a protocol failure, not a caller bug.
+		server.enqueue(503, fault("999", "Service unavailable"));
+
+		try (WinRMClient client = builder().build()) {
+			final WinRMClientException e = assertThrows(
+				WinRMClientException.class,
+				() -> client.wql("SELECT Name FROM Win32_Service").stream()
+			);
+			assertTrue(e.getMessage().contains("HTTP 503"), e.getMessage());
+			assertTrue(rootCause(e) instanceof IllegalStateException);
+		}
+	}
+
+	@Test
+	void startReportsAnUnexpectedHttpStatusAsAClientException() {
+		server.enqueue(503, fault("999", "Service unavailable"));
+
+		try (WinRMClient client = builder().build()) {
+			final WinRMClientException e = assertThrows(WinRMClientException.class, () -> client.command("dir").start());
+			assertTrue(e.getMessage().contains("HTTP 503"), e.getMessage());
+			assertTrue(rootCause(e) instanceof IllegalStateException);
+		}
+	}
+
+	@Test
+	void closeReportsAnUnexpectedHttpStatusAsAClientException() throws Exception {
+		enqueueCommandStartup();
+		// The terminate Signal of an early close is answered with a 503.
+		server.enqueue(503, fault("999", "Service unavailable"));
+
+		try (WinRMClient client = builder().build()) {
+			final RemoteProcess process = client.command("dir").start();
+			final WinRMClientException e = assertThrows(WinRMClientException.class, process::close);
+			assertTrue(e.getMessage().contains("HTTP 503"), e.getMessage());
+		}
 	}
 
 	@Test

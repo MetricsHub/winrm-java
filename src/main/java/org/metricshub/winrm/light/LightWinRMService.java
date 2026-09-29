@@ -517,6 +517,8 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 
 			@Override
 			public void send(final byte[] data, final boolean end) throws TimeoutException, WindowsRemoteException {
+				// A caller bug (input after the end mark), reported as such before any protocol step.
+				remoteCommand.checkStdinOpen();
 				callStreaming(() -> {
 					remoteCommand.send(data, end);
 					return null;
@@ -540,7 +542,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			public void close() {
 				try {
 					remoteCommand.close();
-				} catch (final RuntimeException e) {
+				} catch (final WinRMClientException e) {
 					// Typed protocol failures (e.g. a fault answering the terminate Signal) pass through.
 					throw e;
 				} catch (final InterruptedException e) {
@@ -565,12 +567,13 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	 * @param <T> the step's result type
 	 * @return the step's result
 	 * @throws TimeoutException when the step exceeds the inactivity timeout
-	 * @throws WinRMException when the step fails with a checked failure
+	 * @throws WinRMException when the step fails, with the raw failure as its cause — the typed
+	 *         {@link WinRMClientException}s pass through unchanged
 	 */
 	private static <T> T callStreaming(final Callable<T> step) throws TimeoutException, WinRMException {
 		try {
 			return step.call();
-		} catch (final TimeoutException | RuntimeException e) {
+		} catch (final TimeoutException | WinRMClientException e) {
 			throw e;
 		} catch (final InterruptedException e) {
 			Thread.currentThread().interrupt();
