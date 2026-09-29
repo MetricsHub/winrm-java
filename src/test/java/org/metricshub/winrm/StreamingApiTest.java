@@ -310,6 +310,20 @@ class StreamingApiTest {
 	}
 
 	@Test
+	void streamOutlivingItsClientFailsAsAClosedClient() throws Exception {
+		server.enqueue(200, envelope(enumeratePage("uuid:CTX-1", service("Spooler", "Running"))));
+
+		final WinRMClient client = builder().build();
+		final Iterator<WqlRow> iterator = client.wql("SELECT Name FROM Win32_Service").stream().iterator();
+		assertEquals("Spooler", iterator.next().string("Name"));
+		client.close();
+
+		// The next row needs a Pull on a closed client: a caller bug, not a protocol failure.
+		final IllegalStateException e = assertThrows(IllegalStateException.class, iterator::next);
+		assertEquals("This instance has been closed and a new one must be created.", e.getMessage());
+	}
+
+	@Test
 	void streamReportsAnUnexpectedHttpStatusAsAClientException() {
 		// A 503 from a proxy, or a non-WinRM service on the port: a protocol failure, not a caller bug.
 		server.enqueue(503, fault("999", "Service unavailable"));

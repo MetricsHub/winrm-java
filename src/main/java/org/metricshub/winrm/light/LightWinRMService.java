@@ -566,11 +566,14 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	 * @param step the protocol step to run
 	 * @param <T> the step's result type
 	 * @return the step's result
+	 * @throws IllegalStateException when this executor was closed: a handle outliving its client is a
+	 *         caller bug, reported as such rather than as a protocol failure
 	 * @throws TimeoutException when the step exceeds the inactivity timeout
 	 * @throws WinRMException when the step fails, with the raw failure as its cause — the typed
 	 *         {@link WinRMClientException}s pass through unchanged
 	 */
-	private static <T> T callStreaming(final Callable<T> step) throws TimeoutException, WinRMException {
+	private <T> T callStreaming(final Callable<T> step) throws TimeoutException, WinRMException {
+		checkNotClosed();
 		try {
 			return step.call();
 		} catch (final TimeoutException | WinRMClientException e) {
