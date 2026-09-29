@@ -20,26 +20,24 @@ when it is already on, how to turn it on, and how to get the privileges right.
 | Requirement | Detail |
 | --- | --- |
 | WinRM service running | Startup type is automatic (or delayed automatic) on Windows Server 2008 and later. |
-| A listener | HTTP on port **5985**, or HTTPS on port **5986**. See [TLS / HTTPS](tls.html). |
+| A listener | HTTP on port **5985**, or HTTPS on port **5986** (required for Kerberos). See [TLS / HTTPS](tls.html). |
 | Firewall open on that port | Inbound, from the machine running the client. |
-| `Negotiate` authentication enabled on the service | **`True` by default.** This is what carries NTLM; `Kerberos` (also `True` by default) carries Kerberos. |
+| `Negotiate` authentication enabled on the service | **`True` by default.** The client sends both NTLM and Kerberos (SPNEGO) under this scheme; leave `Kerberos` (also `True` by default) as is. |
 | The `Basic` setting enabled on the service (`winrm/config/service/auth`) | **Only for HTTP Basic** (not for NTLM or Kerberos). See below. |
-| An account with the right privileges | See [Privileges](#Privileges) below. |
+| An account with the right privileges | See [Privileges](#privileges) below. |
 
 Just as important, a few settings that other WinRM guides tell you to change are **not** needed
 here:
 
-* **`AllowUnencrypted` stays `False` for NTLM and Kerberos.** Over plain HTTP the client protects
-  the payload with **NTLM message encryption**, so the service's default refusal of unencrypted
-  traffic is satisfied. (Exception: HTTP Basic has no message protection, so it belongs on HTTPS,
-  where TLS provides the confidentiality and no extra setting is needed. If — contrary to that —
-  you run Basic over plain HTTP, the service must also set `AllowUnencrypted=true`, since otherwise
-  it refuses the unprotected SOAP — see [Authentication](authentication.html).)
-* **The service's `Basic` and `CredSSP` settings stay `False` unless you use HTTP Basic.** NTLM
-  and Kerberos need neither. To use HTTP Basic, enable the `Basic` setting under the service's
-  `auth` section — `winrm set winrm/config/service/auth @{Basic=true}` — connect over HTTPS, and
-  authenticate with a **bare local account name**: Windows rejects Basic for domain accounts and
-  for any `DOMAIN\`-qualified name ([Authentication](authentication.html)).
+* **`AllowUnencrypted` stays `False`.** Over plain HTTP the client protects the payload with
+  **NTLM message encryption**; Kerberos runs over HTTPS only, where TLS protects it. (HTTP Basic
+  over plain HTTP would also need `AllowUnencrypted=true`; see
+  [Authentication](authentication.html#basic).)
+* **The service's `CredSSP` setting stays `False`** (this client never uses CredSSP), **and so
+  does `Basic` unless you use HTTP Basic.** To use it, enable the `Basic` setting under the
+  service's `auth` section — `winrm set winrm/config/service/auth @{Basic=true}` — connect over
+  HTTPS, and authenticate with a **bare local account name**: Windows rejects Basic for domain
+  accounts and for any `DOMAIN\`-qualified name ([Authentication](authentication.html#basic)).
 * **`TrustedHosts` is irrelevant.** That is a setting on the *Windows* WinRM **client**, consulted
   by the `winrs` command-line tool. A Java client never reads it, so you do not need to add anything
   to it on either machine.
@@ -60,8 +58,9 @@ installation therefore already has:
 * the firewall open on 5985, and
 * `Kerberos` and `Negotiate` authentication enabled.
 
-That is exactly what this client needs, which is why connecting to a freshly installed Windows
-Server with an administrator account normally works with no host-side preparation at all.
+That is all NTLM needs, which is why connecting to a freshly installed Windows Server with an
+administrator account normally works with no host-side preparation at all; Kerberos also needs an
+[HTTPS listener](#https-port-5986).
 
 It can still have been turned off afterwards — by Group Policy, by a hardening baseline, or by an
 unattended-install answer file — so verify rather than assume.
@@ -69,7 +68,7 @@ unattended-install answer file — so verify rather than assume.
 ### Windows 10 / 11 and other client versions — no
 
 Client versions of Windows do **not** enable WinRM by default. You must enable it explicitly, and
-the network profile matters (see [Enabling WinRM](#Enabling_WinRM)).
+the [network profile](#on-client-versions-of-windows-the-network-profile) matters.
 
 ### Domain membership is not what enables WinRM
 
@@ -83,12 +82,12 @@ Domain membership does change three things that matter here:
 
 * **Kerberos becomes possible.** Kerberos needs a KDC, so it is only available in a domain;
   workgroup hosts are limited to NTLM. See [Authentication](authentication.html).
-* **Group Policy becomes the practical way to enable WinRM** across many hosts at once — which is
-  why WinRM *is* in fact enabled on the client machines of many domains. That is the GPO's doing,
-  not the domain's.
+* **Group Policy becomes the practical way to enable WinRM** across many hosts at once
+  ([At scale: Group Policy](#at-scale-group-policy)), which is why many domains' workstations do
+  have it on.
 * **Domain accounts escape UAC remote token filtering**, unlike local accounts. This is the single
   most common cause of "my local admin account gets access denied" — see
-  [Local administrators and UAC](#Local_administrators_and_UAC).
+  [Local administrators and UAC](#local-administrators-and-uac).
 
 ### Checking on the host
 
@@ -96,11 +95,12 @@ Domain membership does change three things that matter here:
 Get-Service WinRM                              # is the service running?
 winrm enumerate winrm/config/listener          # is there a listener, on which port and address?
 winrm get winrm/config/service                 # Negotiate/Kerberos enabled? AllowUnencrypted? RootSDDL?
-Get-NetFirewallRule -Name 'WINRM*' | Select-Object Name, Enabled, Profile
+Get-NetFirewallPortFilter | Where-Object LocalPort -in 5985, 5986 |
+  Get-NetFirewallRule | Select-Object DisplayName, Enabled, Profile   # which rules open the ports?
 ```
 
 `winrm get winrm/config/service` needs an elevated prompt; it is also the quickest way to read the
-listener's security descriptor (`RootSDDL`) discussed under [Privileges](#Privileges).
+listener's security descriptor (`RootSDDL`) discussed under [Privileges](#privileges).
 
 ### Checking from the client
 
@@ -126,15 +126,15 @@ needs WMI access, the second needs remote-shell access.
 
 ### The quick way (HTTP, port 5985)
 
-This client needs three things on the host: the **service running**, a **listener**, and the
-**firewall open**. One command sets up all three, from an **elevated** prompt on the target host:
+From an **elevated** prompt on the target host, one command starts the service, creates the HTTP
+listener and opens the firewall:
 
 ```console
 winrm quickconfig
 ```
 
-Answer `y` when it asks. Add `-quiet` to skip the prompt. You can also use PowerShell's
-`Enable-PSRemoting -Force`, which also enables WinRM.
+Answer `y` when it asks. Add `-quiet` to skip the prompt. PowerShell's `Enable-PSRemoting -Force`
+does the same.
 
 > [!NOTE]
 > `winrm quickconfig` creates the firewall exception **only for the current firewall profile**. If
@@ -188,8 +188,8 @@ New-WSManInstance -ResourceURI winrm/config/Listener `
 New-NetFirewallRule -DisplayName 'WinRM HTTPS' -Direction Inbound -Protocol TCP -LocalPort 5986 -Action Allow
 ```
 
-On the client side, a self-signed certificate is not trusted by default since 2.0.0: import it into
-a Java trust store, or opt out for testing. See [TLS / HTTPS](tls.html).
+On the client side, a self-signed certificate is not trusted by default: import it into a Java
+trust store, or opt out for testing. See [TLS / HTTPS](tls.html).
 
 ### At scale: Group Policy
 
@@ -225,7 +225,7 @@ a frequent reason a Windows Server that "should" work does not.
 | **Domain administrator** (or any domain account in the host's local `Administrators`) | **Yes.** Nothing to configure. |
 | **Built-in local `Administrator`** | **Yes** (it is exempt from UAC token filtering by default). |
 | **Any other local account in `Administrators`** | **No** — access denied until `LocalAccountTokenFilterPolicy` is set. See below. |
-| **Non-administrator account** | **No** — needs an explicit grant on the listener, plus WMI grants *if it runs WQL queries*. See [Configuring a non-administrator account](#Configuring_a_non-administrator_account). |
+| **Non-administrator account** | **No** — needs an explicit grant on the listener, plus WMI grants *if it runs WQL queries*. See [Configuring a non-administrator account](#configuring-a-non-administrator-account). |
 
 Administrator rights are what make WinRM work with zero host configuration, because the default
 security descriptor on the WinRM listener grants full access to `BUILTIN\Administrators` and to
@@ -234,10 +234,6 @@ nobody else who connects over the network.
 ### Local administrators and UAC
 
 This is the trap that catches most people connecting to a workgroup host or with a local account.
-Microsoft states it plainly:
-
-> Local administrator accounts other than the built-in Administrator account may not have rights to
-> manage a server remotely, even if remote management is enabled.
 
 Under UAC, a local account that is a member of `Administrators` receives a **filtered token** on
 network logon, stripped of its administrative privileges — so WinRM denies it. The built-in
@@ -249,6 +245,10 @@ To let other local administrator accounts connect, set on the **target host**:
 New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' `
   -Name LocalAccountTokenFilterPolicy -PropertyType DWord -Value 1 -Force
 ```
+
+On Windows 10 / 11, `winrm quickconfig` sets this value itself (its prompt lists *Configure
+LocalAccountTokenFilterPolicy to grant administrative rights remotely to local users*), so the
+warning below applies there too.
 
 > [!WARNING]
 > `LocalAccountTokenFilterPolicy = 1` disables UAC remote restrictions for **all** local
@@ -270,21 +270,21 @@ separately:
 | --- | --- |
 | **WQL queries** (`client.wql(...)`) | Remote access to the listener, access to the **WMI plug-in**, and rights on the target **WMI namespace** (`ROOT\CIMV2` by default) — plus whatever the queried class itself demands. |
 | **Remote commands** (`client.command(...)`) | Remote access to the listener, remote shell access on the host (`AllowRemoteShellAccess`, `True` by default), and whatever rights **the command itself** needs once it runs. |
-| **Transfer-and-run** (`upload(...)`) | Both of the above, plus write access to `<windir>\Temp\winrm-upload-<CLIENT>`, and `certutil` and `forfiles` present on the host. See [File Transfers](file-transfers.html). |
+| **Transfer-and-run** (`upload(...)`, and `powerShell(...)` scripts over ~3,000 characters) | Both of the above, plus write access to `<windir>\Temp\winrm-upload-<CLIENT-COMPUTER-NAME>`, and `certutil` and `forfiles` present on the host. See [File Transfers](file-transfers.html). |
 | **`uploadFile(...)`** to an explicit path | Remote shell access, write access to the destination directory, and `certutil` on the host (the same transfer engine, minus the transfer directory and its `forfiles` housekeeping). |
 | **Remote file access** (`client.file(...)`: reads, downloads, `info()`, `list()`) | Remote shell access, **PowerShell 2.0 or later in `FullLanguage` mode** (not constrained by AppLocker or WDAC), and read access to the files and directories themselves. Nothing is written on the host. See [Remote Files](files.html). |
 
 So an account can perfectly well run WQL queries and fail to run commands, or the reverse. When
-diagnosing, test the two independently — as in [Checking from the client](#Checking_from_the_client)
+diagnosing, test the two independently — as in [Checking from the client](#checking-from-the-client)
 above.
 
 ### Configuring a non-administrator account
 
 Non-administrative access is possible, and is the right choice for a monitoring account that only
 needs to read WMI. Step 1 below is always required. **Step 2 is only needed for WQL queries** (and
-therefore for transfer-and-run, which discovers the remote Windows directory with one): an account
-that only runs commands, calls `uploadFile(...)` or accesses remote files never reaches WMI, so
-grant it nothing there.
+therefore for transfer-and-run, which discovers the remote Windows directory with one, long
+`powerShell(...)` scripts included): an account that only runs commands, calls `uploadFile(...)` or
+accesses remote files never reaches WMI, so grant it nothing there.
 
 **1. Grant remote access to the WinRM listener.** The default listener security descriptor
 (`RootSDDL`) grants full access to `BUILTIN\Administrators` and read access to interactive users
@@ -322,14 +322,9 @@ whereas assigning the value wholesale risks dropping the entries already there.
   ```
 
   > [!NOTE]
-  > `WinRMRemoteWMIUsers__` and `Remote Management Users` carry the *same* description in Windows
-  > ("can access WMI resources over management protocols"), which makes them easy to confuse.
-  > `WinRMRemoteWMIUsers__` is the one Microsoft's WinRM documentation names for the WMI plug-in on
-  > Windows 8 / Server 2012 **and later** — it is current, not a legacy name — and it is created when
-  > WinRM is configured, so a host where WinRM was never enabled may not have it yet.
-  >
-  > Either way, **membership in neither group is sufficient on its own**: the namespace rights below
-  > and the `RootSDDL` entry from step 1 are what actually grant access.
+  > `WinRMRemoteWMIUsers__` and `Remote Management Users` carry the *same* description in Windows,
+  > which makes them easy to confuse. `WinRMRemoteWMIUsers__` is the current group for the WMI
+  > plug-in (Windows 8 / Server 2012 and later), created when WinRM is configured.
 
 * Then grant the account rights on the WMI namespace itself, since group membership alone does not
   confer them. Run `wmimgmt.msc` → **WMI Control** → *Properties* → *Security*, select the
@@ -337,13 +332,9 @@ whereas assigning the value wholesale risks dropping the entries already there.
   **Enable Account** and **Remote Enable**, with *Applies to* set to
   **This namespace and subnamespaces**.
 
-  Those two are all a `SELECT` query needs. In particular **`Execute Methods` is not required** —
-  it authorizes invoking WMI class methods, which this client never does (it only runs `SELECT`
-  queries; anything else is rejected locally as a `WqlSyntaxException`). Many monitoring guides
-  grant it anyway; leave it off unless something else on the account's behalf needs it.
-
-  Granting these on `Root` with *This namespace and subnamespaces* covers every namespace at once;
-  granting them on `Root\CIMV2` alone is tighter and usually sufficient.
+  Those two are all a query needs: **`Execute Methods` is not required**, since this client never
+  invokes WMI methods. Granting them on `Root` covers every namespace; `Root\CIMV2` alone is tighter
+  and usually sufficient.
 
 **3. Remote commands need more than this.** Listener access lets a non-administrator open a remote
 shell, but the commands you then run are ordinary Windows processes subject to ordinary Windows
@@ -379,8 +370,8 @@ the host, the tighter they are:
 | `MaxMemoryPerShellMB` | Memory per shell, including child processes | Historically **150 MB**; 1024 MB on modern hosts. A command whose output is large can hit it. |
 | `MaxShellsPerUser` | Concurrent shells per user | 5 on older hosts, 30 on modern ones. Close clients you no longer need. |
 | `MaxConcurrentOperationsPerUser` | Concurrent operations per user | 15 on Windows Server 2008 R2, 1500 later. File transfers are batched specifically to stay under low limits. |
-| `MaxEnvelopeSizekb` | SOAP envelope size | 150 KB on older hosts, **500 KB** on modern ones; caps how much a single response can carry. |
-| `IdleTimeout` | How long an idle shell survives | 180000 ms (3 min) on older hosts, **7200000 ms** (2 h) on modern ones; 60000 ms minimum. |
+| `MaxEnvelopeSizekb` | SOAP envelope size | 150 KB on older hosts, **500 KB** on modern ones. This client always uses 150 KB envelopes, so the default never needs raising. |
+| `IdleTimeout` | How long an idle shell survives | 180000 ms (3 min) on older hosts, **7200000 ms** (2 h) on modern ones; 60000 ms minimum. The client transparently recreates a shell the host reaped. |
 
 Read them with `winrm get winrm/config`. Raising a quota is a considered decision, not a reflex —
 prefer narrowing the query or splitting the command.
@@ -390,12 +381,11 @@ prefer narrowing the query or splitting the command.
 | What you see | Likely cause on the host |
 | --- | --- |
 | Connection refused / connection timed out on 5985 or 5986 | Service not running, no listener, or the firewall is closed. Check all three, in that order. |
-| Connection succeeds but every request is refused, with correct credentials | The account is denied by `RootSDDL`, or it is a local administrator hitting UAC token filtering. |
-| `WinRMAuthenticationException` for one local admin but not for the built-in `Administrator` | UAC token filtering — see [Local administrators and UAC](#Local_administrators_and_UAC). |
-| `WinRMAuthenticationException` with a Kerberos scheme, NTLM working | Connect by the FQDN the KDC knows, check clock skew, or fall back to NTLM. See [Authentication](authentication.html). |
+| `WinRMAuthenticationException` although the password is right | A non-administrator not granted in `RootSDDL` ([step 1](#configuring-a-non-administrator-account)), or a local administrator other than the built-in `Administrator` hitting UAC token filtering ([Local administrators and UAC](#local-administrators-and-uac)). |
+| Kerberos fails while NTLM works: a `WinRMClientException` carrying the JDK's Kerberos message (*Server not found in Kerberos database*, *Clock skew too great*), or a `WinRMAuthenticationException` | Connect by the FQDN the KDC knows, check clock skew, or fall back to NTLM. See [Authentication](authentication.html#kerberos-spnego). |
 | `WinRMFaultException` whose detail is `WBEM_E_ACCESS_DENIED` | The account reached WMI but lacks namespace rights — step 2 above. |
 | `WinRMFaultException` whose detail is `WBEM_E_INVALID_CLASS` or `WBEM_E_INVALID_NAMESPACE` | The query is wrong, not the permissions. See [WQL Queries](wql.html). |
-| WQL works, commands do not | Remote shell access, `AllowRemoteShellAccess`, or a per-user shell quota. |
+| WQL works, commands do not | `AllowRemoteShellAccess` is disabled, or the `MaxShellsPerUser` quota is reached (see [Host quotas](#host-quotas-worth-knowing-about)). |
 | Commands work, WQL does not | WMI plug-in or namespace rights — step 2 above. |
 | A TLS handshake failure over HTTPS | The certificate is not trusted by the JVM, or its name does not match. See [TLS / HTTPS](tls.html). |
 
@@ -404,7 +394,7 @@ The full exception surface, including how to read a WSMan fault code, is describ
 
 ## See also
 
-* [Authentication](authentication.html) — NTLM and Kerberos, and what each needs from the host
+* [Authentication](authentication.html) — NTLM, Kerberos and Basic, and what each needs from the host
 * [TLS / HTTPS](tls.html) — trusting the listener's certificate
 * [File Transfers](file-transfers.html) — what transfers need on the host
 * [Remote Files](files.html) — reading and listing remote files, and what that needs on the host

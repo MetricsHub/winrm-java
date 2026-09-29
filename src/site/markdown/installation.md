@@ -5,18 +5,10 @@ description: Add the WinRM Java Client to your build, or run the standalone comm
 
 <!-- MACRO{toc|fromDepth=2|toDepth=3|id=toc} -->
 
-## Coordinates
+## Add it to your build
 
 The library is published on
-[Maven Central](https://central.sonatype.com/artifact/${project.groupId}/${project.artifactId}) under:
-
-| Field | Value |
-| --- | --- |
-| `groupId` | `${project.groupId}` |
-| `artifactId` | `${project.artifactId}` |
-| `version` | `${project.version}` |
-
-## Add it to your build
+[Maven Central](https://central.sonatype.com/artifact/${project.groupId}/${project.artifactId}):
 
 > [!TABS]
 > * Maven
@@ -45,7 +37,7 @@ The library targets **Java 11** and runs on any later JDK.
 
 ## Runtime dependencies
 
-Since 2.0.0 the client has **zero runtime dependencies**. There is no longer an Apache CXF /
+Since 2.0.00 the client has **zero runtime dependencies**. There is no longer an Apache CXF /
 JAX-WS / JAXB stack, no BouncyCastle, and no SMB stack (`smbj`) on the classpath — the client speaks
 WS-Management over the JDK's own HTTP and XML APIs, and copies files through the WinRM channel
 itself. If you upgraded from 1.x, see [Migrating from 1.x](migrating-from-1x.html) for the details
@@ -71,5 +63,6 @@ Subcommands, options, password handling, streaming behavior, and exit codes are 
 * [Preparing the Windows Host](preparing-the-host.html) — enabling WinRM and the required privileges
 * [WQL Queries](wql.html)
 * [Remote Commands](commands.html)
+* [Remote Files](files.html)
 * [Command-Line Client](cli.html)
 * [Authentication](authentication.html)

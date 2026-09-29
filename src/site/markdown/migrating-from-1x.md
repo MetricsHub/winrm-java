@@ -1,16 +1,16 @@
 keywords: migration, upgrade, 1.x, 2.0, cxf, tls, smb, breaking changes
-description: What changed in WinRM Java Client 2.0.0 and how to upgrade from the 1.x releases.
+description: What changed in WinRM Java Client 2.0.00 and how to upgrade from the 1.x releases.
 
 # Migrating from 1.x
 
 <!-- MACRO{toc|fromDepth=2|toDepth=3|id=toc} -->
 
-Version 2.0.0 is a major cleanup: the legacy Apache CXF backend and the SMB-based file copy are
-gone, leaving a **dependency-free** client. The **1.x entry points are unchanged**, so typical
-calling code is unaffected — but a few CXF/SMB-only public types were removed (see the *Removed types*
-section below), and two runtime behaviors changed. Read this page before upgrading.
+Version 2.0.00 is a major cleanup: the legacy Apache CXF backend and the SMB-based file copy are
+gone, leaving a **dependency-free** client. The **1.x entry points keep their signatures**, but a few
+CXF/SMB-only public types were removed and several runtime behaviors changed (summarized below).
+Read this page before upgrading.
 
-Version 2.0.0 also introduces the **fluent [`WinRMClient`](apidocs/org/metricshub/winrm/WinRMClient.html)
+Version 2.0.00 also introduces the **fluent [`WinRMClient`](apidocs/org/metricshub/winrm/WinRMClient.html)
 API**, which the documentation is now written around. Upgrading does not require adopting it —
 the [legacy API](legacy.html) keeps working — but moving is straightforward and worthwhile; see
 [Moving to the fluent API](#moving-to-the-fluent-api) below.
@@ -21,6 +21,8 @@ the [legacy API](legacy.html) keeps working — but moving is straightforward an
 * HTTPS now **validates the certificate and verifies the hostname by default** (1.x trusted every
   certificate). Self-signed hosts that used to work will now fail the TLS handshake until you trust
   the certificate or opt out.
+* **Kerberos over plain HTTP is rejected**, even as a fallback: see
+  [Other behavior changes](#other-behavior-changes).
 * File copy for `localFileToCopyList` now goes **through the WinRM channel** instead of SMB.
 * A few CXF/SMB-only classes were removed.
 * A new **fluent API** (`WinRMClient`) is the recommended way to use the library; the 1.x static
@@ -29,7 +31,7 @@ the [legacy API](legacy.html) keeps working — but moving is straightforward an
 ## TLS is validated by default
 
 The 1.x CXF client silently trusted every TLS certificate and skipped hostname verification. The
-2.0.0 client uses the JDK's default validating socket factory instead, so **HTTPS connections to
+2.0.00 client uses the JDK's default validating socket factory instead, so **HTTPS connections to
 hosts with self-signed or otherwise untrusted certificates now fail** during the handshake.
 
 To restore connectivity, either:
@@ -42,46 +44,66 @@ See [TLS / HTTPS](tls.html) for details.
 
 ## The CXF backend was removed
 
-The dependency-free client introduced in the previous release is now the only implementation. There
-is no switch to fall back to the Apache CXF backend — if you still need it, stay on winrm-java 1.x.
+The dependency-free client is now the only implementation. There is no switch to fall back to the
+Apache CXF backend — if you still need it, stay on winrm-java 1.x.
 
 ## File copy no longer uses SMB
 
 Files listed in `localFileToCopyList` for
-[`WinRMCommandExecutor.execute(...)`](commands.html) are no longer copied over SMB. They are
-transferred **through the WinRM command shell** (chunked base64, decoded on the host with `certutil`
-and verified with a digest). The consequences:
+[`WinRMCommandExecutor.execute(...)`](legacy.html#remote-commands) are no longer copied over SMB.
+They are transferred **through the WinRM command shell** (chunked base64, decoded on the host with
+`certutil` and verified with a digest). The consequences:
 
 * **No SMB requirement** — TCP port 445 no longer needs to be reachable, no administrative or
   temporary share is created on the host, and the copy now works from **any client OS** (1.x wrote
   through a Windows UNC path and only worked from a Windows client).
+* Files land in `<windir>\Temp\winrm-upload-<CLIENT-COMPUTER-NAME>` instead of 1.x's
+  `SEN_ShareFor_<CLIENT-COMPUTER-NAME>$`. Where ACLs are hardened, grant write access on the new
+  path. Directories left by 1.x are not reused and can be deleted
+  ([Where files land](file-transfers.html#where-files-land)).
 * The remote copy is **content-addressed**: a fragment of the content digest is inserted before the
-  file extension (for example `script.1a2b3c4d.vbs`). Same-named files with different content can no
-  longer overwrite each other, and a script that reads its own name (`WScript.ScriptName`) will see
-  the digest fragment.
+  file extension (for example `script.1a2b3c4d5e6f.vbs`). Same-named files with different content
+  can no longer overwrite each other, and a script that reads its own name (`WScript.ScriptName`)
+  will see the digest fragment.
 * A file already present on the host with an identical digest is not transferred again.
 * The transport is meant for **small script files**, not bulk data.
+
+## Other behavior changes
+
+* **Kerberos requires HTTPS.** On an HTTP endpoint, any `authentication` list that contains
+  `KERBEROS` fails before connecting (`Kerberos over WinRM requires HTTPS ...`), even
+  `[NTLM, KERBEROS]`, which 1.x served with NTLM. Use HTTPS, or remove `KERBEROS` from lists used
+  over HTTP ([Authentication](authentication.html#kerberos-spnego)).
+* **Command output is decoded as UTF-8.** The shell runs under console code page 65001 (1.x decoded
+  the output with the host's ANSI code page), so non-ASCII characters now come through intact.
+  `WindowsRemoteProcessUtils.getWindowsEncodingCharset()` is deprecated. See
+  [Character encoding](commands.html#character-encoding).
+* **Result collections are unmodifiable.** `WinRMWqlExecutor.getHeaders()`/`getRows()` and
+  `WqlQuery.getSelectedProperties()`/`getSubPropertiesMap()` return unmodifiable collections: copy
+  them before modifying.
 
 ## Fewer dependencies
 
 Removing CXF and SMB leaves the library with **zero runtime dependencies**: the Apache CXF /
 JAX-WS / JAXB stack is gone, and so are `smbj`, BouncyCastle, SLF4J, `mbassador`, and `asn-one`. The
-standalone CLI jar shrinks from around 9 MB to a few hundred kB, and the library no longer references
-any logging API — problems are reported through [exceptions](timeouts-and-errors.html) only.
+library is a single jar of a few hundred kB, and it no longer references any logging API — problems
+are reported through [exceptions](timeouts-and-errors.html) only.
 
 ## Removed types
 
-These types and members were public in 1.x but are **removed** in 2.0.0. Code that referenced them
-will not compile against 2.0.0 (all were CXF- or SMB-specific):
+These types and members were public in 1.x but are **removed** in 2.0.00. Code that referenced them
+will not compile against 2.0.00 (all were CXF- or SMB-specific):
 
 * `KerberosCredentialsException` — was thrown only by CXF internals.
 * `SmbTempShare` and `WindowsRemoteProcessUtils.copyLocalFilesToShare(...)` — replaced by the
-  WinRM-channel file transfer. `WindowsTempShare` is unchanged.
-* The Apache CXF-based `WinRMService` and its `service.client` internals, along with the generated
-  WSDL/XSD resources.
+  WinRM-channel file transfer. `WindowsTempShare` keeps its API, but the share it creates is now
+  `winrm-upload-<CLIENT-COMPUTER-NAME>`: no trailing `$`, so it is no longer hidden.
+  `WindowsRemoteProcessUtils.buildNewOutputFileName()` now starts names with `winrm-`, not `SEN_`.
+* The Apache CXF-based `WinRMService` and its `service.client` internals (`AuthenticationEnum`
+  stays), along with the generated WSDL/XSD resources.
 
 The 1.x entry points — `WinRMWqlExecutor`, `WinRMCommandExecutor`, `WinRMEndpoint`,
-`WindowsRemoteCommandResult`, the enums, and the exception types — are unchanged.
+`WindowsRemoteCommandResult`, the enums, and the exception types — keep their signatures.
 
 ## Moving to the fluent API
 
@@ -146,6 +168,8 @@ try (WinRMClient client = WinRMClient.builder("server").https()
 | `ticketCache` argument | `ticketCache(Path)` |
 | `List<AuthenticationEnum>` | `authentication(AuthScheme...)` — same ordered-fallback semantics |
 | `localFileToCopyList` | `upload(Path...)` on the command |
+| `workingDirectory` argument | `workingDirectory(String)` on the command (applies to the client's first command only) |
+| `getExecutionTime()` | `elapsed()` (a `Duration`) |
 | `-Dorg.metricshub.winrm.tls.insecure=true` | `trustAllCertificates()` per client (or `sslContext(...)` for a dedicated trust store) |
 | `getHeaders()` / `getRows()` (parallel lists) | `WqlResult.columns()` / iterable `WqlRow` with lookup by property name |
 | `getStatusCode()` | `CommandResult.exitCode()` |
@@ -155,7 +179,7 @@ try (WinRMClient client = WinRMClient.builder("server").https()
 The fluent API reports failures through the unchecked
 [`WinRMClientException`](apidocs/org/metricshub/winrm/exceptions/WinRMClientException.html)
 hierarchy instead of the 1.x checked exceptions — no more mandatory `try`/`catch` around every
-call, and WSMan faults expose their code and detail as fields:
+call, and WSMan faults expose their code and detail through getters:
 
 | 1.x checked exception | Fluent unchecked exception |
 | --- | --- |
@@ -164,5 +188,6 @@ call, and WSMan faults expose their code and detail as fields:
 | `java.util.concurrent.TimeoutException` | [`WinRMTimeoutException`](apidocs/org/metricshub/winrm/exceptions/WinRMTimeoutException.html) |
 | `WqlQuerySyntaxException` | [`WqlSyntaxException`](apidocs/org/metricshub/winrm/exceptions/WqlSyntaxException.html) |
 
-The exception **messages are unchanged**, so code that matches on message text keeps working after
-the switch. See [Timeouts and Errors](timeouts-and-errors.html) for the complete picture.
+Except for timeouts, the exception **messages are unchanged**, so code that matches on message text
+keeps working after the switch. See [Timeouts and Errors](timeouts-and-errors.html) for the complete
+picture.

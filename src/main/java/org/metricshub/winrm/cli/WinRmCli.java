@@ -728,9 +728,9 @@ public final class WinRmCli {
 			"  winrm-java [options] cat <file> [cat options]\n" +
 			"  winrm-java [options] get <file> [<local path>]\n" +
 			"\n" +
-			"Connection options:\n" +
+			"Options (before the subcommand):\n" +
 			"  -h, --hostname <host>       Target hostname or IP address (required)\n" +
-			"  -u, --username <user>       User name, optionally DOMAIN\\\\user (required)\n" +
+			"  -u, --username <user>       User name, optionally DOMAIN\\user (required)\n" +
 			"  -p, --password <password>   Password (visible to local processes; avoid in automation)\n" +
 			"  -pf, --password-file <file> Read a UTF-8 password from a file (preferred for automation)\n" +
 			"  -P, --port <port>           Target port (default: HTTP 5985, HTTPS 5986)\n" +
@@ -738,7 +738,7 @@ public final class WinRmCli {
 			"  -d, --directory <path>      Working directory of the remote command or shell\n" +
 			"      --env <NAME=VALUE>      Environment variable of the remote command or shell (repeatable)\n" +
 			"      --profile               Load the user profile in the remote command or shell\n" +
-			"  -i, --stdin                 Forward the local standard input to the remote command\n" +
+			"  -i, --stdin                 Always forward the local standard input (automatic when redirected)\n" +
 			"      --https                 Use HTTPS\n" +
 			"      --https-permissive      Trust any HTTPS certificate and hostname (insecure)\n" +
 			"      --ntlm                  Use NTLM authentication (default)\n" +

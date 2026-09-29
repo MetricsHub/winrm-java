@@ -33,7 +33,7 @@ try (WinRMClient client = WinRMClient.builder("server.example.com")
 ```
 
 One client can run any number of queries (and [commands](commands.html)) over the same
-authenticated connection — see the [Overview](index.html) for the builder options.
+authenticated connection — see the [client options](index.html#client-options).
 
 ### Query options
 
@@ -86,7 +86,7 @@ Points to know:
   an exhausted stream cleans up on its own.
 * The stream **holds the client's serial connection** while open: other operations on the same
   client wait until it is closed or exhausted (the same contract as a JDBC `ResultSet` on its
-  connection).
+  connection). Never call the same client while consuming the stream; use a second client.
 * The timeout is an **inactivity** timeout — the longest silence tolerated from the server between
   two responses — not an overall deadline: consuming a huge result can take arbitrarily long as
   long as the server keeps answering. See [Timeouts and Errors](timeouts-and-errors.html).
@@ -99,7 +99,7 @@ Points to know:
 
 | Method | Returns | Description |
 | --- | --- | --- |
-| `columns()` | `List<String>` | The property (column) names, in query order. |
+| `columns()` | `List<String>` | The property (column) names (see [Column order and case](#column-order-and-case)). |
 | `rows()` | `List<`[`WqlRow`](apidocs/org/metricshub/winrm/WqlRow.html)`>` | The result rows. |
 | `size()` / `isEmpty()` | `int` / `boolean` | Row count. |
 | `elapsed()` | `java.time.Duration` | Wall-clock time of the query. |
@@ -108,20 +108,26 @@ Each [`WqlRow`](apidocs/org/metricshub/winrm/WqlRow.html) exposes the instance p
 
 | Method | Returns | Description |
 | --- | --- | --- |
-| `string(String)` | `String` | The property value as a string, or `null`. |
-| `get(String)` | `Object` | The raw property value, or `null`. |
+| `string(String)` | `String` | The property value, or `null` when the row has no such property. |
+| `get(String)` | `Object` | The same value (currently always a `String`). |
 | `asMap()` | `Map<String, Object>` | All properties, in server order (unmodifiable). |
 
 Property lookup is **case-insensitive**, matching WMI semantics: `row.string("name")` and
 `row.string("Name")` return the same value.
 
-### Property order and case
+Values are the text WinRM sends, unconverted: parse numbers, booleans and dates yourself. A WMI
+`NULL` comes back as an empty string.
+
+### Column order and case
+
+These rules apply to `WqlResult.columns()`; each row's `asMap()` keeps the server's order, and
+lookups in it are case-sensitive.
 
 * When you select explicit properties (`SELECT Name, State FROM ...`), the columns keep the **order
   of the query** and the **exact case reported by WMI**.
-* With `SELECT * FROM ...`, the properties are returned in **alphabetical order** (case-insensitive).
-* If the query returns no rows, the columns fall back to the property names exactly as written in
-  the query (WMI's own casing cannot be recovered from an empty result set).
+* With `SELECT * FROM ...`, the columns are in **alphabetical order** (case-insensitive).
+* If the query returns no rows, the columns are the selected property names in lower case (WMI's
+  own casing cannot be recovered from an empty result set), or an empty list for `SELECT *`.
 
 ## Supported WQL syntax
 
@@ -133,9 +139,9 @@ SELECT Name, State, StartMode FROM Win32_Service
 SELECT Name FROM Win32_Process WHERE Name = 'explorer.exe'
 ```
 
-The grammar is a single `SELECT` of either `*` or a comma-separated property list, a `FROM` clause,
-and an optional `WHERE` clause. Joins, sub-selects, and other advanced constructs are not part of
-the supported syntax. An invalid query raises a
+The grammar is a single `SELECT` of either `*` or a comma-separated property list, a `FROM` clause
+naming one class, and an optional `WHERE` clause. Anything else, such as `ASSOCIATORS OF`,
+`REFERENCES OF` or event queries (`WITHIN`), is rejected: an invalid query raises a
 [`WqlSyntaxException`](apidocs/org/metricshub/winrm/exceptions/WqlSyntaxException.html) before
 anything is sent to the host.
 
@@ -148,21 +154,15 @@ accepted.
 
 ## Exceptions
 
-`execute()` reports failures through the unchecked
-[`WinRMClientException`](apidocs/org/metricshub/winrm/exceptions/WinRMClientException.html)
-hierarchy:
-
-| Exception | When |
-| --- | --- |
-| [`WqlSyntaxException`](apidocs/org/metricshub/winrm/exceptions/WqlSyntaxException.html) | The query does not match the supported `SELECT` syntax. |
-| [`WinRMAuthenticationException`](apidocs/org/metricshub/winrm/exceptions/WinRMAuthenticationException.html) | The credentials were rejected. |
-| [`WinRMFaultException`](apidocs/org/metricshub/winrm/exceptions/WinRMFaultException.html) | The remote service answered with a WSMan fault (e.g. an unknown class or namespace) — the fault code and detail are available as fields. |
-| [`WinRMTimeoutException`](apidocs/org/metricshub/winrm/exceptions/WinRMTimeoutException.html) | The query did not complete within its timeout. |
-| [`WinRMClientException`](apidocs/org/metricshub/winrm/exceptions/WinRMClientException.html) | Any other failure (connection, TLS, protocol). |
-
-See [Timeouts and Errors](timeouts-and-errors.html) for the full exception surface.
+`execute()` and `stream()` report failures as unchecked
+[`WinRMClientException`](apidocs/org/metricshub/winrm/exceptions/WinRMClientException.html)s; see
+[Timeouts and Errors](timeouts-and-errors.html#the-exception-surface) for the full list. An
+unknown class or namespace raises a
+[`WinRMFaultException`](apidocs/org/metricshub/winrm/exceptions/WinRMFaultException.html) whose
+`getFaultDetail()` carries the WMI error, e.g. `WBEM_E_INVALID_CLASS` or
+`WBEM_E_INVALID_NAMESPACE`.
 
 ## From the command line
 
-The standalone jar exposes the same capability through its `wql` subcommand, streaming the rows
-to stdout as JSON Lines — see the [Command-Line Client](cli.html) manual.
+The standalone jar runs queries in the default `ROOT\CIMV2` namespace through its `wql` subcommand,
+streaming the rows to stdout as JSON Lines — see the [Command-Line Client](cli.html) manual.

@@ -57,7 +57,7 @@ public final class WqlResult implements Iterable<WqlRow> {
 
 	/**
 	 * Get the column names, in the order they appear in the WQL query ({@code SELECT *} yields
-	 * the order the server returned).
+	 * them in case-insensitive alphabetical order).
 	 *
 	 * @return an unmodifiable list of column names
 	 */

@@ -6,9 +6,10 @@ description: Manual page of the winrm-java standalone command-line client - subc
 <!-- MACRO{toc|fromDepth=2|toDepth=3|id=toc} -->
 
 Every release ships a self-contained executable jar that bundles the client and a small CLI:
-download `${project.artifactId}-${project.version}-standalone.jar` from the
-[latest release](https://github.com/metricshub/winrm-java/releases/latest) and run it with Java.
-This page is its manual.
+download `${project.artifactId}-${project.version}-standalone.jar` (shortened to
+`winrm-java-standalone.jar` in the synopsis and short examples) from the
+[latest release](https://github.com/metricshub/winrm-java/releases/latest) and run it with Java 11
+or later. This page is its manual.
 
 ## Synopsis
 
@@ -27,7 +28,7 @@ java -jar winrm-java-standalone.jar --help | --version
 
 | Subcommand | Description |
 | --- | --- |
-| `wql <query>` | Run a WQL query and print the rows to stdout as UTF-8 [JSON Lines](https://jsonlines.org/). |
+| `wql <query>` | Run a WQL query in the `ROOT\CIMV2` namespace and print the rows to stdout as UTF-8 [JSON Lines](https://jsonlines.org/). |
 | `command <command line...>` | Run a command on the remote host, forwarding its output. `cmd`, `exec`, and `run` are aliases. |
 | `shell` | Open an interactive `cmd.exe` session on the remote host (see [Interactive shell](#interactive-shell)). |
 | `ls <directory>` | List a remote directory, or a tree, one entry per line (see [Remote files](#remote-files)). |
@@ -35,10 +36,15 @@ java -jar winrm-java-standalone.jar --help | --version
 | `cat <file>` | Copy the bytes of a remote file, or of a byte range, to stdout. |
 | `get <file> [<local path>]` | Download a remote file to a local file, digest-verified. |
 
-For `wql` and `command`, everything after the subcommand is the query or the command line;
-quoting follows your local shell's rules, and multi-word command lines are reassembled for the
-remote `cmd.exe`. `shell` takes no argument. The file subcommands take a remote path, then their
-own options, in any order.
+For `wql` and `command`, everything after the subcommand is the query or the command line, quoted
+by your local shell's rules. For `command`, the arguments are joined with spaces, and one that
+contains a space is double-quoted: write `command dir 'C:\Program Files'`, not
+`command 'dir "C:\Program Files"'`. The remote `cmd.exe` then parses the line, so its operators
+(`&`, `|`, `<`, `>`, `^`, `%`) keep their meaning outside quotes:
+`command ipconfig '|' findstr IPv4` filters on the host. Git Bash rewrites an argument that starts with `/` into a
+Windows path: double the slash of a switch (`ipconfig //all`). `shell` takes no argument. The file
+subcommands take a remote path and their own [file options](#file-options), in any order. All
+other options go before the subcommand.
 
 ## Options
 
@@ -53,8 +59,8 @@ own options, in any order.
 | `-d, --directory <path>` | Working directory the remote command or interactive shell starts in, like `winrs -d` (only with `command` and `shell`). Default: the user's profile directory, or `C:\Users\Default` when that profile is not loaded (see `--profile`). |
 | `--env <NAME=VALUE>` | Environment variable set in the remote shell, like `winrs -env` (only with `command` and `shell`). Repeatable — one occurrence per variable; the value is split on the first `=`, so it may itself contain `=`. |
 | `--profile` | Load the user profile in the remote shell (only with `command` and `shell`): `%APPDATA%`, the user's `HKEY_CURRENT_USER` hive. Not loaded by default, the reverse of `winrs`, where `-noprofile` turns it off; see [Loading the user profile](commands.html#loading-the-user-profile). |
-| `-i, --stdin` | Forward the local standard input to the remote command (only with `command`); see below. |
-| `--https` | Connect over HTTPS. |
+| `-i, --stdin` | Always forward the local standard input to the remote command (only with `command`); forwarding is automatic when it is redirected, see below. |
+| `--https` | Connect over HTTPS. The certificate is validated against the Java trust store: for a self-signed or private-CA host, run `java -Djavax.net.ssl.trustStore=<file> -jar ...` (see [Trusting a certificate](tls.html#trusting-a-certificate)). |
 | `--https-permissive` | Trust any HTTPS certificate and hostname. Intentionally insecure: testing and isolated hosts only. Requires `--https`. |
 | `--ntlm` | Authenticate with NTLM (the default). |
 | `--kerberos` | Authenticate with Kerberos. Requires `--https`. |
@@ -88,38 +94,41 @@ The options of `ls`, `stat` and `cat` come **after** the subcommand, before or a
 ## Passwords
 
 If neither `-p` nor `-pf` is supplied, the CLI securely requests the password from the interactive
-console without echoing it. Non-interactive runs must use `--password-file` (or, less securely,
-`--password`).
+console without echoing it. The prompt needs a console, and there is none when standard input or
+output is redirected or piped (`| jq`, `> out.txt`): such runs must use `--password-file` (or,
+less securely, `--password`).
 
 Password files are decoded as UTF-8. Exactly one final LF, CRLF, or CR is removed; every other
-byte — including whitespace and earlier line endings — is part of the password.
+byte — including whitespace, earlier line endings, and a byte order mark — is part of the password.
 
 ## Kerberos
 
-By default, Kerberos uses the ambient JDK configuration (`krb5.conf` /
-`-Djava.security.krb5.*`). The CLI can instead configure the JDK for the current invocation with
-`--kerberos-kdc <host>`. If no `--kerberos-realm` is supplied, the realm is inferred by removing
-the KDC hostname's first DNS label and uppercasing the remaining suffix — for example, a KDC of
-`camus.internal.example.net` infers the realm `INTERNAL.EXAMPLE.NET`. The inference follows a
-common Active Directory DNS naming convention; it is not guaranteed by Kerberos, so specify
-`--kerberos-realm` when the realm does not match the KDC's DNS suffix or when the KDC is not a
-fully qualified DNS name. Both options are valid only with `--kerberos`, and `--kerberos-realm`
-requires `--kerberos-kdc`.
+With `--kerberos`, pass the host's FQDN to `-h`, not an IP address: the service principal is
+`HTTP/<host>` (see [Kerberos](authentication.html#kerberos-spnego)). By default, Kerberos uses the
+ambient JDK configuration (`krb5.conf` / `-Djava.security.krb5.*`). The CLI can instead configure
+the JDK for the current invocation with `--kerberos-kdc <host>`. If no `--kerberos-realm` is
+supplied, the realm is inferred by removing the KDC hostname's first DNS label and uppercasing the
+remaining suffix — for example, a KDC of `camus.internal.example.net` infers the realm
+`INTERNAL.EXAMPLE.NET`. The inference follows a common Active Directory DNS naming convention; it
+is not guaranteed by Kerberos, so specify `--kerberos-realm` when the realm does not match the
+KDC's DNS suffix or when the KDC is not a fully qualified DNS name. Both options are valid only
+with `--kerberos`, and `--kerberos-realm` requires `--kerberos-kdc`.
 
 `--allow-delegate` forwards your Kerberos ticket to the host, so the remote command can reach a
 further host as you — a UNC path, another server — where it would otherwise get *access denied*.
 The ticket must be forwardable, which the JDK asks for only when a `krb5.conf` says
-`forwardable = true` in its `[libdefaults]` section (`--kerberos-kdc` does not): otherwise the CLI
-exits with an authentication error (77) saying so. Only delegate to hosts you trust; see
+`forwardable = true` in its `[libdefaults]` section (`--kerberos-kdc` cannot set it): otherwise
+the CLI exits with an authentication error (77) saying so. Only delegate to hosts you trust; see
 [Credential delegation](authentication.html#credential-delegation) for the details.
 
 ## Basic
 
 `--basic` authenticates with HTTP Basic, sending the credential in the `Authorization` header of
 every request. It has no message protection, so the credential and payload are plaintext over HTTP —
-combine it with `--https` (and `--https-permissive` for self-signed hosts) so TLS protects them.
-On Windows, use a **bare local account name** with `-u`: the WinRM service rejects Basic for
-domain accounts and for any `DOMAIN\`-qualified name.
+combine it with `--https` so TLS protects them. Do not combine it with `--https-permissive`: any
+host impersonating the server would receive the password. For a self-signed host, trust its
+certificate instead (see `--https`). On Windows, use a **bare local account name** with `-u`: the
+WinRM service rejects Basic for domain accounts and for any `DOMAIN\`-qualified name.
 
 See [Authentication](authentication.html) for how NTLM, Kerberos, and Basic work on the wire.
 
@@ -141,8 +150,8 @@ Remote stdout and stderr are forwarded **live** to the corresponding local strea
 command runs — each chunk is flushed as it arrives, so a long-running command can be followed in
 real time. The output is decoded as UTF-8: the remote shell is created with console code page
 65001, so no code-page detection is needed and non-ASCII output survives whatever the remote
-locale. See [Character encoding](commands.html#character-encoding) for the two legacy tools that
-ignore the console code page.
+locale. A few legacy tools (`net.exe`, `chcp.com`) ignore the console code page: their non-ASCII
+characters arrive as `U+FFFD` (see [Character encoding](commands.html#character-encoding)).
 
 When the local standard input is piped or redirected, it is forwarded as the remote command's
 standard input, with pipe semantics, so filters just work:
@@ -158,8 +167,8 @@ even when only the *output* is redirected (`... command hostname > result.txt`).
 undetectable case is a pipe whose producer has written nothing by the time the CLI starts: pass
 `-i`/`--stdin` to force forwarding there. The input is delivered in full before the output is
 read: piping a large input into a command that floods its output at the same time can deadlock
-both sides (the classic pipe deadlock), exactly as with `java.lang.Process`. Input the command
-does not read, because it exits first, is discarded, as with a local pipe.
+both sides (the classic pipe deadlock). Input the command does not read, because it exits first,
+is discarded, as with a local pipe.
 
 ### `ls`, `stat`, `cat`, `get`
 
@@ -173,36 +182,29 @@ java -jar winrm-java-standalone.jar -h server.example.net -u 'DOMAIN\user' -pf p
 
 `shell` starts `cmd.exe` on the remote host and bridges it to the local terminal until the remote
 shell exits (type `exit`, or send end-of-input — Ctrl+Z then Enter on Windows, Ctrl+D elsewhere —
-which the session turns into an `exit`). The remote exit code is propagated through the usual
-[exit-code contract](#exit-codes).
+which closes the remote shell's input, so `cmd.exe` exits). The remote exit code is propagated
+through the usual [exit-code contract](#exit-codes).
 
 * **Echo is off** — the remote shell runs `cmd.exe /Q`, so the input you forward is never
   repeated back: your terminal already shows what you type, and the output stream carries the
   prompts and the command output only.
-* **The session runs under a single-byte code page**, the remote machine's ANSI one (queried
-  once per session from `Win32_OperatingSystem.CodeSet`, falling back to 1252 when the host
-  cannot answer); both what you type and what you see use it. This is deliberate: a remote
-  `cmd.exe` decodes the command lines it reads from its standard input **one byte at a time**
-  under code page 65001, so every non-ASCII character would be lost. `winrs` has the same
-  constraint. The practical limit is that characters outside the host's ANSI code page cannot be
-  typed or displayed in an interactive session — `é` on a Western-European host is fine.
-  The other subcommands are unaffected: `wql` and `command` keep code page 65001 and full UTF-8
-  output, and piped input to `command` transfers bytes unconverted.
+* **The session runs under the host's ANSI code page** (from `Win32_OperatingSystem.CodeSet`,
+  1252 when the host cannot answer), not UTF-8: under code page 65001, a remote `cmd.exe` reading
+  its input loses every non-ASCII character, as with `winrs`. So characters outside that code
+  page cannot be typed or displayed (`é` on a Western-European host is fine). `wql` and `command`
+  keep full UTF-8 output, and piped input to `command` transfers bytes unconverted.
 * **Line-oriented, like `winrs`** — input is line-buffered by the local terminal and forwarded
-  when you press Enter. There is no raw-terminal/PTY mode (with zero dependencies there is none in
-  pure Java): full-screen programs, cmd.exe line editing, tab completion, and ANSI cursor control
-  are not supported. Command output echoes back with sub-second latency; a line typed while the
-  session is idle can wait up to the poll cadence (about one second — the WSMan protocol's floor
-  for a bounded poll) before it is forwarded.
+  when you press Enter. There is no raw-terminal/PTY mode: full-screen programs, cmd.exe line
+  editing, tab completion, and ANSI cursor control are not supported. Command output echoes back
+  with sub-second latency; a line typed while the session is idle can wait up to the poll cadence
+  (about one second — the WSMan protocol's floor for a bounded poll) before it is forwarded.
 * **Ctrl+C interrupts the remote command, not the session** — it is forwarded as the WSMan
   `ctrl_c` signal, which stops the running remote child (like a console Ctrl+C) and returns to the
-  remote prompt. On a Java runtime without `sun.misc.Signal`, Ctrl+C keeps its default behavior
-  and ends the CLI (terminating the remote shell with it).
+  remote prompt.
 * **An idle session does not time out** — `-t`/`--timeout` bounds each protocol round trip, and
   every round trip of an idle session completes with the protocol's "nothing yet" answer. Only a
   server that stops answering altogether trips the timeout. A `--timeout` below 1000 ms is
-  rejected for `shell`: one poll round trip cannot complete faster (the WSMan service holds a
-  bounded request for at least 500 ms before answering "nothing yet").
+  rejected for `shell`: one poll round trip cannot complete faster.
 
 ## Remote files
 
@@ -214,7 +216,7 @@ PowerShell script does the work on the host, which needs PowerShell 2.0 or later
 ```bash
 # List: long format, machine-readable timestamps and sizes
 java -jar winrm-java-standalone.jar -h server -u 'DOMAIN\user' -pf pw.txt \
-  ls 'C:\inetpub\logs' --glob '*.log' --recursive --depth 3
+  ls 'C:\inetpub\logs' --glob '*.log' --depth 3
 
 # One path's properties
 java -jar winrm-java-standalone.jar ... stat 'C:\Windows\Temp\collect.log'
@@ -288,8 +290,8 @@ created: 2025-12-01T08:00:00.0000000Z
 lastAccessed: 2026-01-02T03:04:05.6789012Z
 ```
 
-A path that does not exist exits with `66`, any other failure (access denied, for example) with
-`70`: `stat` doubles as an existence test.
+A path that does not exist exits with `66`, a path that cannot be read (access denied, for
+example) with `70`: `stat` doubles as an existence test.
 
 ### `cat`
 
@@ -345,8 +347,7 @@ local shell parses them first:
   tolerated silence between two server responses. A large result or file can stream for longer
   than the timeout, as long as the server keeps answering; a walking `ls` signals it is alive
   every second.
-* For `command`, `stat`, and `get`, it is the **overall deadline** covering the whole operation
-  (for `command`, the command itself and any file uploads).
+* For `command`, `stat`, and `get`, it is the **overall deadline** covering the whole operation.
 * For `shell`, it bounds **each protocol round trip**; an idle interactive session never trips it
   (see [Interactive shell](#interactive-shell)).
 
@@ -362,8 +363,8 @@ See [Timeouts and Errors](timeouts-and-errors.html) for the underlying semantics
 | `64` | Invalid CLI usage. |
 | `66` | Remote path not found (`ls`, `stat`, `cat`, `get`). |
 | `69` | Connection, DNS, socket, or TLS failure. |
-| `70` | WinRM protocol or other remote failure (including access denied to a remote path, and a remote exit code not representable in 0–255). |
-| `74` | Local I/O failure: stdout closed or not writable, or a file-system error on the local file of `get` (access denied, a missing drive). |
+| `70` | WinRM protocol or other remote failure (including access denied to a remote path, an invalid WQL query, and a remote exit code not representable in 0–255). |
+| `74` | Local I/O failure: stdout closed or not writable (`ls`, `stat`, `cat`), or a file-system error on the local file of `get` (access denied, a missing drive). |
 | `77` | Authentication failure. |
 | `124` | Operation timeout. |
 
@@ -405,7 +406,7 @@ java -Djava.security.krb5.conf=krb5.conf -jar ${project.artifactId}-${project.ve
   exec dir '\\fileserver\share'
 ```
 
-Follow a long-running command live and capture the streamed WQL rows with `jq`:
+Stream WQL rows into `jq` as they arrive:
 
 ```bash
 java -jar ${project.artifactId}-${project.version}-standalone.jar \

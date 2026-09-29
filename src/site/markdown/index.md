@@ -1,5 +1,5 @@
 keywords: winrm java client, windows remote management, wsman, dependency-free, overview
-description: A dependency-free Java client for Windows Remote Management (WinRM): run WQL queries and remote commands, and read and list remote files, over NTLM or Kerberos.
+description: A dependency-free Java client for Windows Remote Management (WinRM): run WQL queries and remote commands, and read and list remote files, over NTLM, Kerberos, or Basic authentication.
 
 # WinRM Java Client
 
@@ -24,16 +24,19 @@ All of them can also **stream**: WQL rows are consumed page by page as they arri
 returning a `java.lang.Process`-like handle), and file contents and directory listings are
 decoded as the host sends them — memory stays bounded regardless of the result size.
 
+The standalone jar is also a [command-line client](cli.html) for the same operations (`wql`,
+`command`, `shell`, `ls`, `stat`, `cat`, `get`).
+
 It supports **NTLM** over HTTP (with message encryption) and HTTPS, **Kerberos (SPNEGO)** over
 HTTPS, and **HTTP Basic** over HTTPS ([Authentication](authentication.html)).
 
-Since 2.0.0 the client has **zero runtime dependencies** (no Apache CXF / JAX-WS / JAXB stack, no SMB
+Since 2.0.00 the client has **zero runtime dependencies** (no Apache CXF / JAX-WS / JAXB stack, no SMB
 stack) and is immune by construction to JAXP `ServiceLoader` conflicts, because it uses the
 JDK-default XML factories. Problems are reported through exceptions only — the library pulls in no
 logging framework.
 
 > [!WARNING]
-> **Upgrading from 1.x?** Version 2.0.0 removed the legacy Apache CXF backend and now
+> **Upgrading from 1.x?** Version 2.0.00 removed the legacy Apache CXF backend and now
 > **validates TLS certificates and verifies hostnames by default**. If you connect over HTTPS to
 > hosts with self-signed certificates, read [Migrating from 1.x](migrating-from-1x.html) first.
 
@@ -62,13 +65,13 @@ The library is published on [Maven Central](https://central.sonatype.com/artifac
 See [Installation](installation.html) for the coordinates, the supported JDKs, and the standalone
 command-line jar.
 
-## A first WQL query
+## Quick start
 
 > [!NOTE]
 > **On the target host**, WinRM must be enabled and the account must have sufficient privileges.
 > Windows Server 2012 and later have WinRM enabled by default and an administrator account works
-> with no configuration; Windows 10 / 11, non-administrator accounts, and local (non-domain)
-> administrator accounts all need host-side setup. See
+> with no configuration; Windows 10 / 11, non-administrator accounts, and local administrator
+> accounts other than the built-in `Administrator` need host-side setup. See
 > [Preparing the Windows Host](preparing-the-host.html).
 
 Everything starts with the fluent
@@ -128,6 +131,28 @@ hierarchy. The static one-shot helpers that predate `WinRMClient`
 [`WinRMCommandExecutor.execute(...)`](apidocs/org/metricshub/winrm/command/WinRMCommandExecutor.html))
 remain available and unchanged, with their checked exceptions.
 
+## Client options
+
+`build()` does not connect: the first operation does. A client may be shared between threads, but
+its connection is a serial channel: operations run one at a time, and an open stream or process
+holds the connection until it is closed. For parallel work, use one client per concurrent task.
+
+Besides the host name passed to `builder(...)`, only `credentials(...)` is mandatory on the
+[builder](apidocs/org/metricshub/winrm/WinRMClient.Builder.html):
+
+| Option | Default | Details |
+| --- | --- | --- |
+| `credentials(String, char[])` | required | [User name and domain](authentication.html#user-name-and-domain) |
+| `https()` / `http()`, `port(int)` | HTTP; port 5985 (5986 with HTTPS) | [TLS / HTTPS](tls.html) |
+| `authentication(AuthScheme...)` | NTLM | [Authentication](authentication.html) |
+| `ticketCache(Path)`, `allowDelegation()` | none, off | [Kerberos](authentication.html#kerberos-spnego), [Credential delegation](authentication.html#credential-delegation) |
+| `sslContext(SSLContext)` / `trustAllCertificates()` | JDK trust store, hostname verified | [TLS / HTTPS](tls.html) |
+| `timeout(Duration)` | 30 s | [Timeouts and Errors](timeouts-and-errors.html) |
+| `retries(int, Duration)` | no retry | [Retrying](timeouts-and-errors.html#retrying-transient-connection-failures) |
+| `namespace(String)` | `ROOT\CIMV2` | [Choosing a namespace](wql.html#choosing-a-namespace) |
+| `loadUserProfile()` | not loaded | [Loading the user profile](commands.html#loading-the-user-profile) |
+| `consoleCodePage(int)` | 65001 (UTF-8) | [Input encoding](commands.html#input-encoding) |
+
 ## Where to go next
 
 * [Installation](installation.html) — coordinates, supported JDKs, and the standalone CLI jar
@@ -138,9 +163,9 @@ remain available and unchanged, with their checked exceptions.
 * [File Transfers](file-transfers.html) — how files are copied to the host and downloaded back through the WinRM channel
 * [Remote Files](files.html) — read remote files (whole, byte ranges, tails, streams, digests), get file properties, list directories
 * [Command-Line Client](cli.html) — the standalone jar's manual page
-* [Authentication](authentication.html) — NTLM and Kerberos
+* [Authentication](authentication.html) — NTLM, Kerberos (including credential delegation), and Basic
 * [TLS / HTTPS](tls.html) — certificate validation and trust stores
 * [Timeouts and Errors](timeouts-and-errors.html) — timeout semantics and the exception surface
-* [Migrating from 1.x](migrating-from-1x.html) — the 2.0.0 breaking changes, and moving to the fluent API
+* [Migrating from 1.x](migrating-from-1x.html) — the 2.0.00 breaking changes, and moving to the fluent API
 * [Migrating from winrm4j](migrating-from-winrm4j.html) — moving from cloudsoft/winrm4j: option mapping and behavioral differences
 * [Legacy API](legacy.html) — the static one-shot helpers that predate `WinRMClient`

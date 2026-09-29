@@ -8,9 +8,10 @@ description: How the WinRM Java Client reads files and lists directories on the 
 WinRM has no file-access operation of its own (nothing like SFTP's `READ`), so the client reads
 remote files and lists directories **through the WinRM command shell**: a small PowerShell script
 does the work on the host and writes the result in an encoding-proof form, and the client reads
-it as it arrives. No SMB, no extra port, no share. This is the reverse direction of
-[File Transfers](file-transfers.html). The standalone jar exposes it as the `ls`, `stat`, `cat`,
-and `get` subcommands — see the [Command-Line Client](cli.html#remote-files) manual.
+it as it arrives. No SMB, no extra port, no share. [File Transfers](file-transfers.html) covers
+copying files to the host, and how downloads work. The standalone jar exposes remote file access
+as the `ls`, `stat`, `cat`, and `get` subcommands — see the
+[Command-Line Client](cli.html#remote-files) manual.
 
 ## Reading a file
 
@@ -21,10 +22,11 @@ remote host; nothing is sent until a terminal is called:
 // Whole file, bytes (byte-exact: nothing converted, a BOM is kept)
 byte[] content = client.file("C:\\Windows\\Temp\\collect.bin").readBytes();
 
-// Whole file, text — the charset is always explicit, never guessed
+// Whole file, text — the charset is always explicit, never guessed (UTF-8 keeps a BOM as U+FEFF)
 String text = client.file("C:\\inetpub\\logs\\u_ex260729.log").readText(StandardCharsets.UTF_8);
 
-// Integrity: only the digest is transferred (MD5, SHA1, SHA256, SHA384, SHA512)
+// Integrity: the whole file's digest, as lowercase hex (MD5, SHA1, SHA256, SHA384, SHA512);
+// only the digest is transferred, and offset/length do not apply
 String sha256 = client.file("C:\\Windows\\Temp\\collect.ps1").digest("SHA256");
 ```
 
@@ -71,10 +73,11 @@ try (BufferedReader reader = client.file("D:\\logs\\huge.log").openReader(Standa
 ```
 
 The stream passes the content on as it arrives: memory stays bounded whatever the file size.
-Like a [`RemoteProcess`](commands.html), **it must be closed** — it holds the client's connection
-until it reaches its end or is closed, and closing it early stops the remote read. The file is
-opened before `openStream()` returns, so a missing file fails there; a failure midway is reported
-by `read()`, never as a silently short read.
+Like a [`RemoteProcess`](commands.html#streaming-the-output), **it must be closed** — it holds the
+client's connection until it reaches its end or is closed (other operations on the same client
+wait meanwhile), and closing it early stops the remote read. The file is opened before
+`openStream()` returns, so a missing file fails there; a failure midway is reported by `read()`,
+never as a silently short read.
 
 ## Downloading to a local file
 
@@ -86,9 +89,8 @@ half-written. `client.downloadFile(remote, local)` does the same with the client
 long bytes = client.file("C:\\Windows\\Temp\\collect.log").downloadTo(Path.of("collect.log"));
 ```
 
-It streams, so memory stays bounded whatever the size of the file, and its timeout is a
-wall-clock deadline for the whole transfer. The mechanics, the guarantees and the measured speed
-are described in [File Transfers](file-transfers.html#downloading-a-file).
+How it works, its timeout and its speed are described in
+[Downloading a file](file-transfers.html#downloading-a-file).
 
 ## Timeouts
 
@@ -130,21 +132,14 @@ operation. See [Timeouts and Errors](timeouts-and-errors.html).
 The mechanism is designed for **configuration files, logs and small data files — not bulk data**.
 Measured over HTTP with NTLM encryption, `openStream()` reads about **1.8–2.0 MB/s**: a 20 MiB
 file in 10.6–12 seconds, on Windows Server 2008 R2 (PowerShell 2.0), 2019 and 2022
-(PowerShell 5.1) alike. A small file costs about a second, mostly the PowerShell startup. For
+(PowerShell 5.1) alike. A small file costs under a second, mostly the PowerShell startup. For
 gigabytes, use SMB.
 
 The limit is on the host, not in the network or the client: the WinRM service reads a command's
-output pipe itself, **at most 32 KiB per read and about 60 reads per second** per output stream —
-about 2 MB/s of output whatever the command. The reader runs at that limit: the host writes the
-file's raw bytes 64 KiB at a time, so every read is a full one and carries nothing but content
-(base64 text would carry only 3 bytes of the file in 4, and measured a third slower). Neither the
-client's `MaxEnvelopeSize` nor the host's `MaxEnvelopeSizekb` changes the limit — raising them
-only makes each response larger and proportionally slower to come.
-
-The same limit applies to any command output: a command that writes its output in small pieces —
-line by line, like `Write-Output` or `type` — gets only what accumulated in the 4 KiB pipe at each
-read, about 0.3 MB/s. Parallel commands, each on its own `WinRMClient`, add up: each command gets
-its own output pipeline.
+output pipe **at most 32 KiB at a time, about 60 times per second** — about 2 MB/s at best. The
+reader's script writes the file's raw bytes 64 KiB at a time, so it runs at that ceiling; a
+command that writes line by line (`Write-Output`, `type`) gets about 0.3 MB/s. Raising the host's
+`MaxEnvelopeSizekb` does not help. Parallel reads, each on its own `WinRMClient`, add up.
 
 ## File properties
 
@@ -174,8 +169,10 @@ invalid path, PowerShell unavailable or constrained.
 
 ## Listing a directory
 
-`list()` prepares the listing of a directory; set its filters, then `execute()` it or
-`stream()` it:
+`list()` prepares the listing of a directory
+([`RemoteDirectoryListing`](apidocs/org/metricshub/winrm/RemoteDirectoryListing.html)); set its
+filters, then `execute()` it into a
+[`RemoteFileList`](apidocs/org/metricshub/winrm/RemoteFileList.html) or `stream()` it:
 
 ```java
 RemoteFileList logs = client.file("C:\\inetpub\\logs").list()
@@ -215,10 +212,12 @@ discarded locally. The filters select what is *reported*, not where the walk goe
 `recursive()`, every subdirectory is traversed, whatever the glob or the type filter.
 
 Like the other streaming terminals, **a `stream()` must be closed** (try-with-resources): it
-holds the client's connection until it is exhausted or closed, and closing it early stops the
-remote walk. Failures are thrown from the stream's operations, when the host reports them. The
-host signals it is alive every second while it walks, so the inactivity timeout only trips when
-the host is unresponsive — or when reading a single directory takes longer than the timeout.
+holds the client's connection until it is exhausted or closed (other operations on the same
+client wait: to read or digest each entry, `execute()` the listing first), and closing it early
+stops the remote walk. Failures are thrown from the stream's operations, when the host reports
+them. The host signals it is alive every second while it walks, so the inactivity timeout only
+trips when the host is unresponsive — or when reading a single directory takes longer than the
+timeout.
 
 ### Links and inaccessible directories
 
@@ -244,20 +243,16 @@ the walk itself counts: a recursive `*.dll` over 10 MB in System32 takes under a
 
 ## How the metadata travels
 
-The listing does not parse `dir` output (locale-dependent columns, dates and decimal separators,
-minute granularity), nor use `Get-ChildItem` (whose `-Depth`, `-File` and `-Directory` need
-PowerShell 3 to 5, and whose object pipeline is slow on big trees). A small script walks the tree
-with the .NET `DirectoryInfo` API and an explicit stack — on every PowerShell version from 2.0 —
-and writes **one ASCII line per entry**: the attributes, size and timestamps as plain integers
-(Windows file times), and only the path base64-encoded (UTF-8). Non-ASCII names therefore
-round-trip exactly, whatever the remote console code page, and a truncated or malformed line
-fails with a clear exception instead of producing a half-populated entry.
+A small script walks the tree with the .NET `DirectoryInfo` API — on every PowerShell version from
+2.0 — and writes **one ASCII line per entry**: the attributes, size and timestamps as plain
+integers, and only the path base64-encoded (UTF-8). Non-ASCII names therefore round-trip exactly,
+whatever the remote console code page, and a truncated or malformed line fails with a clear
+exception instead of producing a half-populated entry.
 
-WMI could serve metadata too (`CIM_DataFile`, `CIM_Directory` and `ASSOCIATORS OF` queries through
-[`client.wql(...)`](wql.html)), and remains an alternative where PowerShell is constrained — but
-the WMI file provider is notoriously slow (an unindexed `CIM_DataFile` query on a large tree can
-take minutes), a recursive listing needs one query per directory, and timestamps come back as
-DMTF strings.
+Where PowerShell is constrained, `SELECT` queries on `CIM_DataFile` and `CIM_Directory` through
+[`client.wql(...)`](wql.html) can serve metadata instead, much more slowly: an unindexed
+`CIM_DataFile` query on a large tree can take minutes, and a recursive listing needs one query per
+directory.
 
 ## Paths and limitations
 
