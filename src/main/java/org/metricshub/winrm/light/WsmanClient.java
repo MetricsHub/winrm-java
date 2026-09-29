@@ -1327,16 +1327,26 @@ final class WsmanClient implements AutoCloseable {
 				if (instance.getNodeType() != Node.ELEMENT_NODE) {
 					continue;
 				}
-				final Map<String, String> row = new LinkedHashMap<>();
+				// A WMI array comes back as sibling elements sharing one name: join them. Built with
+				// StringBuilders so a large array (SMBIOS raw tables: tens of thousands of bytes) is
+				// appended in linear time rather than re-copied on every element.
+				final Map<String, StringBuilder> values = new LinkedHashMap<>();
 				final NodeList props = instance.getChildNodes();
 				for (int k = 0; k < props.getLength(); k++) {
 					final Node prop = props.item(k);
-					if (prop.getNodeType() == Node.ELEMENT_NODE) {
-						// A WMI array comes back as sibling elements sharing one name: join them.
-						row.merge(((Element) prop).getLocalName(), prop.getTextContent(), (a, b) -> a + arraySeparator + b);
+					if (prop.getNodeType() != Node.ELEMENT_NODE) {
+						continue;
+					}
+					final StringBuilder value = values.get(((Element) prop).getLocalName());
+					if (value == null) {
+						values.put(((Element) prop).getLocalName(), new StringBuilder(prop.getTextContent()));
+					} else {
+						value.append(arraySeparator).append(prop.getTextContent());
 					}
 				}
-				if (!row.isEmpty()) {
+				if (!values.isEmpty()) {
+					final Map<String, String> row = new LinkedHashMap<>();
+					values.forEach((name, value) -> row.put(name, value.toString()));
 					rows.add(row);
 				}
 			}
