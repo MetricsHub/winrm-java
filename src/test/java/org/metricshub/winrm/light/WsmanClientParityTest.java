@@ -113,11 +113,40 @@ class WsmanClientParityTest {
 
 		for (final Document doc : List.of(wsenItems, wsmanItems)) {
 			final List<Map<String, String>> rows = new ArrayList<>();
-			WsmanClient.collectItems(doc, rows);
+			WsmanClient.collectItems(doc, rows, "|");
 			assertEquals(1, rows.size());
 			assertEquals("Spooler", rows.get(0).get("Name"));
 			assertEquals("Running", rows.get(0).get("State"));
 		}
+	}
+
+	@Test
+	void arrayPropertyElementsAreJoinedWithTheSeparator() throws Exception {
+		// WS-Management sends a WMI array as sibling elements sharing one name; a WMI NULL is xsi:nil.
+		final Document doc = parse(
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
+				"<s:Body><wsen:PullResponse xmlns:wsen=\"" +
+				WSEN +
+				"\">" +
+				"<wsman:Items xmlns:wsman=\"" +
+				WSMAN +
+				"\">" +
+				"<p:Cfg xmlns:p=\"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/Cfg\"" +
+				" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">" +
+				"<p:IPAddress>192.0.2.10</p:IPAddress>" +
+				"<p:Caption>eth0</p:Caption>" +
+				"<p:IPAddress>fe80::1</p:IPAddress>" +
+				"<p:DefaultIPGateway xsi:nil=\"true\"/>" +
+				"</p:Cfg>" +
+				"</wsman:Items>" +
+				"</wsen:PullResponse></s:Body></s:Envelope>"
+		);
+		final List<Map<String, String>> rows = new ArrayList<>();
+		WsmanClient.collectItems(doc, rows, ", ");
+		assertEquals(1, rows.size());
+		assertEquals("192.0.2.10, fe80::1", rows.get(0).get("IPAddress"));
+		assertEquals("eth0", rows.get(0).get("Caption"));
+		assertEquals("", rows.get(0).get("DefaultIPGateway"));
 	}
 
 	@Test
@@ -140,7 +169,7 @@ class WsmanClientParityTest {
 				"</wsen:PullResponse></s:Body></s:Envelope>"
 		);
 		final List<Map<String, String>> rows = new ArrayList<>();
-		WsmanClient.collectItems(doc, rows);
+		WsmanClient.collectItems(doc, rows, "|");
 		assertEquals(1, rows.size());
 		assertEquals("real-row", rows.get(0).get("Name"));
 	}

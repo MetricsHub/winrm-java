@@ -109,7 +109,7 @@ Each [`WqlRow`](apidocs/org/metricshub/winrm/WqlRow.html) exposes the instance p
 | Method | Returns | Description |
 | --- | --- | --- |
 | `string(String)` | `String` | The property value, or `null` when the row has no such property. |
-| `get(String)` | `Object` | The same value (currently always a `String`). |
+| `get(String)` | `Object` | The same value (always a `String`). |
 | `asMap()` | `Map<String, Object>` | All properties, in server order (unmodifiable). |
 
 Property lookup is **case-insensitive**, matching WMI semantics: `row.string("name")` and
@@ -117,6 +117,10 @@ Property lookup is **case-insensitive**, matching WMI semantics: `row.string("na
 
 Values are the text WinRM sends, unconverted: parse numbers, booleans and dates yourself. A WMI
 `NULL` comes back as an empty string.
+
+A WMI **array** property (`IPAddress` in `Win32_NetworkAdapterConfiguration`, `Capabilities` in
+`Win32_DiskDrive`, ...) comes back as a single string, its elements joined with `|`:
+`"192.0.2.10|fe80::1"`. The builder's `arraySeparator(String)` changes the separator.
 
 ### Column order and case
 

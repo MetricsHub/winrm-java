@@ -59,6 +59,9 @@ import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
  */
 public final class LightWinRMService implements WindowsRemoteExecutor {
 
+	/** The default string joining the elements of a WMI array property in a WQL row. */
+	public static final String DEFAULT_ARRAY_SEPARATOR = "|";
+
 	private final WinRMEndpoint winRMEndpoint;
 	private final WsmanClient client;
 	private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -211,7 +214,8 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	/**
 	 * Create a light WinRM executor that may delegate the caller's Kerberos credentials to the host,
 	 * so remote commands can authenticate onward as the caller (the second hop), and may load the
-	 * user profile in the command shell.
+	 * user profile in the command shell. WMI array properties are joined with
+	 * {@link #DEFAULT_ARRAY_SEPARATOR}.
 	 *
 	 * @param winRMEndpoint endpoint with credentials (mandatory)
 	 * @param timeout timeout in milliseconds (must be &gt; 0)
@@ -235,6 +239,8 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	 * @return a new {@code LightWinRMService}
 	 * @throws WinRMException on invalid arguments or an unsupported authentication request
 	 */
+	// CPD-OFF — a compatibility overload: its parameter list is the next overload's minus the
+	// separator, and reordering the parameters to fool the detector would break callers.
 	public static LightWinRMService createInstance(
 		final WinRMEndpoint winRMEndpoint,
 		final long timeout,
@@ -248,7 +254,68 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final int connectRetries,
 		final long retryDelay
 	) throws WinRMException {
+		return createInstance(
+			winRMEndpoint,
+			timeout,
+			ticketCache,
+			authentications,
+			allowDelegation,
+			sslContext,
+			trustAllCertificates,
+			consoleCodePage,
+			loadUserProfile,
+			DEFAULT_ARRAY_SEPARATOR,
+			connectRetries,
+			retryDelay
+		);
+		// CPD-ON
+	}
+
+	/**
+	 * Create a light WinRM executor that may delegate the caller's Kerberos credentials to the host,
+	 * so remote commands can authenticate onward as the caller (the second hop), may load the
+	 * user profile in the command shell, and joins WMI array properties with a custom separator.
+	 *
+	 * @param winRMEndpoint endpoint with credentials (mandatory)
+	 * @param timeout timeout in milliseconds (must be &gt; 0)
+	 * @param ticketCache Kerberos ticket cache path (used by the Kerberos scheme; {@code null} logs
+	 *        in with the password)
+	 * @param authentications requested authentication schemes, tried in order (NTLM, Kerberos, and/or Basic);
+	 *        {@code null}/empty means NTLM only
+	 * @param allowDelegation whether Kerberos forwards the caller's ticket-granting ticket to the
+	 *        host (which must then be forwardable); requires Kerberos among {@code authentications}
+	 * @param sslContext the {@link SSLContext} providing the HTTPS socket factory (hostname
+	 *        verification stays on); {@code null} uses the default configuration
+	 * @param trustAllCertificates when {@code true} (and no {@code sslContext} is given), trust every
+	 *        server certificate and skip hostname verification — insecure, testing only
+	 * @param consoleCodePage the console code page of the command shell; 0 keeps the default 65001,
+	 *        which makes command output UTF-8 whatever the remote locale
+	 * @param loadUserProfile whether the command shell loads the user profile (registry hive,
+	 *        per-user environment variables); {@code false} is the historical behavior
+	 * @param arraySeparator the string joining the elements of a WMI array property in a WQL row;
+	 *        see {@link #DEFAULT_ARRAY_SEPARATOR}
+	 * @param connectRetries how many times one round trip may re-attempt to connect and authenticate
+	 *        (must be &gt;= 0); 0 keeps the historical fail-fast behavior
+	 * @param retryDelay the pause in milliseconds before each retry (must be &gt;= 0)
+	 * @return a new {@code LightWinRMService}
+	 * @throws WinRMException on invalid arguments or an unsupported authentication request
+	 */
+	public static LightWinRMService createInstance(
+		final WinRMEndpoint winRMEndpoint,
+		final long timeout,
+		final java.nio.file.Path ticketCache,
+		final List<AuthenticationEnum> authentications,
+		final boolean allowDelegation,
+		final SSLContext sslContext,
+		final boolean trustAllCertificates,
+		final int consoleCodePage,
+		final boolean loadUserProfile,
+		final String arraySeparator,
+		final int connectRetries,
+		final long retryDelay
+	) throws WinRMException {
 		Utils.checkNonNull(winRMEndpoint, "winRMEndpoint");
+		Utils.checkNonNull(arraySeparator, "arraySeparator");
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
 		if (connectRetries < 0) {
 			throw new IllegalArgumentException("connectRetries must not be negative.");
@@ -298,6 +365,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			winRMEndpoint.getRawUsername(),
 			consoleCodePage,
 			loadUserProfile,
+			arraySeparator,
 			connectRetries,
 			retryDelay
 		);

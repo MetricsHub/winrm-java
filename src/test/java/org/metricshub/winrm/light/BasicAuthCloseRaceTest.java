@@ -48,6 +48,7 @@ class BasicAuthCloseRaceTest {
 			USERNAME,
 			65001,
 			false,
+			"|",
 			0,
 			0L
 		);
