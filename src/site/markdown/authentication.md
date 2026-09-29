@@ -153,8 +153,9 @@ over HTTPS only, where TLS protects both.
 On Windows, WinRM accepts Basic for **local accounts only**, addressed by their **bare user
 name**: a domain account, or a local account written `MACHINE\user` or `DOMAIN\user`, gets a `401`
 even with the correct password. Use `credentials("user", password)`, not
-`credentials("MACHINE\\user", password)`. (The client itself sends a qualified name unchanged, for
-the non-Microsoft WSMan services that accept one.)
+`credentials("MACHINE\\user", password)`. (The client itself does not reject a qualified name, for
+the non-Microsoft WSMan services that accept one; like every user name, it is sent with all
+whitespace removed: `DOMAIN\John Smith` becomes `DOMAIN\JohnSmith`.)
 
 ```java
 try (WinRMClient client = WinRMClient.builder("server.example.com")

@@ -127,8 +127,8 @@ Two short-lived artifacts exist next to the destination during a transfer:
 
 `<unique>` combines a process-wide counter with 64 random bits, so concurrent transfers — same
 JVM or not — never collide. Both files are removed on success and best-effort deleted on failure;
-an interrupted transfer can leave them behind, and only the transfer directory's 30-day purge
-reclaims them.
+an interrupted transfer can leave them behind. The 30-day purge below reclaims them in the
+transfer directory; next to an `uploadFile(...)` destination, they stay until deleted.
 
 ### Housekeeping
 
