@@ -330,6 +330,7 @@ public final class WinRMClient implements AutoCloseable {
 		private boolean trustAllCertificates;
 		private int consoleCodePage;
 		private boolean loadUserProfile;
+		private String arraySeparator = LightWinRMService.DEFAULT_ARRAY_SEPARATOR;
 		private SSLContext sslContext;
 		private Duration timeout = DEFAULT_TIMEOUT;
 		private int retries;
@@ -610,6 +611,20 @@ public final class WinRMClient implements AutoCloseable {
 		}
 
 		/**
+		 * Set the string that joins the elements of a WMI array property in a WQL row, such as
+		 * {@code IPAddress} in {@code Win32_NetworkAdapterConfiguration}. Default: {@code |}
+		 * ({@code "192.0.2.10|fe80::1"}).
+		 *
+		 * @param arraySeparator the separator (may be empty, not {@code null})
+		 * @return this builder
+		 */
+		public Builder arraySeparator(final String arraySeparator) {
+			Utils.checkNonNull(arraySeparator, "arraySeparator");
+			this.arraySeparator = arraySeparator;
+			return this;
+		}
+
+		/**
 		 * Build the client. This does not connect yet: the connection is established and
 		 * authenticated by the first operation.
 		 *
@@ -656,6 +671,7 @@ public final class WinRMClient implements AutoCloseable {
 					trustAllCertificates,
 					consoleCodePage,
 					loadUserProfile,
+					arraySeparator,
 					retries,
 					toMillis(retryDelay)
 				);

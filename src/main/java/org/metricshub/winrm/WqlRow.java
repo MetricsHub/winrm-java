@@ -46,7 +46,8 @@ public final class WqlRow {
 	 * back to a case-insensitive match — WMI property names are case-insensitive.
 	 *
 	 * @param property the property name
-	 * @return the property value, or {@code null} when the property is absent or null
+	 * @return the property value, or {@code null} when the row has no such property (a WMI
+	 *         {@code NULL} is an empty string)
 	 */
 	public Object get(final String property) {
 		Utils.checkNonNull(property, "property");
@@ -65,7 +66,8 @@ public final class WqlRow {
 	 * Get the value of a property as a string. Same lookup semantics as {@link #get(String)}.
 	 *
 	 * @param property the property name
-	 * @return the property value as a string, or {@code null} when the property is absent or null
+	 * @return the property value as a string, or {@code null} when the row has no such property
+	 *         (a WMI {@code NULL} is an empty string)
 	 */
 	public String string(final String property) {
 		final Object value = get(property);

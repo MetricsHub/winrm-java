@@ -59,6 +59,9 @@ import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
  */
 public final class LightWinRMService implements WindowsRemoteExecutor {
 
+	/** The default string joining the elements of a WMI array property in a WQL row. */
+	public static final String DEFAULT_ARRAY_SEPARATOR = "|";
+
 	private final WinRMEndpoint winRMEndpoint;
 	private final WsmanClient client;
 	private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -203,6 +206,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			trustAllCertificates,
 			consoleCodePage,
 			false,
+			DEFAULT_ARRAY_SEPARATOR,
 			connectRetries,
 			retryDelay
 		);
@@ -229,6 +233,8 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	 *        which makes command output UTF-8 whatever the remote locale
 	 * @param loadUserProfile whether the command shell loads the user profile (registry hive,
 	 *        per-user environment variables); {@code false} is the historical behavior
+	 * @param arraySeparator the string joining the elements of a WMI array property in a WQL row;
+	 *        see {@link #DEFAULT_ARRAY_SEPARATOR}
 	 * @param connectRetries how many times one round trip may re-attempt to connect and authenticate
 	 *        (must be &gt;= 0); 0 keeps the historical fail-fast behavior
 	 * @param retryDelay the pause in milliseconds before each retry (must be &gt;= 0)
@@ -245,10 +251,12 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final boolean trustAllCertificates,
 		final int consoleCodePage,
 		final boolean loadUserProfile,
+		final String arraySeparator,
 		final int connectRetries,
 		final long retryDelay
 	) throws WinRMException {
 		Utils.checkNonNull(winRMEndpoint, "winRMEndpoint");
+		Utils.checkNonNull(arraySeparator, "arraySeparator");
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
 		if (connectRetries < 0) {
 			throw new IllegalArgumentException("connectRetries must not be negative.");
@@ -298,6 +306,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			winRMEndpoint.getRawUsername(),
 			consoleCodePage,
 			loadUserProfile,
+			arraySeparator,
 			connectRetries,
 			retryDelay
 		);

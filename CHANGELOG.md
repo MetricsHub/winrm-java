@@ -158,6 +158,12 @@ Consequences:
 
 ### Fixed
 
+- **WQL array properties keep all their elements** (#189). A WMI array (`IPAddress`,
+  `DefaultIPGateway`, `Capabilities`, ...) used to yield only its last element, without any
+  error. Its elements are now joined with `|` (`"192.0.2.10|fe80::1"`); the new
+  `WinRMClient.Builder.arraySeparator(String)` changes the separator. The `WqlRow` Javadoc now
+  says what the code does: a WMI `NULL` is an empty string, `null` means "no such property".
+
 - **Streaming terminals now report protocol failures as `WinRMClientException`** (#188).
   `WqlRequest.stream()`, `CommandRequest.start()`, `RemoteFile.openStream()`/`openReader()`,
   `RemoteDirectoryListing.stream()` and the closing of a `RemoteProcess` let raw

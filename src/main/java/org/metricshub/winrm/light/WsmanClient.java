@@ -91,6 +91,7 @@ final class WsmanClient implements AutoCloseable {
 	private final long timeoutMs;
 	private final int consoleCodePage;
 	private final boolean loadUserProfile;
+	private final String arraySeparator;
 	private final String url;
 	private final String rawUsername;
 	private final AuthScheme auth;
@@ -189,12 +190,14 @@ final class WsmanClient implements AutoCloseable {
 		final String rawUsername,
 		final int consoleCodePage,
 		final boolean loadUserProfile,
+		final String arraySeparator,
 		final int connectRetries,
 		final long retryDelayMs
 	) {
 		this.timeoutMs = timeoutMs;
 		this.consoleCodePage = consoleCodePage;
 		this.loadUserProfile = loadUserProfile;
+		this.arraySeparator = arraySeparator;
 		this.connectRetries = connectRetries;
 		this.retryDelayMs = retryDelayMs;
 		// A non-null socket factory selects HTTPS: TLS wraps the transport and the SOAP travels plaintext.
@@ -371,7 +374,7 @@ final class WsmanClient implements AutoCloseable {
 		private void ingest(final Document doc) {
 			page = new ArrayList<>();
 			cursor = 0;
-			collectItems(doc, page);
+			collectItems(doc, page, arraySeparator);
 			endOfSequence = hasEnumerationElement(doc, "EndOfSequence");
 			// Pull only while the server hands back a context (matching the CXF backend).
 			context = endOfSequence ? null : textNS(doc, WS_ENUMERATION_NS, "EnumerationContext");
@@ -1304,15 +1307,19 @@ final class WsmanClient implements AutoCloseable {
 		return nodes.getLength() > 0 ? nodes.item(0).getTextContent() : null;
 	}
 
-	static void collectItems(final Document doc, final List<Map<String, String>> rows) {
+	static void collectItems(final Document doc, final List<Map<String, String>> rows, final String arraySeparator) {
 		// The Items wrapper comes in the WS-Enumeration namespace (EnumerateResponse) or the WSMan
 		// namespace (PullResponse) depending on the operation; accept both, like the CXF backend, and
 		// nothing else — a WMI property or class named "Items" must not be mistaken for the wrapper.
-		collectRows(doc.getElementsByTagNameNS(WS_ENUMERATION_NS, "Items"), rows);
-		collectRows(doc.getElementsByTagNameNS(WSMAN_NS, "Items"), rows);
+		collectRows(doc.getElementsByTagNameNS(WS_ENUMERATION_NS, "Items"), rows, arraySeparator);
+		collectRows(doc.getElementsByTagNameNS(WSMAN_NS, "Items"), rows, arraySeparator);
 	}
 
-	private static void collectRows(final NodeList items, final List<Map<String, String>> rows) {
+	private static void collectRows(
+		final NodeList items,
+		final List<Map<String, String>> rows,
+		final String arraySeparator
+	) {
 		for (int i = 0; i < items.getLength(); i++) {
 			final NodeList instances = items.item(i).getChildNodes();
 			for (int j = 0; j < instances.getLength(); j++) {
@@ -1325,7 +1332,8 @@ final class WsmanClient implements AutoCloseable {
 				for (int k = 0; k < props.getLength(); k++) {
 					final Node prop = props.item(k);
 					if (prop.getNodeType() == Node.ELEMENT_NODE) {
-						row.put(((Element) prop).getLocalName(), prop.getTextContent());
+						// A WMI array comes back as sibling elements sharing one name: join them.
+						row.merge(((Element) prop).getLocalName(), prop.getTextContent(), (a, b) -> a + arraySeparator + b);
 					}
 				}
 				if (!row.isEmpty()) {
