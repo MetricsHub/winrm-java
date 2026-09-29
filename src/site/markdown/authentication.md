@@ -29,9 +29,7 @@ When `authentication(...)` is not called, **NTLM** is used.
 
 Several schemes form an **ordered fallback list**: each is tried in the given order until one
 succeeds. `authentication(KERBEROS, NTLM)` attempts Kerberos first and falls back to NTLM — for
-example when the KDC is unreachable or the clock skew is too large. Because the list contains
-Kerberos, it requires an HTTPS transport: Kerberos is rejected over plain HTTP rather than being
-silently dropped (see [Kerberos](#kerberos-spnego) below).
+example when the KDC is unreachable or the clock skew is too large.
 
 ## User name and domain
 
@@ -43,6 +41,10 @@ remember to escape the backslash in a string literal:
 "DOMAIN\\Administrator"   // domain = DOMAIN, user = Administrator
 "Administrator"           // no domain
 ```
+
+With Kerberos the `DOMAIN\` part is ignored: the principal is the account name in the default
+realm of the [Kerberos configuration](#kerberos-configuration). Write `user@REALM` (e.g.
+`admin@EXAMPLE.COM`) to name the realm explicitly.
 
 The password is a `char[]`, and the builder deliberately does **not** copy it: the client keeps
 that same array by reference end-to-end and never converts it to a `String` internally, so after
@@ -75,8 +77,9 @@ try (WinRMClient client = WinRMClient.builder("server.internal.example.com")
 }
 ```
 
-Requesting Kerberos on a plain-HTTP client fails at `build()` with a clear message: there is no
-Kerberos message encryption over HTTP.
+Requesting Kerberos on a plain-HTTP client fails at `build()`, even in a fallback list such as
+`(KERBEROS, NTLM)`, rather than being silently dropped: there is no Kerberos message encryption
+over HTTP.
 
 ### Kerberos configuration
 
@@ -90,8 +93,9 @@ java -Djava.security.krb5.realm=EXAMPLE.COM \
      -cp ... MyApp
 ```
 
-The optional `ticketCache(Path)` builder option points at a Kerberos ticket cache to use for the
-connection; without it, Kerberos logs in with the user name and password.
+The optional `ticketCache(Path)` builder option logs in from a Kerberos ticket cache (filled by
+`kinit`, for example) instead of with the password. `credentials(...)` is still required: its user
+name must be the cached ticket's principal, and the password is not used.
 
 ### Credential delegation
 
@@ -117,8 +121,8 @@ The TGT must be **forwardable**, and the JDK asks the KDC for a forwardable one 
 set `forwardable = true` in the `[libdefaults]` section of the JDK's `krb5.conf` (see
 [Kerberos configuration](#kerberos-configuration)) — or, with `ticketCache(Path)`, get the cached
 ticket with `kinit -f`. The `java.security.krb5.realm` and `java.security.krb5.kdc` properties
-cannot say it, but the file is read in addition to them, so next to them a file with only these
-lines is enough:
+cannot request a forwardable ticket, but the JDK still reads `krb5.conf` when they are set, so a
+file with only these lines is enough:
 
 ```ini
 [libdefaults]
@@ -130,9 +134,9 @@ on the second hop. An account that Active Directory never lets be delegated (*Ac
 and cannot be delegated*, or a member of *Protected Users*) fails the same way.
 
 Unlike `winrs`, which delegates only to hosts that Active Directory trusts for delegation, the
-client forwards the ticket to any host it is enabled for (verified with a host that is not trusted
-for delegation). The host then holds a ticket that lets it act as you on the network until the
-ticket expires: enable delegation only for hosts you trust.
+client forwards the ticket whether or not the host is trusted. The host then holds a ticket that
+lets it act as you on the network until the ticket expires: enable delegation only for hosts you
+trust.
 
 `build()` rejects `allowDelegation()` when Kerberos is not among the schemes: NTLM and Basic
 credentials cannot be delegated. In an ordered fallback such as `(KERBEROS, NTLM)`, a connection
@@ -147,13 +151,10 @@ transports, but over plain HTTP the credential and the data are sent **in the cl
 over HTTPS only, where TLS protects both.
 
 On Windows, WinRM accepts Basic for **local accounts only**, addressed by their **bare user
-name**: a domain account is rejected, and so is a *local* account written with a qualifying
-prefix — `MACHINE\user` or `DOMAIN\user` gets a `401` even when the password is correct
-(verified against a real host). Use `credentials("user", password)`, not
-`credentials("MACHINE\\user", password)`. The client itself does not reject a qualified name —
-some non-Microsoft WSMan services accept one — and sends the account with all whitespace
-removed: a `DOMAIN\user` value is rebuilt as `DOMAIN` + `\` + the account, and a bare name is
-sent as-is.
+name**: a domain account, or a local account written `MACHINE\user` or `DOMAIN\user`, gets a `401`
+even with the correct password. Use `credentials("user", password)`, not
+`credentials("MACHINE\\user", password)`. (The client itself sends a qualified name unchanged, for
+the non-Microsoft WSMan services that accept one.)
 
 ```java
 try (WinRMClient client = WinRMClient.builder("server.example.com")
@@ -165,32 +166,29 @@ try (WinRMClient client = WinRMClient.builder("server.example.com")
 }
 ```
 
-The server must have Basic authentication enabled on the WinRM service — the `Basic` setting under
-the service's `auth` section, `False` by default:
+The WinRM service must have Basic enabled (it is off by default):
 `winrm set winrm/config/service/auth @{Basic=true}`; see
-[Preparing the Windows Host](preparing-the-host.html). Over HTTPS that is all that is needed, since
-TLS provides the confidentiality. Over plain HTTP — which, as noted, should not be used — the
-service would additionally have to set `AllowUnencrypted=true` (otherwise it refuses the unprotected
-SOAP), which is exactly what the HTTPS recommendation exists to avoid.
+[Preparing the Windows Host](preparing-the-host.html). Over plain HTTP it must also set
+`AllowUnencrypted=true`, or it refuses the request with a `401` or a WSMan fault, depending on the
+Windows version.
 
-Note that most server-side refusals above surface as the same `401`: a Basic authentication
-error can mean a wrong password, but also a domain-qualified or domain account, or `Basic`
-disabled on the service — check the configuration before suspecting the credential. Unencrypted
-HTTP with `AllowUnencrypted=false` is refused too, but not always as a `401`: depending on the
-Windows version, the service may authenticate the credential and then reject the unprotected
-SOAP with a WSMan fault (a `401` was observed on Server 2008 R2, a fault is reported on later
-versions), so that misconfiguration can surface as either an authentication error or a fault.
+A Basic `401` can therefore mean a wrong password, but also a domain or qualified account name,
+`Basic` disabled on the service, or plain HTTP with `AllowUnencrypted=false`: check the
+configuration before suspecting the credential.
 
 ## Authentication failures
 
-A rejected credential (after every scheme of the fallback list was tried) surfaces as a
+A credential the server rejects (HTTP `401`, after every scheme of the fallback list was tried)
+surfaces as a
 [`WinRMAuthenticationException`](apidocs/org/metricshub/winrm/exceptions/WinRMAuthenticationException.html)
 whose message has the stable form `Authentication error on <endpoint> with user name "<user>"`.
+When Kerberos is the last scheme tried and fails on the client side (a password the KDC rejects,
+an unreachable KDC, an unknown service principal, a ticket that cannot be delegated), the error is
+a plain `WinRMClientException` carrying the JDK's Kerberos message.
 
 ## Choosing the scheme on the command line
 
-The standalone jar selects the scheme with `--ntlm` (the default), `--kerberos`, or `--basic`. The
-three are mutually exclusive, and `--kerberos` requires `--https`:
+The standalone jar selects the scheme with `--ntlm` (the default), `--kerberos`, or `--basic`:
 
 ```bash
 java -jar ${project.artifactId}-${project.version}-standalone.jar \
@@ -199,33 +197,12 @@ java -jar ${project.artifactId}-${project.version}-standalone.jar \
   command whoami
 ```
 
-Instead of relying on the ambient configuration, the CLI can set the JDK Kerberos configuration for
-the current invocation:
-
-| Option | Meaning |
-| --- | --- |
-| `--kerberos-kdc <host>` | Sets the KDC and, unless `--kerberos-realm` is given, infers the realm from the KDC's DNS suffix. |
-| `--kerberos-realm <realm>` | Overrides the inferred realm. Requires `--kerberos-kdc`. |
-
-```bash
-java -jar ${project.artifactId}-${project.version}-standalone.jar \
-  -h server.internal.example.com -u 'DOMAIN\user' -pf password.txt \
-  --https --kerberos --kerberos-kdc dc01.internal.example.com \
-  command whoami
-```
-
-Here the realm is inferred as `INTERNAL.EXAMPLE.COM` by dropping the KDC's first DNS label and
-upper-casing the rest. This follows a common Active Directory naming convention but is not
-guaranteed by Kerberos — pass `--kerberos-realm` when the realm does not match the KDC's DNS suffix,
-or when the KDC is not a fully qualified DNS name.
-
-`--allow-delegate` turns on [credential delegation](#credential-delegation) for the invocation. It
-requires `--kerberos`, and the ticket must still be forwardable: `--kerberos-kdc` sets the KDC and
-the realm, not `forwardable = true`.
+Its Kerberos options (`--kerberos-kdc`, `--kerberos-realm`, `--allow-delegate`) are described in the
+[Command-Line Client](cli.html#kerberos) manual.
 
 ## See also
 
 * [Preparing the Windows Host](preparing-the-host.html) — the privileges the account needs, and why
   local administrator accounts are often denied
-* [TLS / HTTPS](tls.html) — required for Kerberos and recommended for NTLM
+* [TLS / HTTPS](tls.html) — required for Kerberos, and the only safe transport for Basic
 * [Timeouts and Errors](timeouts-and-errors.html) — how authentication failures surface

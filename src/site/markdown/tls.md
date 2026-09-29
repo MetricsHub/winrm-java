@@ -17,15 +17,21 @@ WinRMClient.builder("server.example.com")
 
 ## Validation is on by default
 
-Since 2.0.0 the client uses the JDK's default, **validating** `SSLSocketFactory`: it checks the
-server certificate against the platform trust store and **verifies the server hostname** during the
-handshake.
+Since 2.0.00 the client uses the JDK's default, **validating** `SSLSocketFactory`: it checks the
+server certificate against the JDK's trust store (its `cacerts`, not the Windows certificate store)
+and **verifies** during the handshake that the certificate matches the host name passed to
+`builder(...)`.
 
 > [!WARNING]
 > This is a change from the 1.x CXF-based client, which silently trusted every certificate and
 > skipped hostname verification. Connections over HTTPS to hosts with **self-signed or otherwise
 > untrusted certificates now fail** during the TLS handshake unless you trust the certificate or
 > explicitly opt out (below). See [Migrating from 1.x](migrating-from-1x.html).
+
+Current JDKs also disable TLS 1.0 and 1.1 (`jdk.tls.disabledAlgorithms`), so the handshake fails
+with a host that offers nothing newer (Windows Server 2008 R2 by default), whatever the trust
+settings. Enable TLS 1.2 on the host, or, for a test host, re-enable the old protocol in a file
+passed with `-Djava.security.properties=<file>`.
 
 ## Trusting a certificate
 
@@ -39,7 +45,7 @@ java -Djavax.net.ssl.trustStore=/path/to/truststore.jks \
 ```
 
 Because the client uses the JDK default socket factory, any trust store configured this way (or the
-platform's default trust store) applies automatically.
+JDK's default `cacerts`) applies automatically.
 
 ### A dedicated trust store for one client
 
@@ -93,12 +99,8 @@ precedence over the system property for that client.
 
 ## On the command line
 
-The standalone jar mirrors this behavior:
-
-| Option | Meaning |
-| --- | --- |
-| `--https` | Use HTTPS (port 5986 by default). |
-| `--https-permissive` | Trust any certificate and hostname. Intentionally insecure; testing only. Requires `--https`. |
+The standalone jar's `--https` and `--https-permissive` options are `https()` and
+`trustAllCertificates()`; see the [Command-Line Client](cli.html#options) manual:
 
 ```bash
 java -jar ${project.artifactId}-${project.version}-standalone.jar \
@@ -106,8 +108,6 @@ java -jar ${project.artifactId}-${project.version}-standalone.jar \
   --https --https-permissive \
   wql 'SELECT Name FROM Win32_ComputerSystem'
 ```
-
-`--https-permissive` sets `org.metricshub.winrm.tls.insecure=true` for that invocation.
 
 ## See also
 

@@ -7,13 +7,14 @@
 
 See **[Project Documentation](https://metricshub.org/winrm-java)** and the [Javadoc](https://metricshub.org/winrm-java/apidocs) for more information on how to use this library in your code.
 
-The Windows Remote Management (WinRM) Java Client is a library that enables to:
-* Connect to a remote Windows server using one of three authentication types (NTLM, Kerberos, or Basic)
-* Execute WMI Query Language (WQL) queries which uses HTTP/HTTPS protocols.
+The Windows Remote Management (WinRM) Java Client is a library that lets you:
+* Connect to a remote Windows server over HTTP or HTTPS with NTLM, Kerberos, or Basic authentication
+* Run WMI Query Language (WQL) queries and remote commands (`cmd.exe` or PowerShell)
+* Upload, read, list, and download remote files
 
 > ## ⚠️ Upgrading from 1.x
 >
-> Version 2.0.0 **removed the legacy Apache CXF backend**: the dependency-free **light** client is
+> Version 2.0.00 **removed the legacy Apache CXF backend**: the dependency-free **light** client is
 > the only implementation (same documented entry points; a few CXF/SMB-only public types were
 > removed). The main consequence:
 >
@@ -101,18 +102,10 @@ try (WinRMClient client = WinRMClient.builder("server01.acme.com")
 }
 ```
 
-Connection-scoped options on the builder: `https()`, `port(int)`,
-`authentication(AuthScheme.KERBEROS, AuthScheme.NTLM)` (ordered fallback; NTLM is the default —
-Kerberos in the list requires `https()`),
-`ticketCache(Path)`, `namespace(String)`, `trustAllCertificates()` (per-client alternative to the
-`org.metricshub.winrm.tls.insecure` system property; insecure, testing only), and
-`sslContext(SSLContext)` for a dedicated trust store.
-
-Per-operation options: `namespace(...)`, `timeout(...)`, and for WQL enumeration tuning
-`pageSize(int)` (WS-Enumeration `MaxElements`, 32000 by default) and `pullTimeout(Duration)`
-(`MaxTime` per Pull). Commands accept `workingDirectory(String)`, `charset(Charset)` (see
-[Character encoding](#character-encoding)), and `upload(Path...)` to copy local script files and
-rewrite the command to reference the remote copies.
+Every builder and request option (transport, authentication, TLS, timeouts, retries, working
+directory, environment, stdin, uploads, ...) is described on the
+[project site](https://metricshub.org/winrm-java) and in the
+[Javadoc](https://metricshub.org/winrm-java/apidocs).
 
 ### Character encoding
 
@@ -218,7 +211,7 @@ cleanup, and command-line substitution — are documented on the
 upgrade warning above); `trustAllCertificates()` on the builder or
 `-Dorg.metricshub.winrm.tls.insecure=true` trusts all certificates (insecure, testing only).
 Kerberos uses the ambient Kerberos configuration (`krb5.conf` / `-Djava.security.krb5.*`) unless
-the command-line KDC and realm options described below are used.
+the CLI's `--kerberos-kdc` / `--kerberos-realm` options are used.
 
 ### Legacy API
 
@@ -289,7 +282,7 @@ server, so no Windows host is needed in CI.
 ### Live run against a real host
 
 `WinRMLiveTest` runs a WQL query and a command against a **real** WinRM host (the successor of
-the pre-2.0.0 CXF-vs-light differential harness). It is skipped unless `winrm.live.host` is set:
+the pre-2.0.00 CXF-vs-light differential harness). It is skipped unless `winrm.live.host` is set:
 
 ```bash
 mvn test -Dtest=WinRMLiveTest \
@@ -305,16 +298,13 @@ for hosts with self-signed certificates).
 
 ## Release instructions
 
-The artifact is deployed to Sonatype's [Maven Central](https://central.sonatype.com/).
+The artifact is deployed to [Maven Central](https://central.sonatype.com/) through the Central
+Portal (server id `central`, inherited from `oss-parent`). Release only with the
+["Release to Maven Central"](https://github.com/metricshub/winrm-java/actions/workflows/release.yml)
+GitHub Actions workflow:
 
-The actual repository URL is https://s01.oss.sonatype.org/, with server Id `ossrh` and requires credentials to deploy
-artifacts manually.
-
-But it is strongly recommended to only use [GitHub Actions "Release to Maven Central"](actions/workflows/release.yml) to perform a release:
-
-* Manually trigger the "Release" workflow
+* Manually trigger the "Release to Maven Central" workflow
 * Specify the version being released and the next version number (SNAPSHOT)
-* Release the corresponding staging repository on [Sonatype's Nexus server](https://s01.oss.sonatype.org/)
 * Merge the PR that has been created to prepare the next version
 
 ## License

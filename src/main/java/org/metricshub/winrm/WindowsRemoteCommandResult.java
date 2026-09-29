@@ -20,6 +20,10 @@ package org.metricshub.winrm;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
+/**
+ * The result of a command run by the legacy WinRMCommandExecutor: its output, exit code and
+ * execution time.
+ */
 public class WindowsRemoteCommandResult {
 
 	private final String stdout;
@@ -32,7 +36,7 @@ public class WindowsRemoteCommandResult {
 	 *
 	 * @param stdout The stdout of the command
 	 * @param stderr The stderr of the command
-	 * @param executionTime The execution time of the command in milliseconds
+	 * @param executionTime The execution time of the command in seconds
 	 * @param statusCode The command return status code
 	 */
 	public WindowsRemoteCommandResult(
@@ -50,7 +54,7 @@ public class WindowsRemoteCommandResult {
 	/**
 	 * Get the stdout of the command.
 	 *
-	 * @return
+	 * @return the standard output of the command
 	 */
 	public String getStdout() {
 		return stdout;
@@ -59,7 +63,7 @@ public class WindowsRemoteCommandResult {
 	/**
 	 * Get the stderr of the command.
 	 *
-	 * @return
+	 * @return the standard error of the command
 	 */
 	public String getStderr() {
 		return stderr;
@@ -68,7 +72,7 @@ public class WindowsRemoteCommandResult {
 	/**
 	 * Get the execution time of the command in seconds.
 	 *
-	 * @return
+	 * @return the execution time, in seconds
 	 */
 	public float getExecutionTime() {
 		return executionTime;
@@ -77,7 +81,7 @@ public class WindowsRemoteCommandResult {
 	/**
 	 * Get the return status code of the command
 	 *
-	 * @return
+	 * @return the exit code of the command
 	 */
 	public int getStatusCode() {
 		return statusCode;

@@ -8,8 +8,8 @@ description: Timeout semantics and the exception surface of the WinRM Java Clien
 ## Timeouts
 
 Timeouts are `java.time.Duration` values and must be **at least one millisecond**. The builder's
-`timeout(...)` sets the default for every operation (30 seconds when unset), and each operation
-can override it:
+`timeout(...)` sets the default for every operation (30 seconds when unset), and each request
+can override it (`uploadFile(...)` and `downloadFile(...)` always use the client's):
 
 ```java
 try (WinRMClient client = WinRMClient.builder("server.example.com")
@@ -28,7 +28,7 @@ first operation), every WSMan round trip, and — for commands — the file uplo
 download: the whole transfer), all budgeted against the same deadline. When it elapses, the operation
 fails with
 [`WinRMTimeoutException`](apidocs/org/metricshub/winrm/exceptions/WinRMTimeoutException.html) and
-no part of it (in particular: the command itself) runs afterward.
+stops: a command not started yet is never started, and one still running is terminated.
 
 The timeout also drives the wire-level behavior: the WSMan `OperationTimeout` header and the
 socket timeouts follow each operation's own deadline.
@@ -44,8 +44,8 @@ it is an **inactivity timeout**, the longest silence tolerated from the server b
 responses. A query result can be consumed, or a command can keep streaming output, for arbitrarily
 long — but as soon as the server stays silent for a whole timeout, the operation fails with
 [`WinRMTimeoutException`](apidocs/org/metricshub/winrm/exceptions/WinRMTimeoutException.html).
-For commands, `RemoteProcess.waitFor(Duration)` provides an overall deadline on top when one is
-needed.
+For commands, `RemoteProcess.waitFor(Duration)` adds an overall deadline: it returns `false` when
+the deadline passes, and the command keeps running.
 
 ## Retrying transient connection failures
 
@@ -97,13 +97,13 @@ subtypes for the cases worth catching specifically:
 
 | Exception | Meaning |
 | --- | --- |
-| [`WinRMAuthenticationException`](apidocs/org/metricshub/winrm/exceptions/WinRMAuthenticationException.html) | The credentials were rejected (after every scheme of an ordered fallback list). |
+| [`WinRMAuthenticationException`](apidocs/org/metricshub/winrm/exceptions/WinRMAuthenticationException.html) | The server rejected the credentials (after every scheme of an ordered fallback list); the message reads `Authentication error on <endpoint> with user name "<user>"`. A Kerberos failure on the client side (login refused by the KDC, unknown SPN) is a plain `WinRMClientException` caused by a `LoginException` or `GSSException`. |
 | [`WinRMFaultException`](apidocs/org/metricshub/winrm/exceptions/WinRMFaultException.html) | The remote service answered with a WSMan fault. |
 | [`WinRMTimeoutException`](apidocs/org/metricshub/winrm/exceptions/WinRMTimeoutException.html) | The operation exceeded its timeout. |
 | [`WqlSyntaxException`](apidocs/org/metricshub/winrm/exceptions/WqlSyntaxException.html) | The WQL query does not match the supported `SELECT` syntax. |
-| [`WinRMClientException`](apidocs/org/metricshub/winrm/exceptions/WinRMClientException.html) | Base type: any other failure (connection, DNS, TLS, protocol, local I/O). |
+| [`WinRMClientException`](apidocs/org/metricshub/winrm/exceptions/WinRMClientException.html) | Base type: any other failure (connection, DNS, TLS, protocol, local I/O); the underlying exception, e.g. `java.net.ConnectException` or `javax.net.ssl.SSLHandshakeException`, is in its cause chain. |
 
-`IllegalArgumentException` (invalid option values) and `IllegalStateException` (missing
+`IllegalArgumentException` (invalid option values) and `IllegalStateException` (e.g. missing
 credentials at `build()`, or an operation on a closed client) report programming errors
 immediately, before anything touches the network.
 
@@ -114,30 +114,24 @@ the fault **programmatically**, so no message parsing is needed:
 
 | Method | Returns |
 | --- | --- |
-| `getFaultCode()` | The numeric WSManFault code, e.g. `2150858778`. |
-| `getFaultReason()` | The SOAP fault reason text. |
-| `getFaultDetail()` | The provider-level detail — where WMI puts mnemonics such as `WBEM_E_INVALID_CLASS` or `WBEM_E_INVALID_NAMESPACE`. |
+| `getFaultCode()` | The WSManFault code as a decimal `String`, e.g. `"2150858778"`, or `null` when the response carried none. |
+| `getFaultReason()` | The SOAP fault reason text, or `null`. |
+| `getFaultDetail()` | The provider-level detail — where WMI puts mnemonics such as `WBEM_E_INVALID_CLASS` or `WBEM_E_INVALID_NAMESPACE` — or `null`. |
 | `getHttpStatus()` | The HTTP status of the faulting response (typically 500). |
 
 The exception message still carries the same text as the legacy API, so message-based matching
 keeps working.
 
-### Authentication failures
-
-A rejected credential surfaces as a
-[`WinRMAuthenticationException`](apidocs/org/metricshub/winrm/exceptions/WinRMAuthenticationException.html)
-whose message has the stable form `Authentication error on <endpoint> with user name "<user>"`.
-
 ### The legacy API
 
 The [legacy static helpers](legacy.html) keep their historical **checked** exceptions
-(`WinRMException`, `WqlQuerySyntaxException`, `TimeoutException`, `IOException`); they are
-unaffected by the unchecked hierarchy above.
+(`WindowsRemoteException` and its subclass `WinRMException`, `WqlQuerySyntaxException`,
+`TimeoutException`, `IOException`); they are unaffected by the unchecked hierarchy above.
 
 ## Command-line exit codes
 
 The standalone jar maps these outcomes to stable process exit codes — see the
-[Command-Line Client](cli.html) manual.
+[Command-Line Client](cli.html#exit-codes) manual.
 
 ## See also
 

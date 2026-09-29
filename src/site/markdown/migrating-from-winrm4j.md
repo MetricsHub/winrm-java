@@ -6,7 +6,7 @@ description: Move from cloudsoft/winrm4j to the WinRM Java Client: why, a one-fo
 <!-- MACRO{toc|fromDepth=2|toDepth=3|id=toc} -->
 
 [winrm4j](https://github.com/cloudsoft/winrm4j) has served Java projects well, but it is dormant —
-the last release (0.12.3) dates back to August 2021 and the last commit to March 2023 — and its
+the last release (0.12.3) dates back to August 2021 and the last commit to March 2022 — and its
 Apache CXF / Java 8-era stack has aged poorly: on modern JDKs it needs manually added JAXB and
 JAX-WS dependencies, and its `ServiceLoader`-based XML factory lookup is a known source of
 classpath conflicts. This page maps the winrm4j API to the **WinRM Java Client** so an existing
@@ -23,11 +23,8 @@ code base can switch in one sitting.
   so another library's `ServiceLoader`-registered XML implementation cannot break it — a classic
   winrm4j/CXF failure mode.
 * **Actively maintained**, with releases published on Maven Central.
-* **Features winrm4j never had:** [WQL / WMI queries](wql.html), [file transfers](file-transfers.html)
-  and [remote file reads and directory listings](files.html) through the WinRM channel,
-  [standard input](commands.html#standard-input),
-  [`Process`-style streaming](commands.html#streaming-the-output) of live output, and a
-  full-featured [command-line client](cli.html).
+* **Features winrm4j never had** — WQL queries, file transfers, remote file reads and listings,
+  standard input, `Process`-style streaming, and a full CLI: see [What you gain](#what-you-gain).
 
 ## The five-minute version
 
@@ -56,7 +53,7 @@ try (WinRMClient client = WinRMClient.builder("server.example.com")
 }
 ```
 
-NTLM over HTTP on port 5985 is the default on both sides, so nothing needs to be spelled out. Two
+NTLM over HTTP on port 5985 is this client's default, so nothing needs to be spelled out. Two
 shape differences are visible immediately:
 
 * The client is **`AutoCloseable`** and meant for try-with-resources — it authenticates once and
@@ -75,20 +72,21 @@ with largely overlapping options. Both map to the single
 
 | winrm4j | WinRM Java Client |
 | --- | --- |
-| `WinRmTool.Builder.builder(address, username, password)` | `WinRMClient.builder(hostname).credentials(username, password)` — password as `char[]` |
+| `WinRmTool.Builder.builder(address, username, password)` | `WinRMClient.builder(hostname).credentials(username, password)` — a bare host name or IP, not a URL or `host:port` (use `https()` and `port(int)`); password as `char[]` |
 | `builder(address, domain, username, password)` | `credentials("DOMAIN\\user", password)` — the domain rides in the user name |
 | `useHttps(true)` | `https()` |
 | `port(int)` | `port(int)` |
 | `authenticationScheme(AuthSchemes.NTLM)` | `authentication(AuthScheme.NTLM)` — the default; several schemes form an ordered fallback list ([Authentication](authentication.html)) |
 | `authenticationScheme(AuthSchemes.KERBEROS)` | `authentication(AuthScheme.KERBEROS)` — requires `https()` (see [behavioral differences](#behavioral-differences)) |
+| `authenticationScheme(AuthSchemes.SPNEGO)` | `authentication(AuthScheme.KERBEROS)` — always SPNEGO (`Negotiate`) here, and requires `https()`; credential delegation, automatic in winrm4j's SPNEGO, is opt-in with `allowDelegation()` ([Credential delegation](authentication.html#credential-delegation)) |
 | `authenticationScheme(AuthSchemes.BASIC)` | `authentication(AuthScheme.BASIC)` — over HTTPS (see [behavioral differences](#behavioral-differences)) |
 | `disableCertificateChecks(true)` | `trustAllCertificates()` |
 | `sslContext(SSLContext)` | `sslContext(SSLContext)` — hostname verification stays on |
 | `hostnameVerifier(...)`, `sslSocketFactory(...)` | none — hostname verification is all or nothing: on with `sslContext(...)`, off (together with certificate validation) with `trustAllCertificates()`. There is no custom-verifier hook, so the certificate must identify the hostname you connect by ([TLS / HTTPS](tls.html)) |
 | `operationTimeout(long)` (milliseconds) | `timeout(Duration)` — different semantics, see [behavioral differences](#behavioral-differences) |
 | `connectionTimeout(long)`, `connectionRequestTimeout(long)`, `receiveTimeout(Long)` | none — the single `timeout(Duration)` is a wall-clock deadline covering all of it |
-| `retriesForConnectionFailures(int)` | `retries(int, Duration)` — **opt-in**; see [behavioral differences](#behavioral-differences) |
-| `failureRetryPolicy(...)`, `retryReceiveAfterOperationTimeout(...)` | none — see [behavioral differences](#behavioral-differences) |
+| `retriesForConnectionFailures(int)` | `retries(int, Duration)` — **opt-in**; `retries(1, Duration.ofSeconds(5))` is the closest equivalent of winrm4j's default (one retry, 5-second pause); see [behavioral differences](#behavioral-differences) |
+| a custom `failureRetryPolicy(...)`, `retryReceiveAfterOperationTimeout(...)` | none — see [behavioral differences](#behavioral-differences) |
 | `workingDirectory(String)` | `workingDirectory(String)` — on the **command**, not the client ([command options](commands.html#command-options)) |
 | `environment(Map<String, String>)` | `environment(String, String)` — on the **command**, once per variable |
 | `requestNewKerberosTicket(boolean)` | none — Kerberos logs in with the password by default; `ticketCache(Path)` points at an existing ticket cache instead |
@@ -117,7 +115,7 @@ with largely overlapping options. Both map to the single
 Failures surface through the unchecked
 [`WinRMClientException`](apidocs/org/metricshub/winrm/exceptions/WinRMClientException.html)
 hierarchy instead of winrm4j's `SOAPFaultException` / `RuntimeException` mix — authentication
-rejections, WSMan faults (with the fault code and detail as fields), and timeouts each have their
+rejections, WSMan faults (with getters for the fault code and detail), and timeouts each have their
 own type. See [Timeouts and Errors](timeouts-and-errors.html).
 
 Users of the lower-level `WinRmClient` / `createShell()` / `ShellCommand` API map the same way:
@@ -130,28 +128,19 @@ becomes `command(cmd).onStdout(...).onStderr(...).execute()`, and the shell reus
 Beyond the API shapes, a few runtime behaviors differ deliberately. Worth reading before flipping
 the switch:
 
-* **Payload encryption is always on over HTTP.** In winrm4j, NTLM message encryption is a
+* **NTLM payload encryption is always on over HTTP.** In winrm4j, NTLM message encryption is a
   configurable `PayloadEncryptionMode` (`OFF` / `OPTIONAL` / `REQUIRED`) that only appeared in its
-  final 0.12.x releases. Here, HTTP always uses NTLM message encryption — there is no unencrypted
-  mode and nothing to configure, and hosts that require encryption (`AllowUnencrypted=false`, the
-  Windows default) work out of the box.
-* **Basic needs HTTPS, but the client does not enforce it.** winrm4j offers `AuthSchemes.BASIC`,
-  which here maps to `authentication(AuthScheme.BASIC)`. This client has no Basic message
-  protection: it accepts the scheme over both transports, so **use `https()` with it** — without
-  TLS, the credential and payload travel in the clear and the client will not stop you. The host
-  must have the `Basic` setting enabled on the WinRM service and be reachable over HTTPS
-  ([Preparing the Windows Host](preparing-the-host.html)), and the credential must be a **bare
-  local account name** — Windows rejects Basic for domain accounts and for any
-  `DOMAIN\`/`MACHINE\`-qualified name ([Authentication](authentication.html)). NTLM remains the
-  recommended scheme.
+  final 0.12.x releases. Here, NTLM over HTTP always uses message encryption — nothing to
+  configure — and hosts that require encryption (`AllowUnencrypted=false`, the Windows default)
+  work out of the box.
+* **Basic: use it with `https()` and a bare local account name.** The client accepts Basic over
+  plain HTTP too, where the credential and payload travel in the clear, and Windows accepts Basic
+  only for local accounts named without a `DOMAIN\`/`MACHINE\` prefix
+  ([Authentication](authentication.html#basic)). NTLM remains the recommended scheme.
 * **Kerberos requires HTTPS.** winrm4j runs Kerberos over plain HTTP; this client refuses at
   `build()`, because it does not implement Kerberos message encryption — without TLS the payload
   would travel unprotected. Connect with `https()` and by the FQDN the KDC knows
   ([Authentication](authentication.html)).
-* **TLS certificates are validated by default**, including hostname verification — like winrm4j
-  (`disableCertificateChecks` exists on both sides), but worth re-checking if your winrm4j setup
-  disabled checks and you want to stop doing that: point `sslContext(...)` at a trust store
-  containing the host certificate instead ([TLS / HTTPS](tls.html)).
 * **Command output is UTF-8, not code page 437.** winrm4j hardcodes `WINRS_CODEPAGE=437` (US-OEM),
   which mangles any non-ASCII output on non-English hosts. This client creates the remote shell
   with code page **65001 (UTF-8)**, so accented and non-Latin output decodes correctly whatever
@@ -192,12 +181,13 @@ Once on the fluent API, features winrm4j never offered are one call away:
 * **Live streaming** — `start()` returns a `java.lang.Process`-shaped
   [`RemoteProcess`](apidocs/org/metricshub/winrm/RemoteProcess.html) whose output is consumed
   while the command runs, with bounded memory ([Streaming the output](commands.html#streaming-the-output)).
-* **A real CLI** — the standalone jar runs commands, PowerShell, WQL queries, and an interactive
-  remote shell from the terminal ([Command-Line Client](cli.html)).
+* **A real CLI** — the standalone jar runs commands and WQL queries, opens an interactive remote
+  shell, and lists, reads and downloads remote files (`ls`, `stat`, `cat`, `get`) from the terminal
+  ([Command-Line Client](cli.html)).
 
 ## See also
 
 * [Installation](installation.html) — coordinates and supported JDKs
 * [Remote Commands](commands.html) — the complete command API
-* [Authentication](authentication.html) — NTLM and Kerberos details
+* [Authentication](authentication.html) — NTLM, Kerberos, and Basic details
 * [Timeouts and Errors](timeouts-and-errors.html) — timeout semantics and the exception surface

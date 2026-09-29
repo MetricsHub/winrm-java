@@ -49,18 +49,18 @@ public class WinRMCommandExecutor {
 	 * path on the remote system where the files have been copied.
 	 * Example:
 	 * <code>
-	 * 		WinRemoteCommandExecutor.execute(
-	 * 		"CSCRIPT c:\\MyScript.vbs", null, "remote-srv", null, null, null, 30000, Arrays.asList("c:\\MyScript.vbs"), false);
+	 * 		WinRMCommandExecutor.execute(
+	 * 		"CSCRIPT c:\\MyScript.vbs", null, "remote-srv", null, "DOMAIN\\user", password, null, 30000, List.of("c:\\MyScript.vbs"), null, null);
 	 * </code>
-	 * This will copy <b>c:\\MyScript.vbs</b> to <b>remote-srv</b>, typically in
-	 * <b>C:\\Windows\\Temp\\winrm-upload-MYHOST</b> and the command that is executed will therefore
-	 * become:
-	 * <code>CSCRIPT "C:\\Windows\\Temp\\winrm-upload-MYHOST\\MyScript.vbs"</code>
+	 * This will copy <b>c:\MyScript.vbs</b> to <b>remote-srv</b>, typically in
+	 * <b>C:\Windows\Temp\winrm-upload-MYHOST</b> under a content-addressed name, and the command
+	 * that is executed will therefore become:
+	 * <code>CMD.EXE /C (CSCRIPT C:\Windows\Temp\winrm-upload-MYHOST\MyScript.1a2b3c4d5e6f.vbs)</code>
 	 *
 	 * @param command The command to execute. (Mandatory)
 	 * @param protocol The HTTP protocol (HTTP by default)
 	 * @param hostname Host to connect to. (Mandatory)
-	 * @param port The port (5985 for HTPP or 5986 for HTTPS by default)
+	 * @param port The port (5985 for HTTP or 5986 for HTTPS by default)
 	 * @param username The username name. (Mandatory)
 	 * @param password The password.
 	 * @param workingDirectory Path of the directory for the spawned process on the remote system (can be null)

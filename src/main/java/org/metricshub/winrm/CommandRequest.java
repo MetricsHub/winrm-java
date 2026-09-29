@@ -264,12 +264,12 @@ public final class CommandRequest {
 	 * output charset. Default: the output charset (see {@link #charset(Charset)}).
 	 * <p>
 	 * The two directions are not symmetric on Windows. Output follows the shell's console code
-	 * page, which this client pins to UTF-8. Input written to a command created with
-	 * <i>console-mode</i> stdin is converted by the WinRM service with the remote machine's
-	 * <b>ANSI</b> code page instead — so an interactive session (the CLI's {@code shell}
-	 * subcommand) must encode what it sends with that code page, whatever the console code page
-	 * is. Input handed to a command created with pipe semantics (any {@code stdin(...)} on this
-	 * request) reaches the process unconverted and needs no override.
+	 * page (UTF-8 unless {@link WinRMClient.Builder#consoleCodePage(int)} says otherwise). Input
+	 * handed to a command created with pipe semantics (any {@code stdin(...)} on this request)
+	 * reaches the process unconverted and needs no override. Input written to a command created
+	 * with <i>console-mode</i> stdin is converted by the WinRM service with a code page that
+	 * depends on the Windows version: prefer pipe semantics, or set this to match the console
+	 * code page.
 	 *
 	 * @param charset the input charset
 	 * @return this request
