@@ -37,9 +37,11 @@ java -jar winrm-java-standalone.jar --help | --version
 | `get <file> [<local path>]` | Download a remote file to a local file, digest-verified. |
 
 For `wql` and `command`, everything after the subcommand is the query or the command line, quoted
-by your local shell's rules. For `command`, each argument becomes one word of the remote command
-line, double-quoted when it contains a space: write `command dir 'C:\Program Files'`, not
-`command 'dir "C:\Program Files"'`. Git Bash rewrites an argument that starts with `/` into a
+by your local shell's rules. For `command`, the arguments are joined with spaces, and one that
+contains a space is double-quoted: write `command dir 'C:\Program Files'`, not
+`command 'dir "C:\Program Files"'`. The remote `cmd.exe` then parses the line, so its operators
+(`&`, `|`, `<`, `>`, `^`, `%`) keep their meaning outside quotes:
+`command ipconfig '|' findstr IPv4` filters on the host. Git Bash rewrites an argument that starts with `/` into a
 Windows path: double the slash of a switch (`ipconfig //all`). `shell` takes no argument. The file
 subcommands take a remote path and their own [file options](#file-options), in any order. All
 other options go before the subcommand.
