@@ -43,7 +43,7 @@ public abstract class WmiHelper {
 	 */
 	private static final Pattern WQL_SIMPLE_SELECT_PATTERN = Pattern.compile(
 		"^\\s*SELECT\\s+(\\*|(?!SELECT|FROM|WHERE)[a-z0-9._]+|((?!SELECT|FROM|WHERE)[a-z0-9._]+\\s*,\\s*)+((?!SELECT|FROM|WHERE)[a-z0-9._]+))\\s+FROM\\s+((?!WHERE|FROM)\\w+)\\s*(WHERE\\s+.*)?$",
-		Pattern.CASE_INSENSITIVE
+		Pattern.CASE_INSENSITIVE | Pattern.DOTALL
 	);
 
 	/**
