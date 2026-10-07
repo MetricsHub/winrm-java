@@ -1100,9 +1100,10 @@ final class WsmanClient implements AutoCloseable {
 	/**
 	 * Best-effort Delete of the retired shell, sent right before its replacement is created. No
 	 * failure of it may fail the new command, which owes nothing to its predecessor's cleanup: a
-	 * shell this Delete cannot reach is left to the server's IdleTimeout, and a broken round trip
-	 * has already dropped the connection (see {@link HttpTransport#post}), so the Create that
-	 * follows starts on a fresh one.
+	 * shell this Delete cannot reach is left to the server's IdleTimeout. A failure other than a
+	 * WSMan fault drops the connection, so the Create that follows starts on a fresh,
+	 * re-authenticated one: a response rejected for its HTTP status is never decrypted, which
+	 * leaves the message encryption out of sync on this connection.
 	 */
 	private void deleteRetiredShell(final long timeoutMs) {
 		final String shell = retiredShellId;
@@ -1112,8 +1113,9 @@ final class WsmanClient implements AutoCloseable {
 		} catch (final InterruptedException e) {
 			// Keep the cancellation visible to the checks that guard the next steps
 			Thread.currentThread().interrupt();
-		} catch (final Exception ignored) {
-			// best-effort shell cleanup
+		} catch (final Exception e) {
+			// best-effort shell cleanup, on a connection whose state is now unknown
+			transport.close();
 		}
 	}
 

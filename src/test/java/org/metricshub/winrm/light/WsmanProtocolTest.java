@@ -62,6 +62,7 @@ class WsmanProtocolTest {
 	private static final String WSEN = "http://schemas.xmlsoap.org/ws/2004/09/enumeration";
 	private static final String WSMAN = "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd";
 	private static final String RSP = "http://schemas.microsoft.com/wbem/wsman/1/windows/shell";
+	private static final String DELETE_RESPONSE = "<x:DeleteResponse xmlns:x=\"http://schemas.xmlsoap.org/ws/2004/09/transfer\"/>";
 
 	private FakeWsmanServer server;
 
@@ -469,9 +470,32 @@ class WsmanProtocolTest {
 		assertTrue(delete.contains("Selector Name=\"ShellId\">SHELL-1<"), delete);
 	}
 
+	@Test
+	void aRetiredShellDeleteAnsweredWithAnUnexpectedStatusDoesNotFailTheNextCommand() throws Exception {
+		// The best-effort Delete draws an HTTP 503 whose sealed body is never decrypted: reusing that
+		// connection would decrypt the Create's response with an out-of-sync cipher stream.
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueue(
+				200,
+				envelope(receiveResponse(stream("stdout", "CMD-1", "one".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
+			)
+			.enqueue(500, fault("999", "Signal rejected"))
+			.enqueue(503, envelope(DELETE_RESPONSE));
+		enqueueCommandInShell2();
+
+		assertNextCommandRunsInANewShell();
+	}
+
 	/** Script the second command: the retired shell's Delete, then a whole command in SHELL-2. */
 	private void enqueueNextCommandInANewShell() {
 		enqueueShellDeletion(server);
+		enqueueCommandInShell2();
+	}
+
+	/** Script a whole command in a freshly created SHELL-2. */
+	private void enqueueCommandInShell2() {
 		server
 			.enqueue(200, envelope(resourceCreated("SHELL-2")))
 			.enqueue(200, envelope(commandResponse("CMD-2")))
