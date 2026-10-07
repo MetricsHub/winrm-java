@@ -137,9 +137,8 @@ final class HttpTransport implements AutoCloseable {
 	 * reaches the caller through that fault instead; both surface as the same timeout.
 	 * <p>
 	 * The bound is absolute per request leg (armed at the start of each {@link #post} and
-	 * {@link #connect}): one whole
-	 * response must arrive within the inactivity timeout — a peer trickling bytes must not restart
-	 * the clock with every byte and hold a streaming fetch forever.
+	 * {@link #connect}): one whole response must arrive within the inactivity timeout — a peer
+	 * trickling bytes must not restart the clock with every byte and hold a streaming fetch forever.
 	 *
 	 * @param inactivityTimeoutMillis the longest tolerated silence in milliseconds
 	 */

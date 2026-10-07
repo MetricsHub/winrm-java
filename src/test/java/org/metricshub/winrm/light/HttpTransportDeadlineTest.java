@@ -40,6 +40,9 @@ import org.junit.jupiter.api.Test;
  * span several HTTP round trips (a reconnect plus a re-authentication exchange), and every leg
  * must be capped by what is LEFT of the poll's budget — a peer answering each leg just fast enough
  * must not be able to stretch the poll to several multiples of the requested wait.
+ * <p>
+ * Also covers the streaming {@link HttpTransport#inactivityTimeout(int)} deadline, armed afresh
+ * for every request leg, an explicit reconnection included.
  */
 class HttpTransportDeadlineTest {
 
@@ -157,8 +160,14 @@ class HttpTransportDeadlineTest {
 				Thread.sleep(1_100);
 				// The reconnection is a leg of its own: its handshake must get a fresh 1 s budget and
 				// see the hang-up, not time out on the expired deadline's 1 ms floor.
+				final long start = System.nanoTime();
 				final IOException e = assertThrows(IOException.class, transport::connect);
+				final long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
 				assertFalse(e instanceof SocketTimeoutException, "the reconnection inherited an expired deadline: " + e);
+				assertTrue(
+					elapsedMillis >= 150,
+					"the handshake must wait for the server's hang-up; took " + elapsedMillis + " ms"
+				);
 			} finally {
 				transport.close();
 			}
