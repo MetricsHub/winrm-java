@@ -941,15 +941,16 @@ final class WsmanClient implements AutoCloseable {
 		 * Terminate a command closed before it completed: the Signal is what stops it, so its
 		 * failures are reported — except the expiry of its short hold (see
 		 * {@link #EARLY_CLOSE_SIGNAL_MS}), a complete exchange that leaves the connection in sync
-		 * and the command killed. A reported failure also retires the shell (see
-		 * {@link #retireShell()}): the command may still be running in it.
+		 * and the shell retired. Any failure, that expiry included, retires the shell (see
+		 * {@link #retireShell()}): the fault only says the service did not finish processing the
+		 * Signal in time, so the command may still be running in it.
 		 */
 		private void terminateRunning() throws Exception {
 			try {
 				terminate(commandId, Math.min(EARLY_CLOSE_SIGNAL_MS, operationTimeoutMs));
 			} catch (final WinRMFaultException e) {
+				retireShell();
 				if (!FAULT_OPERATION_TIMEOUT.equals(e.getFaultCode())) {
-					retireShell();
 					throw e;
 				}
 			} catch (final Exception e) {

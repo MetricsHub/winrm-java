@@ -818,6 +818,20 @@ class StreamingApiTest {
 	}
 
 	@Test
+	void anEarlyCloseSignalHeldPastItsHoldRetiresTheShell() throws Exception {
+		enqueueCommandStartup();
+		// The service does not finish processing the Signal within its short hold: not a failure of
+		// close(), but nothing proves the command is gone from SHELL-1.
+		server.enqueue(500, fault(FAULT_OPERATION_TIMEOUT, "The operation timed out."));
+		enqueueNextCommandInANewShell();
+
+		try (WinRMClient client = builder().build()) {
+			client.executor().startCommand("run.exe", null, 10_000).close();
+			assertNextCommandRunsInANewShell(client);
+		}
+	}
+
+	@Test
 	void anEarlyCloseSignalLostInTransitRetiresTheShell() throws Exception {
 		enqueueCommandStartup();
 		// The connection drops before the Signal is answered: whether the command was stopped is
