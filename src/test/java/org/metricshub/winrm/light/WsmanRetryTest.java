@@ -23,9 +23,18 @@ package org.metricshub.winrm.light;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.metricshub.winrm.light.FakeWsmanResponses.COMMAND_ID;
+import static org.metricshub.winrm.light.FakeWsmanResponses.commandResponse;
+import static org.metricshub.winrm.light.FakeWsmanResponses.done;
+import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueCommandExchange;
 import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueEnumeration;
 import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellCreation;
+import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellDeletion;
+import static org.metricshub.winrm.light.FakeWsmanResponses.envelope;
 import static org.metricshub.winrm.light.FakeWsmanResponses.instance;
+import static org.metricshub.winrm.light.FakeWsmanResponses.receiveResponse;
+import static org.metricshub.winrm.light.FakeWsmanResponses.resourceCreated;
+import static org.metricshub.winrm.light.FakeWsmanResponses.stream;
 
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
@@ -261,6 +270,43 @@ class WsmanRetryTest {
 			closer.join();
 			assertEquals(0, server.decryptedRequests().size(), "no request may be sent after close()");
 		}
+	}
+
+	@Test
+	void aRetiredShellDeleteCancelledInARetryPauseIsSentByTheNextCommand() throws Exception {
+		// The first command's terminate Signal is lost in transit: SHELL-1 is retired (issue #196).
+		enqueueShellCreation(server);
+		server
+			.enqueue(200, envelope(commandResponse(COMMAND_ID)))
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(stream("stdout", COMMAND_ID, "one".getBytes(StandardCharsets.UTF_8)), done(COMMAND_ID, 0))
+				)
+			)
+			.enqueueDrop();
+
+		try (LightWinRMService service = service(server.port(), 3, 5_000L)) {
+			assertEquals("one", service.executeCommand("poll", null, StandardCharsets.UTF_8, TIMEOUT).getStdout());
+
+			// The second command's Delete must reconnect: the handshake is dropped, and the deadline
+			// cancels the command during the retry pause, before the Delete was ever sent.
+			server.dropNextConnections(1);
+			assertThrows(TimeoutException.class, () -> service.executeCommand("poll", null, StandardCharsets.UTF_8, 1_500L));
+
+			// SHELL-1 is still retired: the third command deletes it before creating SHELL-2.
+			enqueueShellDeletion(server);
+			server.enqueue(200, envelope(resourceCreated("SHELL-2")));
+			enqueueCommandExchange(server, "two".getBytes(StandardCharsets.UTF_8), new byte[0], 0);
+			assertEquals("two", service.executeCommand("poll", null, StandardCharsets.UTF_8, TIMEOUT).getStdout());
+		}
+
+		final List<String> requests = server.decryptedRequests();
+		// Create, Command, Receive, the dropped Signal, then the third command's requests.
+		final String delete = requests.get(4);
+		assertTrue(delete.contains("transfer/Delete"), delete);
+		assertTrue(delete.contains("Selector Name=\"ShellId\">SHELL-1<"), delete);
+		assertTrue(requests.get(6).contains("Selector Name=\"ShellId\">SHELL-2<"), requests.get(6));
 	}
 
 	// --- the wall-clock deadline still governs ---------------------------------

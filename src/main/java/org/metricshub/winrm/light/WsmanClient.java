@@ -1111,7 +1111,10 @@ final class WsmanClient implements AutoCloseable {
 		try {
 			request(Envelopes.deleteShell(url, shell, timeoutMs));
 		} catch (final InterruptedException e) {
-			// Keep the cancellation visible to the checks that guard the next steps
+			// Cancelled in a connect-retry pause, before the Delete was sent: keep the shell retired so
+			// a later command or close() still deletes it. The restored interrupt makes the caller
+			// abort before its Create, so the shell is never retired alongside a new one.
+			retiredShellId = shell;
 			Thread.currentThread().interrupt();
 		} catch (final Exception e) {
 			// best-effort shell cleanup, on a connection whose state is now unknown
