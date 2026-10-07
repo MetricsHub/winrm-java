@@ -75,7 +75,8 @@ try (WinRMClient client = WinRMClient.builder("server.example.com")
 
 The profile is loaded when the remote shell is created, so this is a client setting. It applies
 to every shell the client creates, for commands, file transfers and remote file operations alike,
-including a shell recreated after the server reaped the previous one. Microsoft's `winrs`
+including a shell recreated after the server reaped the previous one, or after the client deleted
+one holding a command it could not terminate. Microsoft's `winrs`
 documentation warns that loading the profile fails for a user who is not a local administrator on
 the host: the command then fails with a
 [`WinRMFaultException`](apidocs/org/metricshub/winrm/exceptions/WinRMFaultException.html) carrying

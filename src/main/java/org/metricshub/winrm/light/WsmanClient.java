@@ -107,6 +107,14 @@ final class WsmanClient implements AutoCloseable {
 	private String pendingAuthorization;
 	private String shellId;
 
+	// A shell no longer reused because one of its commands may never have been terminated: its
+	// terminate Signal faulted, failed in transit, or found no budget (issue #196). Such a command
+	// keeps holding one of the user's WSMan operations until its shell is deleted, so reusing the
+	// shell would pile them up until MaxConcurrentOperationsPerUser refuses every command. Deleted
+	// before the next shell is created, or by close(); never set together with shellId. Guarded by
+	// connectionPermit, like shellId.
+	private String retiredShellId;
+
 	// The shell's working directory and environment variables are pinned by the FIRST command on
 	// this connection and reused whenever the shell must be (re)created — e.g. after the server
 	// reaped it — so a recreation stays invisible to the caller instead of silently moving later
@@ -560,6 +568,14 @@ final class WsmanClient implements AutoCloseable {
 				shellSettingsPinned = true;
 			}
 			if (shellId == null) {
+				if (retiredShellId != null) {
+					deleteRetiredShell(operationTimeoutMs);
+					// The Delete was a round trip of its own: in streaming mode a timed-out one leaves
+					// the transport's per-leg deadline expired, which would give the Create's reconnect
+					// a 1 ms budget. And never create a shell after the caller's timeout was reported.
+					configureTimeouts(operationTimeoutMs, failOnQuietTimeout);
+					checkNotCancelled();
+				}
 				createShell(shellWorkingDirectory, shellEnvironment, operationTimeoutMs, failOnQuietTimeout);
 			}
 			// The caller's timeout may have fired while the Create response was being awaited (socket
@@ -925,15 +941,20 @@ final class WsmanClient implements AutoCloseable {
 		 * Terminate a command closed before it completed: the Signal is what stops it, so its
 		 * failures are reported — except the expiry of its short hold (see
 		 * {@link #EARLY_CLOSE_SIGNAL_MS}), a complete exchange that leaves the connection in sync
-		 * and the command killed.
+		 * and the command killed. A reported failure also retires the shell (see
+		 * {@link #retireShell()}): the command may still be running in it.
 		 */
 		private void terminateRunning() throws Exception {
 			try {
 				terminate(commandId, Math.min(EARLY_CLOSE_SIGNAL_MS, operationTimeoutMs));
 			} catch (final WinRMFaultException e) {
 				if (!FAULT_OPERATION_TIMEOUT.equals(e.getFaultCode())) {
+					retireShell();
 					throw e;
 				}
+			} catch (final Exception e) {
+				retireShell();
+				throw e;
 			}
 		}
 
@@ -962,23 +983,27 @@ final class WsmanClient implements AutoCloseable {
 		 * complete, in-sync exchange and is simply ignored; any other failure (a timeout, a reset,
 		 * a half-read response) leaves the connection in an unknown state, so it is dropped — a
 		 * late response must not desync a later request. A budget too small for any round trip
-		 * skips the Signal outright, leaving the healthy connection untouched; the server reaps
-		 * the completed command's state with the shell.
+		 * skips the Signal outright, leaving the healthy connection untouched. Whenever the Signal
+		 * does not go through, the command keeps holding a WSMan operation until its shell is
+		 * deleted, so the shell is retired (see {@link #retireShell()}) — never reused.
 		 */
 		private void terminateCompleted(final long budgetMs) {
 			// Same strict clamp as the bounded poll: the per-round-trip timeout caps this cleanup too.
 			final long budget = Math.max(1, Math.min(budgetMs, operationTimeoutMs));
 			if (budget < MIN_WIRE_POLL_MS) {
+				retireShell();
 				return;
 			}
 			transport.pollTimeout(toSocketTimeoutMillis(budget));
 			try {
 				terminate(commandId, budget);
-			} catch (final WinRMFaultException ignored) {
+			} catch (final WinRMFaultException e) {
 				// The Signal was answered with a fault: the exchange completed, the connection is in
 				// sync — and the command's completion is what matters.
+				retireShell();
 			} catch (final Exception e) {
 				transport.close();
+				retireShell();
 			} finally {
 				transport.inactivityTimeout(toSocketTimeoutMillis(operationTimeoutMs));
 			}
@@ -1056,6 +1081,39 @@ final class WsmanClient implements AutoCloseable {
 				throw faultException("Signal", resp);
 			}
 			shellId = null;
+		}
+	}
+
+	/**
+	 * Stop reusing the current shell: one of its commands may never have been terminated, and only
+	 * deleting the shell releases the WSMan operation that command holds (issue #196). The Delete
+	 * is deferred to the next shell creation or to {@link #close()}: the failed or skipped Signal
+	 * that got us here leaves no budget, and possibly no connection, to send it now.
+	 */
+	private void retireShell() {
+		if (shellId != null) {
+			retiredShellId = shellId;
+			shellId = null;
+		}
+	}
+
+	/**
+	 * Best-effort Delete of the retired shell, sent right before its replacement is created. No
+	 * failure of it may fail the new command, which owes nothing to its predecessor's cleanup: a
+	 * shell this Delete cannot reach is left to the server's IdleTimeout, and a broken round trip
+	 * has already dropped the connection (see {@link HttpTransport#post}), so the Create that
+	 * follows starts on a fresh one.
+	 */
+	private void deleteRetiredShell(final long timeoutMs) {
+		final String shell = retiredShellId;
+		retiredShellId = null;
+		try {
+			request(Envelopes.deleteShell(url, shell, timeoutMs));
+		} catch (final InterruptedException e) {
+			// Keep the cancellation visible to the checks that guard the next steps
+			Thread.currentThread().interrupt();
+		} catch (final Exception ignored) {
+			// best-effort shell cleanup
 		}
 	}
 
@@ -1452,8 +1510,10 @@ final class WsmanClient implements AutoCloseable {
 		// transport — which unblocks that worker's read; the shell is reaped by the server IdleTimeout.
 		final boolean locked = connectionPermit.tryAcquire();
 		try {
-			final String shell = shellId;
+			// At most one of the two is set: a retired shell is deleted before the next one is created.
+			final String shell = shellId != null ? shellId : retiredShellId;
 			shellId = null;
+			retiredShellId = null;
 			if (locked && shell != null) {
 				try {
 					send(Envelopes.deleteShell(url, shell, timeoutMs));

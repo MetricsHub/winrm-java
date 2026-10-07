@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.metricshub.winrm.light.FakeWsmanResponses.commandResponse;
 import static org.metricshub.winrm.light.FakeWsmanResponses.done;
+import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellDeletion;
 import static org.metricshub.winrm.light.FakeWsmanResponses.envelope;
 import static org.metricshub.winrm.light.FakeWsmanResponses.enumerationDone;
 import static org.metricshub.winrm.light.FakeWsmanResponses.fault;
@@ -782,6 +783,82 @@ class StreamingApiTest {
 				assertEquals(3, server.decryptedRequests().size(), "a tiny-budget completion must not touch the wire");
 			}
 		}
+	}
+
+	@Test
+	void aSkippedCompletionSignalRetiresTheShell() throws Exception {
+		enqueueCommandStartup();
+		server.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 5))));
+		enqueueNextCommandInANewShell();
+
+		try (WinRMClient client = builder().build()) {
+			try (CommandCursor cursor = client.executor().startCommand("run.exe", null, 10_000)) {
+				cursor.poll(5_000);
+				// No round trip fits the budget: the Signal is skipped, the command never terminated.
+				assertNull(cursor.poll(20));
+			}
+			// Issue #196: reusing SHELL-1 would leave that command holding a WSMan operation for good.
+			assertNextCommandRunsInANewShell(client);
+		}
+	}
+
+	@Test
+	void aFailedEarlyCloseSignalRetiresTheShell() throws Exception {
+		enqueueCommandStartup();
+		// The Signal stopping the still-running command is rejected: the failure is reported, and
+		// the command may still be running in SHELL-1.
+		server.enqueue(500, fault("999", "Signal rejected"));
+		enqueueNextCommandInANewShell();
+
+		try (WinRMClient client = builder().build()) {
+			final CommandCursor cursor = client.executor().startCommand("run.exe", null, 10_000);
+			assertThrows(WinRMClientException.class, cursor::close);
+			assertNextCommandRunsInANewShell(client);
+		}
+	}
+
+	@Test
+	void anEarlyCloseSignalLostInTransitRetiresTheShell() throws Exception {
+		enqueueCommandStartup();
+		// The connection drops before the Signal is answered: whether the command was stopped is
+		// unknown, so SHELL-1 must not be reused either.
+		server.enqueueDrop();
+		enqueueNextCommandInANewShell();
+
+		try (WinRMClient client = builder().build()) {
+			final CommandCursor cursor = client.executor().startCommand("run.exe", null, 10_000);
+			assertThrows(WinRMClientException.class, cursor::close);
+			assertNextCommandRunsInANewShell(client);
+		}
+	}
+
+	/** Script the next command: the retired shell's Delete, then a whole command in SHELL-2. */
+	private void enqueueNextCommandInANewShell() {
+		enqueueShellDeletion(server);
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-2")))
+			.enqueue(200, envelope(commandResponse("CMD-2")))
+			.enqueue(
+				200,
+				envelope(receiveResponse(stream("stdout", "CMD-2", "two".getBytes(StandardCharsets.UTF_8)), done("CMD-2", 0)))
+			)
+			.enqueue(200, envelope(signalResponse()));
+	}
+
+	/** Run the next command: it must delete SHELL-1 and run in a fresh SHELL-2, never reuse SHELL-1. */
+	private void assertNextCommandRunsInANewShell(final WinRMClient client) throws Exception {
+		final int first = server.decryptedRequests().size();
+		try (CommandCursor cursor = client.executor().startCommand("next.exe", null, 10_000)) {
+			assertEquals("two", new String(cursor.next().stdout(), StandardCharsets.UTF_8));
+			assertNull(cursor.next());
+		}
+		final List<String> requests = server.decryptedRequests();
+		final String delete = requests.get(first);
+		assertTrue(delete.contains("transfer/Delete"), delete);
+		assertTrue(delete.contains("Selector Name=\"ShellId\">SHELL-1<"), delete);
+		assertTrue(requests.get(first + 1).contains("transfer/Create"), requests.get(first + 1));
+		final String command = requests.get(first + 2);
+		assertTrue(command.contains("Selector Name=\"ShellId\">SHELL-2<"), command);
 	}
 
 	@Test

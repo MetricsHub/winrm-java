@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.metricshub.winrm.light.FakeWsmanResponses.commandResponse;
 import static org.metricshub.winrm.light.FakeWsmanResponses.done;
+import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellDeletion;
 import static org.metricshub.winrm.light.FakeWsmanResponses.envelope;
 import static org.metricshub.winrm.light.FakeWsmanResponses.fault;
 import static org.metricshub.winrm.light.FakeWsmanResponses.instance;
@@ -406,6 +407,101 @@ class WsmanProtocolTest {
 			assertEquals("ok", result.getStdout());
 			assertEquals(0, result.getStatusCode());
 		}
+	}
+
+	@Test
+	void aFaultedTerminateSignalRetiresTheShell() throws Exception {
+		// Issue #196: a command whose terminate Signal failed keeps holding one of the user's WSMan
+		// operations until its shell is deleted. A long-lived client that kept reusing the shell piled
+		// them up until MaxConcurrentOperationsPerUser refused every Command.
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueue(
+				200,
+				envelope(receiveResponse(stream("stdout", "CMD-1", "one".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
+			)
+			.enqueue(500, fault("999", "Signal rejected"));
+		enqueueNextCommandInANewShell();
+
+		assertNextCommandRunsInANewShell();
+	}
+
+	@Test
+	void aTerminateSignalLostInTransitRetiresTheShell() throws Exception {
+		// Same as a faulted Signal, but the connection drops before the answer: whether the command
+		// was terminated is unknown, so its shell must not be reused either.
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueue(
+				200,
+				envelope(receiveResponse(stream("stdout", "CMD-1", "one".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
+			)
+			.enqueueDrop();
+		enqueueNextCommandInANewShell();
+
+		assertNextCommandRunsInANewShell();
+	}
+
+	@Test
+	void closeDeletesARetiredShell() throws Exception {
+		// The last command's Signal failed, and no other command follows to delete its shell: close()
+		// must. A client per collection cycle would otherwise leave a shell and its held operation behind
+		// every cycle.
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+			.enqueue(200, envelope(commandResponse("CMD-1")))
+			.enqueue(
+				200,
+				envelope(receiveResponse(stream("stdout", "CMD-1", "one".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
+			)
+			.enqueue(500, fault("999", "Signal rejected"));
+		enqueueShellDeletion(server);
+
+		try (LightWinRMService service = client(PASSWORD)) {
+			assertEquals("one", service.executeCommand("poll", null, StandardCharsets.UTF_8, TIMEOUT).getStdout());
+		}
+
+		final List<String> requests = server.decryptedRequests();
+		final String delete = requests.get(requests.size() - 1);
+		assertTrue(delete.contains("transfer/Delete"), delete);
+		assertTrue(delete.contains("Selector Name=\"ShellId\">SHELL-1<"), delete);
+	}
+
+	/** Script the second command: the retired shell's Delete, then a whole command in SHELL-2. */
+	private void enqueueNextCommandInANewShell() {
+		enqueueShellDeletion(server);
+		server
+			.enqueue(200, envelope(resourceCreated("SHELL-2")))
+			.enqueue(200, envelope(commandResponse("CMD-2")))
+			.enqueue(
+				200,
+				envelope(receiveResponse(stream("stdout", "CMD-2", "two".getBytes(StandardCharsets.UTF_8)), done("CMD-2", 0)))
+			)
+			.enqueue(200, envelope(signalResponse()));
+	}
+
+	/**
+	 * Run two commands on one client, the first one's terminate Signal failing: both must succeed,
+	 * and the second must delete SHELL-1 and run in a fresh SHELL-2 instead of reusing SHELL-1.
+	 */
+	private void assertNextCommandRunsInANewShell() throws Exception {
+		try (LightWinRMService service = client(PASSWORD)) {
+			// The failed Signal is cleanup noise: the completed command's result is still reported.
+			assertEquals("one", service.executeCommand("poll", null, StandardCharsets.UTF_8, TIMEOUT).getStdout());
+			assertEquals("two", service.executeCommand("poll", null, StandardCharsets.UTF_8, TIMEOUT).getStdout());
+		}
+
+		final List<String> requests = server.decryptedRequests();
+		// Create, Command, Receive, the failed Signal, then the second command's requests.
+		assertTrue(requests.size() >= 9, () -> String.join("\n---\n", requests));
+		final String delete = requests.get(4);
+		assertTrue(delete.contains("transfer/Delete"), delete);
+		assertTrue(delete.contains("Selector Name=\"ShellId\">SHELL-1<"), delete);
+		assertTrue(requests.get(5).contains("transfer/Create"), requests.get(5));
+		final String command = requests.get(6);
+		assertTrue(command.contains("Selector Name=\"ShellId\">SHELL-2<"), command);
 	}
 
 	// --- Fault mapping ------------------------------------------------------------

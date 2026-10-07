@@ -158,6 +158,15 @@ Consequences:
 
 ### Fixed
 
+- **A long-lived client no longer exhausts the host's operation quota** (#196). When the
+  terminate `Signal` ending a command failed (a fault, a dropped connection) or was skipped (no
+  time left in a bounded poll), the client kept reusing the shell, and the command, never
+  terminated, kept holding one of the user's WSMan operations. A client polling indefinitely
+  piled them up until every command was refused with WSManFault 2150859174 (*the maximum number
+  of concurrent operations for this user has been exceeded*), until the client was recreated.
+  Such a shell is now retired: the next command deletes it and runs in a fresh shell, created
+  with the same working directory, environment and profile.
+
 - **WQL array properties keep all their elements** (#189). A WMI array (`IPAddress`,
   `DefaultIPGateway`, `Capabilities`, ...) used to yield only its last element, without any
   error. Its elements are now joined with `|` (`"192.0.2.10|fe80::1"`); the new
