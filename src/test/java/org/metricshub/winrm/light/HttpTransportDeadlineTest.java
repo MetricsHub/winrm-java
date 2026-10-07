@@ -20,6 +20,7 @@ package org.metricshub.winrm.light;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -31,6 +32,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
+import javax.net.ssl.SSLContext;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -112,6 +114,51 @@ class HttpTransportDeadlineTest {
 					elapsedMillis < 3_000,
 					"the whole response must be bounded by the inactivity timeout; took " + elapsedMillis + " ms"
 				);
+			} finally {
+				transport.close();
+			}
+		}
+	}
+
+	@Test
+	void aStreamingReconnectGetsAFreshDeadline() throws Exception {
+		try (ServerSocket server = new ServerSocket(0)) {
+			// Every connection: take the ClientHello, stay silent 200 ms, then hang up.
+			final Thread handler = new Thread(
+				() -> {
+					try {
+						while (true) {
+							try (Socket socket = server.accept()) {
+								socket.getInputStream().read(new byte[4096]);
+								Thread.sleep(200);
+							}
+						}
+					} catch (final IOException | InterruptedException ignored) {
+						// server socket closed: test over
+					}
+				},
+				"hang-up-tls-server"
+			);
+			handler.setDaemon(true);
+			handler.start();
+
+			final HttpTransport transport = new HttpTransport(
+				"127.0.0.1",
+				server.getLocalPort(),
+				60_000,
+				SSLContext.getDefault().getSocketFactory(),
+				false
+			);
+			try {
+				// A first streaming leg arms its deadline, then fails (the server hangs up)...
+				transport.inactivityTimeout(1_000);
+				assertThrows(IOException.class, () -> transport.post("/wsman", new byte[0], null, null));
+				// ...and the consumer pauses past that leg's deadline before reconnecting explicitly.
+				Thread.sleep(1_100);
+				// The reconnection is a leg of its own: its handshake must get a fresh 1 s budget and
+				// see the hang-up, not time out on the expired deadline's 1 ms floor.
+				final IOException e = assertThrows(IOException.class, transport::connect);
+				assertFalse(e instanceof SocketTimeoutException, "the reconnection inherited an expired deadline: " + e);
 			} finally {
 				transport.close();
 			}

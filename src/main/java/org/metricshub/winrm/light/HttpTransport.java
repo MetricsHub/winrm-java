@@ -136,7 +136,8 @@ final class HttpTransport implements AutoCloseable {
 	 * A server that enforces the WSMan OperationTimeout by answering with the op-timeout fault
 	 * reaches the caller through that fault instead; both surface as the same timeout.
 	 * <p>
-	 * The bound is absolute per request leg (armed at the start of each {@link #post}): one whole
+	 * The bound is absolute per request leg (armed at the start of each {@link #post} and
+	 * {@link #connect}): one whole
 	 * response must arrive within the inactivity timeout — a peer trickling bytes must not restart
 	 * the clock with every byte and hold a streaming fetch forever.
 	 *
@@ -281,10 +282,18 @@ final class HttpTransport implements AutoCloseable {
 	 * Establish (or validate) the connection now instead of lazily on the next {@link #post}. Lets
 	 * the caller separate "could not reach the endpoint" — where nothing has been sent and a retry
 	 * is provably safe — from a failure of a request that may already be executing.
+	 * <p>
+	 * In streaming mode this starts a request leg of its own, with a fresh inactivity deadline:
+	 * a reconnection after a long pause must not inherit the expired deadline of the previous leg.
 	 *
 	 * @throws IOException when the connection cannot be established
 	 */
 	void connect() throws IOException {
+		if (deadlinePerLeg) {
+			// Streaming mode: this whole leg — a reconnect included — must complete within the
+			// inactivity timeout, however many reads it takes (see inactivityTimeout(int)).
+			deadlineEpochMillis = Utils.getCurrentTimeMillis() + readTimeoutMillis;
+		}
 		ensureConnected();
 	}
 
@@ -344,12 +353,7 @@ final class HttpTransport implements AutoCloseable {
 
 	Response post(final String path, final byte[] body, final String contentType, final String authorization)
 		throws IOException {
-		if (deadlinePerLeg) {
-			// Streaming mode: this whole leg — a reconnect included — must complete within the
-			// inactivity timeout, however many reads it takes (see inactivityTimeout(int)).
-			deadlineEpochMillis = Utils.getCurrentTimeMillis() + readTimeoutMillis;
-		}
-		ensureConnected();
+		connect();
 		try {
 			if (deadlineEpochMillis != 0) {
 				// Several HTTP legs can run under one poll deadline (reconnect, authentication
