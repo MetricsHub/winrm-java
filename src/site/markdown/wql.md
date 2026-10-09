@@ -122,6 +122,10 @@ A WMI **array** property (`IPAddress` in `Win32_NetworkAdapterConfiguration`, `C
 `Win32_DiskDrive`, ...) comes back as a single string, its elements joined with `|`:
 `"192.0.2.10|fe80::1"`. The builder's `arraySeparator(String)` changes the separator.
 
+There is no trailing separator, and WinRM sends no type information: a one-element array reads
+like a scalar (`"fr-FR"` for `MUILanguages`), and an empty array is left out of the response, so
+`string()` returns `null` for it.
+
 ### Column order and case
 
 These rules apply to `WqlResult.columns()`; each row's `asMap()` keeps the server's order, and

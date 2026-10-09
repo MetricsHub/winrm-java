@@ -27,6 +27,11 @@ import java.util.Map;
 /**
  * One row of a WQL query result: an immutable, ordered view of the instance properties.
  * Property lookup is case-insensitive, matching WMI semantics.
+ * <p>
+ * A WMI array property is a single string, its elements joined with the client's array
+ * separator ({@code a|b}, no trailing separator). WinRM sends no type information: a
+ * one-element array reads like a scalar ({@code a}), and an empty array is left out of the
+ * response, so the row has no such property.
  */
 public final class WqlRow {
 
