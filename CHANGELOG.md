@@ -166,6 +166,12 @@ Consequences:
   of concurrent operations for this user has been exceeded*), until the client was recreated.
   Such a shell is now retired: the next command deletes it and runs in a fresh shell, created
   with the same working directory, environment and profile.
+- **A streaming read resumed after a long pause no longer times out spuriously** (#198). When a
+  streaming consumer (e.g. a `RemoteProcess` read slowly) paused longer than the inactivity
+  timeout and the host dropped the idle connection meanwhile, the reconnection inherited the
+  expired deadline of the previous request: its TCP connect and TLS handshake got a 1 ms budget
+  and failed with a timeout (*No response from the WinRM service*). Each
+  reconnection now gets a full inactivity timeout of its own.
 
 - **WQL array properties keep all their elements** (#189). A WMI array (`IPAddress`,
   `DefaultIPGateway`, `Capabilities`, ...) used to yield only its last element, without any
