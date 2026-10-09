@@ -570,10 +570,8 @@ final class WsmanClient implements AutoCloseable {
 			if (shellId == null) {
 				if (retiredShellId != null) {
 					deleteRetiredShell(operationTimeoutMs);
-					// The Delete was a round trip of its own: in streaming mode a timed-out one leaves
-					// the transport's per-leg deadline expired, which would give the Create's reconnect
-					// a 1 ms budget. And never create a shell after the caller's timeout was reported.
-					configureTimeouts(operationTimeoutMs, failOnQuietTimeout);
+					// The Delete was a round trip of its own: never create a shell after the caller's
+					// timeout was reported.
 					checkNotCancelled();
 				}
 				createShell(shellWorkingDirectory, shellEnvironment, operationTimeoutMs, failOnQuietTimeout);

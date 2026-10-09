@@ -166,6 +166,7 @@ Consequences:
   of concurrent operations for this user has been exceeded*), until the client was recreated.
   Such a shell is now retired: the next command deletes it and runs in a fresh shell, created
   with the same working directory, environment and profile.
+
 - **A streaming read resumed after a long pause no longer times out spuriously** (#198). When a
   streaming consumer (e.g. a `RemoteProcess` read slowly) paused longer than the inactivity
   timeout and the host dropped the idle connection meanwhile, the reconnection inherited the
