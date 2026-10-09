@@ -59,13 +59,10 @@ final class WsmanClient implements AutoCloseable {
 	private static final String FAULT_OPERATION_TIMEOUT = "2150858793";
 	private static final String FAULT_SHELL_NOT_FOUND = "2150858843";
 
-	// The user's MaxConcurrentOperationsPerUser quota is full. Some hosts (a French Windows Server
-	// 2022) send this fault without any WSManFault code, so it is also recognized by its SOAP
-	// subcode, which is never translated.
+	// The user's MaxConcurrentOperationsPerUser quota is full. Only Windows Server 2008 R2 sends this
+	// code: later versions send the fault with no WSManFault code and a generic InternalError
+	// subcode, which nothing reliable distinguishes from other faults (measured on 2016 and 2022).
 	private static final String FAULT_OPERATION_QUOTA = "2150859174";
-	private static final String SUBCODE_QUOTA_LIMIT = "QuotaLimit";
-
-	private static final String SOAP_ENVELOPE_NS = "http://www.w3.org/2003/05/soap-envelope";
 
 	// A Send answered with this Windows error (ERROR_NO_DATA, "The pipe is being closed") found the
 	// command no longer reading its standard input: it exited, or closed its stdin, first.
@@ -1219,7 +1216,6 @@ final class WsmanClient implements AutoCloseable {
 			operation + " failed: " + faultSummary(resp),
 			resp.status,
 			trimToNull(wsmanFaultCode(resp.document)),
-			trimToNull(faultSubcode(resp.document)),
 			trimToNull(text(resp.document, "Text")),
 			trimToNull(wsmanFaultMessage(resp.document))
 		);
@@ -1491,26 +1487,9 @@ final class WsmanClient implements AutoCloseable {
 		return faults.getLength() > 0 ? ((Element) faults.item(0)).getAttribute("Code") : null;
 	}
 
-	/**
-	 * The SOAP fault subcode without its namespace prefix (e.g. {@code QuotaLimit}), or null: the
-	 * fault's name, never translated, which some hosts send without any WSManFault code.
-	 */
-	private static String faultSubcode(final Document doc) {
-		final NodeList subcodes = doc.getElementsByTagNameNS(SOAP_ENVELOPE_NS, "Subcode");
-		if (subcodes.getLength() == 0) {
-			return null;
-		}
-		final NodeList values = ((Element) subcodes.item(0)).getElementsByTagNameNS(SOAP_ENVELOPE_NS, "Value");
-		if (values.getLength() == 0) {
-			return null;
-		}
-		final String value = values.item(0).getTextContent().trim();
-		return value.substring(value.indexOf(':') + 1);
-	}
-
 	/** Whether the fault says the user's WSMan operation quota (MaxConcurrentOperationsPerUser) is full. */
 	private static boolean isQuotaFault(final WinRMFaultException fault) {
-		return FAULT_OPERATION_QUOTA.equals(fault.getFaultCode()) || SUBCODE_QUOTA_LIMIT.equals(fault.getFaultSubcode());
+		return FAULT_OPERATION_QUOTA.equals(fault.getFaultCode());
 	}
 
 	/**

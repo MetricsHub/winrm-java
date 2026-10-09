@@ -164,14 +164,13 @@ Consequences:
   with every command refused with WSManFault 2150859174 (*the maximum number of concurrent
   operations for this user has been exceeded*), after 15 commands on Windows Server 2008 R2 and
   1500 on later versions, until it was recreated. The client now replaces its shell every 10
-  commands (the new `WinRMClient.Builder.maxCommandsPerShell(int)` changes that number), retries
-  once in a new shell a command the quota refuses in a shell that already ran commands, and never
+  commands (the new `WinRMClient.Builder.maxCommandsPerShell(int)` changes that number) and never
   reuses a shell holding a command it could not terminate (its terminate `Signal` failed or was
-  skipped). The new shell gets the same working directory, environment and profile; deleting the
-  old one ends any process a previous command left running in it, as closing the client always
-  did. The quota fault is recognized by its code or, on hosts that send none (a French
-  Windows Server 2022), by its SOAP subcode, now exposed as
-  `WinRMFaultException.getFaultSubcode()`.
+  skipped). On Windows Server 2008 R2, whose quota fault carries its WSManFault code, a command
+  the quota refuses in a shell that already ran commands is also retried once in a new shell;
+  later versions send that fault with no code, so nothing reliable identifies it. The new shell
+  gets the same working directory, environment and profile; deleting the old one ends any process
+  a previous command left running in it, as closing the client always did.
 
 - **A streaming read resumed after a long pause no longer times out spuriously** (#198). When a
   streaming consumer (e.g. a `RemoteProcess` read slowly) paused longer than the inactivity

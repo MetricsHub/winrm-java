@@ -115,7 +115,6 @@ the fault **programmatically**, so no message parsing is needed:
 | Method | Returns |
 | --- | --- |
 | `getFaultCode()` | The WSManFault code as a decimal `String`, e.g. `"2150858778"`, or `null` when the response carried none. |
-| `getFaultSubcode()` | The SOAP fault subcode without its prefix, e.g. `"QuotaLimit"`, or `null`. Never translated, and present on hosts that send no WSManFault code (the quota fault of a French Windows Server 2022). |
 | `getFaultReason()` | The SOAP fault reason text, or `null`. |
 | `getFaultDetail()` | The provider-level detail — where WMI puts mnemonics such as `WBEM_E_INVALID_CLASS` or `WBEM_E_INVALID_NAMESPACE` — or `null`. |
 | `getHttpStatus()` | The HTTP status of the faulting response (typically 500). |

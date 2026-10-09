@@ -23,7 +23,6 @@ package org.metricshub.winrm;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.metricshub.winrm.light.FakeWsmanResponses.commandResponse;
@@ -69,19 +68,11 @@ class WinRMClientTest {
 	private static final String WSEN = "http://schemas.xmlsoap.org/ws/2004/09/enumeration";
 	private static final String WSMAN = "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd";
 
-	/**
-	 * What a French Windows Server 2022 answers when the user's operation quota is full: a SOAP
-	 * fault with the {@code QuotaLimit} subcode and a translated reason, but no WSManFault element.
-	 */
-	private static final String QUOTA_FAULT_WITHOUT_CODE = "<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\" "
-		+
-		"xmlns:w=\"" +
-		WSMAN +
-		"\"><s:Body><s:Fault><s:Code><s:Value>s:Receiver</s:Value>" +
-		"<s:Subcode><s:Value>w:QuotaLimit</s:Value></s:Subcode></s:Code>" +
-		"<s:Reason><s:Text xml:lang=\"fr-FR\">Le nombre maximal d'opérations simultanées pour cet utilisateur a été dépassé.</s:Text></s:Reason>"
-		+
-		"</s:Fault></s:Body></s:Envelope>";
+	/** The quota fault, as Windows Server 2008 R2 sends it: the only version that carries its code. */
+	private static final String QUOTA_FAULT = fault(
+		"2150859174",
+		"The WS-Management service cannot process the request. The maximum number of concurrent operations for this user has been exceeded."
+	);
 
 	private FakeWsmanServer server;
 
@@ -1003,24 +994,10 @@ class WinRMClientTest {
 
 	@Test
 	void aCommandRefusedByTheQuotaIsRetriedInANewShell() throws Exception {
-		assertQuotaFaultReplacesTheShell(
-			fault(
-				"2150859174",
-				"The WS-Management service cannot process the request. The maximum number of concurrent operations for this user has been exceeded."
-			)
-		);
-	}
-
-	@Test
-	void aQuotaFaultWithoutWsmanFaultCodeIsRecognizedByItsSubcode() throws Exception {
-		assertQuotaFaultReplacesTheShell(QUOTA_FAULT_WITHOUT_CODE);
-	}
-
-	private void assertQuotaFaultReplacesTheShell(final String quotaFault) throws Exception {
 		server.enqueue(200, envelope(resourceCreated("SHELL-1")));
 		enqueueCommand("CMD-1", "first");
 		// The user's operation quota is full: the second Command is refused before it could run.
-		server.enqueue(500, quotaFault);
+		server.enqueue(500, QUOTA_FAULT);
 		enqueueShellReplacement("SHELL-2");
 		enqueueCommand("CMD-2", "second");
 
@@ -1038,15 +1015,13 @@ class WinRMClientTest {
 	}
 
 	@Test
-	void aQuotaFaultOnAFreshShellIsReportedWithItsSubcode() throws Exception {
+	void aQuotaFaultOnAFreshShellIsReported() throws Exception {
 		// The new shell ran nothing: deleting it would release nothing, so the fault is reported.
-		server.enqueue(200, envelope(resourceCreated("SHELL-1"))).enqueue(500, QUOTA_FAULT_WITHOUT_CODE);
+		server.enqueue(200, envelope(resourceCreated("SHELL-1"))).enqueue(500, QUOTA_FAULT);
 
 		try (WinRMClient client = builder(PASSWORD).build()) {
 			final WinRMFaultException e = assertThrows(WinRMFaultException.class, () -> client.command("x.exe").execute());
-			// No WSManFault code on such hosts: the untranslated subcode still names the fault.
-			assertNull(e.getFaultCode());
-			assertEquals("QuotaLimit", e.getFaultSubcode());
+			assertEquals("2150859174", e.getFaultCode());
 			assertEquals(2, server.decryptedRequests().size(), "no Delete, no retry");
 		}
 	}
@@ -1057,9 +1032,9 @@ class WinRMClientTest {
 		// the fault is reported instead of looping.
 		server.enqueue(200, envelope(resourceCreated("SHELL-1")));
 		enqueueCommand("CMD-1", "first");
-		server.enqueue(500, QUOTA_FAULT_WITHOUT_CODE);
+		server.enqueue(500, QUOTA_FAULT);
 		enqueueShellReplacement("SHELL-2");
-		server.enqueue(500, QUOTA_FAULT_WITHOUT_CODE);
+		server.enqueue(500, QUOTA_FAULT);
 
 		try (WinRMClient client = builder(PASSWORD).build()) {
 			assertEquals("first", client.command("first.exe").execute().stdout());
@@ -1067,7 +1042,7 @@ class WinRMClientTest {
 				WinRMFaultException.class,
 				() -> client.command("second.exe").execute()
 			);
-			assertEquals("QuotaLimit", e.getFaultSubcode());
+			assertEquals("2150859174", e.getFaultCode());
 			final long commands = server.decryptedRequests().stream().filter(r -> r.contains(":CommandLine>")).count();
 			assertEquals(3, commands, "the first command, the refused one, and a single retry");
 		}

@@ -637,9 +637,11 @@ public final class WinRMClient implements AutoCloseable {
 		 * command refused. Replacing the shell (one Delete and one Create, about 100 ms) releases
 		 * them. The new shell gets the same working directory, environment and profile, but
 		 * deleting the old one ends any process a previous command left running in it, as
-		 * {@link WinRMClient#close()} does. Besides, a command the quota refuses in a shell that
-		 * already ran commands is retried once in a new shell; in a fresh shell, which holds
-		 * nothing to release, the fault is reported.
+		 * {@link WinRMClient#close()} does. Besides, on Windows Server 2008 R2, whose quota fault
+		 * carries its WSManFault code, a command the quota refuses in a shell that already ran
+		 * commands is retried once in a new shell; in a fresh shell, which holds nothing to
+		 * release, the fault is reported. Later versions send that fault with no code, so this
+		 * setting is what keeps a client under the quota there.
 		 * <p>
 		 * A lower value leaves more of the quota to the user's other connections at the cost of
 		 * more frequent replacements; 1 runs every command in a shell of its own, like {@code winrs}.

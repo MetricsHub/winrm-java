@@ -369,7 +369,7 @@ the host, the tighter they are:
 | --- | --- | --- |
 | `MaxMemoryPerShellMB` | Memory per shell, including child processes | Historically **150 MB**; 1024 MB on modern hosts. A command whose output is large can hit it. |
 | `MaxShellsPerUser` | Concurrent shells per user | 5 on older hosts, 30 on modern ones. Close clients you no longer need. |
-| `MaxConcurrentOperationsPerUser` | Concurrent operations per user | 15 on Windows Server 2008 R2, 1500 later. File transfers are batched specifically to stay under low limits. Every command holds one until its shell is deleted, even after it completed: the client replaces its shell every 10 commands and when the quota refuses a command in a shell that already ran commands, so a long-lived client does not pile them up (see [Shell reuse](commands.html#shell-reuse)). |
+| `MaxConcurrentOperationsPerUser` | Concurrent operations per user | 15 on Windows Server 2008 R2, 1500 later. File transfers are batched specifically to stay under low limits. Every command holds one until its shell is deleted, even after it completed: the client replaces its shell every 10 commands (and, on 2008 R2, when the quota refuses a command in a shell that already ran commands), so a long-lived client does not pile them up (see [Shell reuse](commands.html#shell-reuse)). |
 | `MaxEnvelopeSizekb` | SOAP envelope size | 150 KB on older hosts, **500 KB** on modern ones. This client always uses 150 KB envelopes, so the default never needs raising. |
 | `IdleTimeout` | How long an idle shell survives | 180000 ms (3 min) on older hosts, **7200000 ms** (2 h) on modern ones; 60000 ms minimum. The client transparently recreates a shell the host reaped. |
 

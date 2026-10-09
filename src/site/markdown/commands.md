@@ -98,9 +98,11 @@ So the client replaces its shell:
 * every 10 commands. The builder's `maxCommandsPerShell(int)` changes that number: lower leaves
   more of the quota to the user's other connections, and 1 runs every command in a shell of its
   own, like `winrs`;
-* when the quota refuses a command in a shell that already ran commands: the command ran nothing,
-  so it is retried once in a new shell. In a fresh shell, which holds nothing to release, the fault
-  is reported;
+* on Windows Server 2008 R2, when the quota refuses a command in a shell that already ran
+  commands: the command ran nothing, so it is retried once in a new shell. In a fresh shell, which
+  holds nothing to release, the fault is reported. Later versions send the quota fault without its
+  WSManFault code, so nothing reliable identifies it: there, replacing the shell every N commands
+  is what keeps the client under the quota;
 * when a command could not be terminated cleanly (its terminate `Signal` failed or was skipped).
 
 A replacement costs a Delete and a Create (about 100 ms). The new shell gets the same working
