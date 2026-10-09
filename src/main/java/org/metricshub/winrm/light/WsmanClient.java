@@ -20,6 +20,7 @@ package org.metricshub.winrm.light;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -58,6 +59,11 @@ final class WsmanClient implements AutoCloseable {
 	private static final String FAULT_OPERATION_TIMEOUT = "2150858793";
 	private static final String FAULT_SHELL_NOT_FOUND = "2150858843";
 
+	// The user's MaxConcurrentOperationsPerUser quota is full. Only Windows Server 2008 R2 sends this
+	// code: later versions send the fault with no WSManFault code and a generic InternalError
+	// subcode, which nothing reliable distinguishes from other faults (measured on 2016 and 2022).
+	private static final String FAULT_OPERATION_QUOTA = "2150859174";
+
 	// A Send answered with this Windows error (ERROR_NO_DATA, "The pipe is being closed") found the
 	// command no longer reading its standard input: it exited, or closed its stdin, first.
 	private static final String FAULT_PIPE_CLOSING = "232";
@@ -92,6 +98,7 @@ final class WsmanClient implements AutoCloseable {
 	private final int consoleCodePage;
 	private final boolean loadUserProfile;
 	private final String arraySeparator;
+	private final int maxCommandsPerShell;
 	private final String url;
 	private final String rawUsername;
 	private final AuthScheme auth;
@@ -106,6 +113,23 @@ final class WsmanClient implements AutoCloseable {
 
 	private String pendingAuthorization;
 	private String shellId;
+
+	// A shell no longer reused: it ran maxCommandsPerShell commands, the quota refused a command in
+	// it, or one of its commands may never have been terminated (its terminate Signal faulted, failed
+	// in transit, or found no budget). Its commands hold the user's WSMan operations until it is
+	// deleted, so reusing it would pile them up until MaxConcurrentOperationsPerUser refuses every
+	// command (issue #196). Deleted before the next shell is created, or by close(); never set
+	// together with shellId. Guarded by connectionPermit, like shellId.
+	private String retiredShellId;
+
+	// How many commands the current shell has run. Each one holds one of the user's WSMan operations
+	// until the shell is deleted, even once cleanly terminated (measured on Windows Server 2008 R2
+	// and 2022, issue #196), so the shell is retired after maxCommandsPerShell of them. Guarded by
+	// connectionPermit, like shellId.
+	@SuppressFBWarnings(value = "AT_STALE_THREAD_WRITE_OF_PRIMITIVE", justification = "Only accessed while holding connectionPermit, "
+		+
+		"whose release/acquire orders every write before the next holder's reads")
+	private int shellCommands;
 
 	// The shell's working directory and environment variables are pinned by the FIRST command on
 	// this connection and reused whenever the shell must be (re)created — e.g. after the server
@@ -191,6 +215,7 @@ final class WsmanClient implements AutoCloseable {
 		final int consoleCodePage,
 		final boolean loadUserProfile,
 		final String arraySeparator,
+		final int maxCommandsPerShell,
 		final int connectRetries,
 		final long retryDelayMs
 	) {
@@ -198,6 +223,7 @@ final class WsmanClient implements AutoCloseable {
 		this.consoleCodePage = consoleCodePage;
 		this.loadUserProfile = loadUserProfile;
 		this.arraySeparator = arraySeparator;
+		this.maxCommandsPerShell = maxCommandsPerShell;
 		this.connectRetries = connectRetries;
 		this.retryDelayMs = retryDelayMs;
 		// A non-null socket factory selects HTTPS: TLS wraps the transport and the SOAP travels plaintext.
@@ -559,7 +585,18 @@ final class WsmanClient implements AutoCloseable {
 					: new LinkedHashMap<>(environment);
 				shellSettingsPinned = true;
 			}
+			if (shellId != null && shellCommands >= maxCommandsPerShell) {
+				// The shell's commands hold as many of the user's WSMan operations: replace it before
+				// they exhaust the quota shared by every connection of this user.
+				retireShell();
+			}
 			if (shellId == null) {
+				if (retiredShellId != null) {
+					deleteRetiredShell(operationTimeoutMs);
+					// The Delete was a round trip of its own: never create a shell after the caller's
+					// timeout was reported.
+					checkNotCancelled();
+				}
 				createShell(shellWorkingDirectory, shellEnvironment, operationTimeoutMs, failOnQuietTimeout);
 			}
 			// The caller's timeout may have fired while the Create response was being awaited (socket
@@ -569,18 +606,26 @@ final class WsmanClient implements AutoCloseable {
 			try {
 				commandId = sendCommand(commandLine, operationTimeoutMs, failOnQuietTimeout, consoleModeStdin);
 			} catch (final WinRMFaultException e) {
-				if (!FAULT_SHELL_NOT_FOUND.equals(e.getFaultCode())) {
+				// Either way the Command was rejected before it could run, so it is safe to recreate
+				// the shell — with its ORIGINAL working directory and environment — and retry once.
+				if (FAULT_SHELL_NOT_FOUND.equals(e.getFaultCode())) {
+					// The server reaped the cached shell between commands (e.g. its IdleTimeout expired on
+					// a long-lived client).
+					shellId = null;
+				} else if (shellCommands > 0 && isQuotaFault(e)) {
+					// The user's operation quota is full, and this shell holds one operation per command
+					// it ran: deleting it releases them.
+					retireShell();
+					deleteRetiredShell(operationTimeoutMs);
+					checkNotCancelled();
+				} else {
 					throw e;
 				}
-				// The server reaped the cached shell between commands (e.g. its IdleTimeout expired on a
-				// long-lived client). The Command was rejected before it could run, so it is safe to
-				// recreate the shell — with its ORIGINAL working directory and environment — and retry
-				// once.
-				shellId = null;
 				createShell(shellWorkingDirectory, shellEnvironment, operationTimeoutMs, failOnQuietTimeout);
 				checkNotCancelled();
 				commandId = sendCommand(commandLine, operationTimeoutMs, failOnQuietTimeout, consoleModeStdin);
 			}
+			shellCommands++;
 			opened = true;
 			return new RemoteCommand(commandId, operationTimeoutMs, failOnQuietTimeout);
 		} finally {
@@ -925,15 +970,21 @@ final class WsmanClient implements AutoCloseable {
 		 * Terminate a command closed before it completed: the Signal is what stops it, so its
 		 * failures are reported — except the expiry of its short hold (see
 		 * {@link #EARLY_CLOSE_SIGNAL_MS}), a complete exchange that leaves the connection in sync
-		 * and the command killed.
+		 * and the shell retired. Any failure, that expiry included, retires the shell (see
+		 * {@link #retireShell()}): the fault only says the service did not finish processing the
+		 * Signal in time, so the command may still be running in it.
 		 */
 		private void terminateRunning() throws Exception {
 			try {
 				terminate(commandId, Math.min(EARLY_CLOSE_SIGNAL_MS, operationTimeoutMs));
 			} catch (final WinRMFaultException e) {
+				retireShell();
 				if (!FAULT_OPERATION_TIMEOUT.equals(e.getFaultCode())) {
 					throw e;
 				}
+			} catch (final Exception e) {
+				retireShell();
+				throw e;
 			}
 		}
 
@@ -962,23 +1013,27 @@ final class WsmanClient implements AutoCloseable {
 		 * complete, in-sync exchange and is simply ignored; any other failure (a timeout, a reset,
 		 * a half-read response) leaves the connection in an unknown state, so it is dropped — a
 		 * late response must not desync a later request. A budget too small for any round trip
-		 * skips the Signal outright, leaving the healthy connection untouched; the server reaps
-		 * the completed command's state with the shell.
+		 * skips the Signal outright, leaving the healthy connection untouched. Whenever the Signal
+		 * does not go through, the command keeps holding a WSMan operation until its shell is
+		 * deleted, so the shell is retired (see {@link #retireShell()}) — never reused.
 		 */
 		private void terminateCompleted(final long budgetMs) {
 			// Same strict clamp as the bounded poll: the per-round-trip timeout caps this cleanup too.
 			final long budget = Math.max(1, Math.min(budgetMs, operationTimeoutMs));
 			if (budget < MIN_WIRE_POLL_MS) {
+				retireShell();
 				return;
 			}
 			transport.pollTimeout(toSocketTimeoutMillis(budget));
 			try {
 				terminate(commandId, budget);
-			} catch (final WinRMFaultException ignored) {
+			} catch (final WinRMFaultException e) {
 				// The Signal was answered with a fault: the exchange completed, the connection is in
 				// sync — and the command's completion is what matters.
+				retireShell();
 			} catch (final Exception e) {
 				transport.close();
+				retireShell();
 			} finally {
 				transport.inactivityTimeout(toSocketTimeoutMillis(operationTimeoutMs));
 			}
@@ -1012,6 +1067,7 @@ final class WsmanClient implements AutoCloseable {
 			final Element selector = (Element) selectors.item(i);
 			if ("ShellId".equals(selector.getAttribute("Name"))) {
 				shellId = selector.getTextContent();
+				shellCommands = 0;
 				return;
 			}
 		}
@@ -1056,6 +1112,43 @@ final class WsmanClient implements AutoCloseable {
 				throw faultException("Signal", resp);
 			}
 			shellId = null;
+		}
+	}
+
+	/**
+	 * Stop reusing the current shell: only deleting it releases the WSMan operations its commands
+	 * hold (issue #196). The Delete is deferred to the next shell creation or to {@link #close()}:
+	 * a failed or skipped Signal leaves no budget, and possibly no connection, to send it now.
+	 */
+	private void retireShell() {
+		if (shellId != null) {
+			retiredShellId = shellId;
+			shellId = null;
+		}
+	}
+
+	/**
+	 * Best-effort Delete of the retired shell, sent right before its replacement is created. No
+	 * failure of it may fail the new command, which owes nothing to its predecessor's cleanup: a
+	 * shell this Delete cannot reach is left to the server's IdleTimeout. A failure other than a
+	 * WSMan fault drops the connection, so the Create that follows starts on a fresh,
+	 * re-authenticated one: a response rejected for its HTTP status is never decrypted, which
+	 * leaves the message encryption out of sync on this connection.
+	 */
+	private void deleteRetiredShell(final long timeoutMs) {
+		final String shell = retiredShellId;
+		retiredShellId = null;
+		try {
+			request(Envelopes.deleteShell(url, shell, timeoutMs));
+		} catch (final InterruptedException e) {
+			// Cancelled in a connect-retry pause, before the Delete was sent: keep the shell retired so
+			// a later command or close() still deletes it. The restored interrupt makes the caller
+			// abort before its Create, so the shell is never retired alongside a new one.
+			retiredShellId = shell;
+			Thread.currentThread().interrupt();
+		} catch (final Exception e) {
+			// best-effort shell cleanup, on a connection whose state is now unknown
+			transport.close();
 		}
 	}
 
@@ -1394,6 +1487,11 @@ final class WsmanClient implements AutoCloseable {
 		return faults.getLength() > 0 ? ((Element) faults.item(0)).getAttribute("Code") : null;
 	}
 
+	/** Whether the fault says the user's WSMan operation quota (MaxConcurrentOperationsPerUser) is full. */
+	private static boolean isQuotaFault(final WinRMFaultException fault) {
+		return FAULT_OPERATION_QUOTA.equals(fault.getFaultCode());
+	}
+
 	/**
 	 * The detailed WSManFault Message text, or null. This is where WinRM puts the provider-level
 	 * detail — notably the WMI error mnemonics (WBEM_E_INVALID_CLASS, WBEM_E_INVALID_NAMESPACE,
@@ -1452,8 +1550,10 @@ final class WsmanClient implements AutoCloseable {
 		// transport — which unblocks that worker's read; the shell is reaped by the server IdleTimeout.
 		final boolean locked = connectionPermit.tryAcquire();
 		try {
-			final String shell = shellId;
+			// At most one of the two is set: a retired shell is deleted before the next one is created.
+			final String shell = shellId != null ? shellId : retiredShellId;
 			shellId = null;
+			retiredShellId = null;
 			if (locked && shell != null) {
 				try {
 					send(Envelopes.deleteShell(url, shell, timeoutMs));

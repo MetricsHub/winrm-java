@@ -100,6 +100,16 @@ class WinRMClientBuilderTest {
 	}
 
 	@Test
+	void maxCommandsPerShellMustBeAtLeastOne() {
+		assertThrows(IllegalArgumentException.class, () -> validBuilder().maxCommandsPerShell(0));
+		assertThrows(IllegalArgumentException.class, () -> validBuilder().maxCommandsPerShell(-1));
+		// 1 is valid: every command in a shell of its own.
+		try (WinRMClient client = validBuilder().maxCommandsPerShell(1).build()) {
+			assertEquals("host", client.hostname());
+		}
+	}
+
+	@Test
 	void authenticationMustNotBeEmpty() {
 		assertThrows(IllegalArgumentException.class, () -> validBuilder().authentication());
 		assertThrows(IllegalArgumentException.class, () -> validBuilder().authentication((AuthScheme) null));

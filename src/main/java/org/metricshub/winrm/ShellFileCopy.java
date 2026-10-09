@@ -118,8 +118,10 @@ public class ShellFileCopy {
 
 	/**
 	 * Base delay before retrying after an operation-quota rejection; each retry waits one step
-	 * longer. Measured on Windows 2008 R2 (quota 15 per user): the budget fully recovers within
-	 * 30 seconds, so the escalating delays (5+10+15+20&nbsp;s) comfortably bridge it.
+	 * longer (5+10+15+20&nbsp;s). Time does not release the operations a shell holds, only
+	 * deleting the shell does, and the client already replaces its own shell when the quota
+	 * refuses a command (see {@code WsmanClient}): these delays give the user's other
+	 * connections time to release theirs.
 	 */
 	static final long QUOTA_RETRY_DELAY_MILLIS = 5_000L;
 
@@ -796,8 +798,9 @@ public class ShellFileCopy {
 
 				// The quota rejection happened while the operation was being CREATED — before the
 				// command could run — so retrying cannot duplicate a side effect. Old Windows
-				// versions cap concurrent operations very low (15 per user on 2008 R2) and reap
-				// completed ones lazily: give the server increasingly more time to recover.
+				// versions cap concurrent operations very low (15 per user on 2008 R2), and the
+				// client already replaced its own shell: give the user's other connections
+				// increasingly more time to release theirs.
 				try {
 					Utils.sleep(
 						Math.min(

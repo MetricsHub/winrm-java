@@ -158,12 +158,15 @@ the switch:
   to retry `Receive` after an operation timeout. Here nothing is retried unless you opt in with
   `retries(int, Duration)`, and the policy is deliberately narrow: only attempts that provably
   never reached the server (TCP connect, DNS, TLS handshake, the authentication handshake) are
-  retried, preserving **at-most-once execution** for non-idempotent commands. A request that was
-  actually sent is never replayed.
-* **One shell per client.** winrm4j creates and tears down a remote shell for every
-  `executeCommand(...)`. This client creates the shell on the first command and reuses it, which
-  is faster — and is why `workingDirectory(...)` and `environment(...)` are per-command options
-  that take effect on the client's **first** command ([command options](commands.html#command-options)).
+  retried, preserving **at-most-once execution** for non-idempotent commands. A request that may
+  have run is never replayed: the only replays are of a command the host refused before running it
+  (its shell was reaped, or the quota was full; see [Shell reuse](commands.html#shell-reuse)).
+* **One shell for many commands.** winrm4j creates and tears down a remote shell for every
+  `executeCommand(...)`. This client creates the shell on the first command and reuses it, for 10
+  commands by default ([Shell reuse](commands.html#shell-reuse)), which is faster — and is why
+  `workingDirectory(...)` and `environment(...)` are per-command options that take effect on the
+  client's **first** command, then on every shell that replaces it
+  ([command options](commands.html#command-options)).
 
 ## What you gain
 

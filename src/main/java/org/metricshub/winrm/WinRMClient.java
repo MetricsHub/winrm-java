@@ -331,6 +331,7 @@ public final class WinRMClient implements AutoCloseable {
 		private int consoleCodePage;
 		private boolean loadUserProfile;
 		private String arraySeparator = LightWinRMService.DEFAULT_ARRAY_SEPARATOR;
+		private int maxCommandsPerShell = LightWinRMService.DEFAULT_MAX_COMMANDS_PER_SHELL;
 		private SSLContext sslContext;
 		private Duration timeout = DEFAULT_TIMEOUT;
 		private int retries;
@@ -625,6 +626,38 @@ public final class WinRMClient implements AutoCloseable {
 		}
 
 		/**
+		 * Set how many commands the remote command shell runs before the client replaces it.
+		 * Default: 10.
+		 * <p>
+		 * The client reuses its command shell for commands, file transfers and remote file
+		 * operations, but every command run in a shell holds one of the user's WSMan operations
+		 * until the shell is deleted, even after it completed. The host caps them per user,
+		 * across all of that user's connections ({@code MaxConcurrentOperationsPerUser}: 15 on
+		 * Windows Server 2008 R2, 1500 later), so a shell reused forever ends up having every
+		 * command refused. Replacing the shell (one Delete and one Create, about 100 ms) releases
+		 * them. The new shell gets the same working directory, environment and profile, but
+		 * deleting the old one ends any process a previous command left running in it, as
+		 * {@link WinRMClient#close()} does. Besides, on Windows Server 2008 R2, whose quota fault
+		 * carries its WSManFault code, a command the quota refuses in a shell that already ran
+		 * commands is retried once in a new shell; in a fresh shell, which holds nothing to
+		 * release, the fault is reported. Later versions send that fault with no code, so this
+		 * setting is what keeps a client under the quota there.
+		 * <p>
+		 * A lower value leaves more of the quota to the user's other connections at the cost of
+		 * more frequent replacements; 1 runs every command in a shell of its own, like {@code winrs}.
+		 *
+		 * @param maxCommandsPerShell how many commands a shell runs before it is replaced (at least 1)
+		 * @return this builder
+		 */
+		public Builder maxCommandsPerShell(final int maxCommandsPerShell) {
+			if (maxCommandsPerShell < 1) {
+				throw new IllegalArgumentException("maxCommandsPerShell must be at least 1.");
+			}
+			this.maxCommandsPerShell = maxCommandsPerShell;
+			return this;
+		}
+
+		/**
 		 * Build the client. This does not connect yet: the connection is established and
 		 * authenticated by the first operation.
 		 *
@@ -672,6 +705,7 @@ public final class WinRMClient implements AutoCloseable {
 					consoleCodePage,
 					loadUserProfile,
 					arraySeparator,
+					maxCommandsPerShell,
 					retries,
 					toMillis(retryDelay)
 				);

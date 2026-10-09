@@ -151,6 +151,7 @@ Besides the host name passed to `builder(...)`, only `credentials(...)` is manda
 | `retries(int, Duration)` | no retry | [Retrying](timeouts-and-errors.html#retrying-transient-connection-failures) |
 | `namespace(String)` | `ROOT\CIMV2` | [Choosing a namespace](wql.html#choosing-a-namespace) |
 | `loadUserProfile()` | not loaded | [Loading the user profile](commands.html#loading-the-user-profile) |
+| `maxCommandsPerShell(int)` | 10 | [Shell reuse](commands.html#shell-reuse) |
 | `consoleCodePage(int)` | 65001 (UTF-8) | [Input encoding](commands.html#input-encoding) |
 | `arraySeparator(String)` | `\|` | [Reading the result](wql.html#reading-the-result) |
 
