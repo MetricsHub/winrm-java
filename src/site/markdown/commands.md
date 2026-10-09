@@ -75,8 +75,8 @@ try (WinRMClient client = WinRMClient.builder("server.example.com")
 
 The profile is loaded when the remote shell is created, so this is a client setting. It applies
 to every shell the client creates, for commands, file transfers and remote file operations alike,
-including a shell recreated after the server reaped the previous one, or after the client deleted
-one holding a command it could not terminate. Microsoft's `winrs`
+including a shell recreated after the server reaped the previous one or the client replaced it
+(see [Shell reuse](#shell-reuse)). Microsoft's `winrs`
 documentation warns that loading the profile fails for a user who is not a local administrator on
 the host: the command then fails with a
 [`WinRMFaultException`](apidocs/org/metricshub/winrm/exceptions/WinRMFaultException.html) carrying
@@ -85,6 +85,28 @@ the fault code and detail. The CLI's `--profile` option does the same.
 A command that reaches a further host (a UNC path, another server) fails with *access denied*
 unless the client delegates your Kerberos credentials: see
 [Credential delegation](authentication.html#credential-delegation).
+
+### Shell reuse
+
+The client runs its commands, file transfers and remote file operations in one remote command
+shell, created by the first of them. But every command run in a shell holds one of the user's
+WSMan operations until the shell is deleted, even after it completed, and the host caps them per
+user, across all of that user's connections: `MaxConcurrentOperationsPerUser` is 15 on Windows
+Server 2008 R2 and 1500 later (see [Host quotas](preparing-the-host.html#host-quotas-worth-knowing-about)).
+So the client replaces its shell:
+
+* every 10 commands. The builder's `maxCommandsPerShell(int)` changes that number: lower leaves
+  more of the quota to the user's other connections, and 1 runs every command in a shell of its
+  own, like `winrs`;
+* when the quota refuses a command in a shell that already ran commands: the command ran nothing,
+  so it is retried once in a new shell. In a fresh shell, which holds nothing to release, the fault
+  is reported;
+* when a command could not be terminated cleanly (its terminate `Signal` failed or was skipped).
+
+A replacement costs a Delete and a Create (about 100 ms). The new shell gets the same working
+directory, environment variables and profile, but deleting the old one ends any process a previous
+command left running in it, as closing the client does. A process that must outlive its command
+belongs outside the shell, e.g. in a scheduled task.
 
 ## Running PowerShell
 

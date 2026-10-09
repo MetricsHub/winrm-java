@@ -49,6 +49,7 @@ class BasicAuthCloseRaceTest {
 			65001,
 			false,
 			"|",
+			LightWinRMService.DEFAULT_MAX_COMMANDS_PER_SHELL,
 			0,
 			0L
 		);

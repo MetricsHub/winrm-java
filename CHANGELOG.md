@@ -158,14 +158,20 @@ Consequences:
 
 ### Fixed
 
-- **A long-lived client no longer exhausts the host's operation quota** (#196). When the
-  terminate `Signal` ending a command failed (a fault, a dropped connection) or was skipped (no
-  time left in a bounded poll), the client kept reusing the shell, and the command, never
-  terminated, kept holding one of the user's WSMan operations. A client polling indefinitely
-  piled them up until every command was refused with WSManFault 2150859174 (*the maximum number
-  of concurrent operations for this user has been exceeded*), until the client was recreated.
-  Such a shell is now retired: the next command deletes it and runs in a fresh shell, created
-  with the same working directory, environment and profile.
+- **A long-lived client no longer exhausts the host's operation quota** (#196). Every command
+  run in a shell holds one of the user's WSMan operations until the shell is deleted, even once
+  terminated, and the client reused its shell forever: a client polling indefinitely ended up
+  with every command refused with WSManFault 2150859174 (*the maximum number of concurrent
+  operations for this user has been exceeded*), after 15 commands on Windows Server 2008 R2 and
+  1500 on later versions, until it was recreated. The client now replaces its shell every 10
+  commands (the new `WinRMClient.Builder.maxCommandsPerShell(int)` changes that number), retries
+  once in a new shell a command the quota refuses in a shell that already ran commands, and never
+  reuses a shell holding a command it could not terminate (its terminate `Signal` failed or was
+  skipped). The new shell gets the same working directory, environment and profile; deleting the
+  old one ends any process a previous command left running in it, as closing the client always
+  did. The quota fault is recognized by its code or, on hosts that send none (a French
+  Windows Server 2022), by its SOAP subcode, now exposed as
+  `WinRMFaultException.getFaultSubcode()`.
 
 - **A streaming read resumed after a long pause no longer times out spuriously** (#198). When a
   streaming consumer (e.g. a `RemoteProcess` read slowly) paused longer than the inactivity

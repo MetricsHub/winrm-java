@@ -35,11 +35,12 @@ public class WinRMFaultException extends WinRMClientException {
 
 	private final int httpStatus;
 	private final String faultCode;
+	private final String faultSubcode;
 	private final String faultReason;
 	private final String faultDetail;
 
 	/**
-	 * Create the exception.
+	 * Create the exception, without a SOAP fault subcode.
 	 *
 	 * @param message the complete detail message (same format as the legacy API)
 	 * @param httpStatus the HTTP status of the faulting response
@@ -54,9 +55,32 @@ public class WinRMFaultException extends WinRMClientException {
 		final String faultReason,
 		final String faultDetail
 	) {
+		this(message, httpStatus, faultCode, null, faultReason, faultDetail);
+	}
+
+	/**
+	 * Create the exception.
+	 *
+	 * @param message the complete detail message (same format as the legacy API)
+	 * @param httpStatus the HTTP status of the faulting response
+	 * @param faultCode the WSManFault code, or {@code null} when the response carried none
+	 * @param faultSubcode the SOAP fault subcode without its namespace prefix (e.g.
+	 *        {@code QuotaLimit}), or {@code null} when the response carried none
+	 * @param faultReason the SOAP fault reason text, or {@code null}
+	 * @param faultDetail the detailed WSManFault message (provider-level detail), or {@code null}
+	 */
+	public WinRMFaultException(
+		final String message,
+		final int httpStatus,
+		final String faultCode,
+		final String faultSubcode,
+		final String faultReason,
+		final String faultDetail
+	) {
 		super(message);
 		this.httpStatus = httpStatus;
 		this.faultCode = faultCode;
+		this.faultSubcode = faultSubcode;
 		this.faultReason = faultReason;
 		this.faultDetail = faultDetail;
 	}
@@ -77,6 +101,18 @@ public class WinRMFaultException extends WinRMClientException {
 	 */
 	public String getFaultCode() {
 		return faultCode;
+	}
+
+	/**
+	 * Get the SOAP fault subcode, without its namespace prefix: the WS-Management fault name, such
+	 * as {@code QuotaLimit} or {@code InvalidSelectors}. Unlike the reason text it is never
+	 * translated, and some hosts send it without any WSManFault code (e.g. the quota fault of a
+	 * French Windows Server 2022).
+	 *
+	 * @return the fault subcode, or {@code null} when the response carried none
+	 */
+	public String getFaultSubcode() {
+		return faultSubcode;
 	}
 
 	/**

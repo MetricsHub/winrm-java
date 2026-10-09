@@ -23,10 +23,12 @@ package org.metricshub.winrm;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.metricshub.winrm.light.FakeWsmanResponses.commandResponse;
 import static org.metricshub.winrm.light.FakeWsmanResponses.done;
+import static org.metricshub.winrm.light.FakeWsmanResponses.enqueueShellDeletion;
 import static org.metricshub.winrm.light.FakeWsmanResponses.envelope;
 import static org.metricshub.winrm.light.FakeWsmanResponses.enumerationDone;
 import static org.metricshub.winrm.light.FakeWsmanResponses.fault;
@@ -66,6 +68,20 @@ class WinRMClientTest {
 
 	private static final String WSEN = "http://schemas.xmlsoap.org/ws/2004/09/enumeration";
 	private static final String WSMAN = "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd";
+
+	/**
+	 * What a French Windows Server 2022 answers when the user's operation quota is full: a SOAP
+	 * fault with the {@code QuotaLimit} subcode and a translated reason, but no WSManFault element.
+	 */
+	private static final String QUOTA_FAULT_WITHOUT_CODE = "<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\" "
+		+
+		"xmlns:w=\"" +
+		WSMAN +
+		"\"><s:Body><s:Fault><s:Code><s:Value>s:Receiver</s:Value>" +
+		"<s:Subcode><s:Value>w:QuotaLimit</s:Value></s:Subcode></s:Code>" +
+		"<s:Reason><s:Text xml:lang=\"fr-FR\">Le nombre maximal d'opérations simultanées pour cet utilisateur a été dépassé.</s:Text></s:Reason>"
+		+
+		"</s:Fault></s:Body></s:Envelope>";
 
 	private FakeWsmanServer server;
 
@@ -900,5 +916,160 @@ class WinRMClientTest {
 		client.close();
 		client.close();
 		assertThrows(IllegalStateException.class, () -> client.wql("SELECT Name FROM Win32_Service").execute());
+	}
+
+	// --- Shell replacement (issue #196) -------------------------------------------
+	//
+	// Every command run in a shell holds one of the user's WSMan operations until the shell is
+	// deleted, even once cleanly terminated (measured on Windows Server 2008 R2 and 2022): a shell
+	// reused forever ends up having every command refused by MaxConcurrentOperationsPerUser.
+
+	/** Script a whole command printing the given output, in the current shell. */
+	private void enqueueCommand(final String commandId, final String stdout) {
+		server
+			.enqueue(200, envelope(commandResponse(commandId)))
+			.enqueue(
+				200,
+				envelope(
+					receiveResponse(stream("stdout", commandId, stdout.getBytes(StandardCharsets.UTF_8)), done(commandId, 0))
+				)
+			)
+			.enqueue(200, envelope(signalResponse()));
+	}
+
+	/** Script the Delete of the replaced shell, then the creation of its replacement. */
+	private void enqueueShellReplacement(final String newShell) {
+		enqueueShellDeletion(server);
+		server.enqueue(200, envelope(resourceCreated(newShell)));
+	}
+
+	/** Assert that the requests from the given index delete SHELL-1, create a shell and use SHELL-2. */
+	private void assertShellReplacedAt(final int index) {
+		assertShellReplacedAt(index, "SHELL-1", "SHELL-2");
+	}
+
+	/** Assert that the requests from the given index delete the old shell, create one and use the new one. */
+	private void assertShellReplacedAt(final int index, final String oldShell, final String newShell) {
+		final List<String> requests = server.decryptedRequests();
+		final String delete = requests.get(index);
+		assertTrue(delete.contains("transfer/Delete"), delete);
+		assertTrue(delete.contains("Selector Name=\"ShellId\">" + oldShell + "<"), delete);
+		assertTrue(requests.get(index + 1).contains("transfer/Create"), requests.get(index + 1));
+		final String command = requests.get(index + 2);
+		assertTrue(command.contains("Selector Name=\"ShellId\">" + newShell + "<"), command);
+	}
+
+	@Test
+	void theShellIsReplacedAfterMaxCommandsPerShell() throws Exception {
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")));
+		enqueueCommand("CMD-1", "first");
+		enqueueCommand("CMD-2", "second");
+		enqueueShellReplacement("SHELL-2");
+		enqueueCommand("CMD-3", "third");
+		enqueueCommand("CMD-4", "fourth");
+		enqueueShellReplacement("SHELL-3");
+		enqueueCommand("CMD-5", "fifth");
+
+		try (WinRMClient client = builder(PASSWORD).maxCommandsPerShell(2).build()) {
+			for (final String output : List.of("first", "second", "third", "fourth", "fifth")) {
+				assertEquals(output, client.command(output + ".exe").execute().stdout());
+			}
+		}
+
+		// Create, then two whole commands (Command, Receive, Signal) in SHELL-1...
+		assertShellReplacedAt(7);
+		// ...and the count starts over in SHELL-2: two more commands before the next replacement.
+		assertShellReplacedAt(15, "SHELL-2", "SHELL-3");
+	}
+
+	@Test
+	void theShellIsReplacedAfterTenCommandsByDefault() throws Exception {
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")));
+		for (int i = 1; i <= 10; i++) {
+			enqueueCommand("CMD-" + i, "out");
+		}
+		enqueueShellReplacement("SHELL-2");
+		enqueueCommand("CMD-11", "out");
+
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			for (int i = 0; i < 11; i++) {
+				assertEquals("out", client.command("poll.exe").execute().stdout());
+			}
+		}
+
+		// Create, then ten whole commands (Command, Receive, Signal) in SHELL-1.
+		assertShellReplacedAt(31);
+	}
+
+	@Test
+	void aCommandRefusedByTheQuotaIsRetriedInANewShell() throws Exception {
+		assertQuotaFaultReplacesTheShell(
+			fault(
+				"2150859174",
+				"The WS-Management service cannot process the request. The maximum number of concurrent operations for this user has been exceeded."
+			)
+		);
+	}
+
+	@Test
+	void aQuotaFaultWithoutWsmanFaultCodeIsRecognizedByItsSubcode() throws Exception {
+		assertQuotaFaultReplacesTheShell(QUOTA_FAULT_WITHOUT_CODE);
+	}
+
+	private void assertQuotaFaultReplacesTheShell(final String quotaFault) throws Exception {
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")));
+		enqueueCommand("CMD-1", "first");
+		// The user's operation quota is full: the second Command is refused before it could run.
+		server.enqueue(500, quotaFault);
+		enqueueShellReplacement("SHELL-2");
+		enqueueCommand("CMD-2", "second");
+
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			assertEquals("first", client.command("first.exe").execute().stdout());
+			// SHELL-1 holds an operation per command it ran: deleting it releases them, and the
+			// refused command runs in a new shell.
+			assertEquals("second", client.command("second.exe").execute().stdout());
+		}
+
+		// Create, the first command, the refused Command in SHELL-1, then the replacement.
+		final String refused = server.decryptedRequests().get(4);
+		assertTrue(refused.contains("Selector Name=\"ShellId\">SHELL-1<"), refused);
+		assertShellReplacedAt(5);
+	}
+
+	@Test
+	void aQuotaFaultOnAFreshShellIsReportedWithItsSubcode() throws Exception {
+		// The new shell ran nothing: deleting it would release nothing, so the fault is reported.
+		server.enqueue(200, envelope(resourceCreated("SHELL-1"))).enqueue(500, QUOTA_FAULT_WITHOUT_CODE);
+
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			final WinRMFaultException e = assertThrows(WinRMFaultException.class, () -> client.command("x.exe").execute());
+			// No WSManFault code on such hosts: the untranslated subcode still names the fault.
+			assertNull(e.getFaultCode());
+			assertEquals("QuotaLimit", e.getFaultSubcode());
+			assertEquals(2, server.decryptedRequests().size(), "no Delete, no retry");
+		}
+	}
+
+	@Test
+	void aCommandRefusedByTheQuotaIsRetriedOnlyOnce() throws Exception {
+		// The quota is held by other connections of the user: the new shell is refused too, and
+		// the fault is reported instead of looping.
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")));
+		enqueueCommand("CMD-1", "first");
+		server.enqueue(500, QUOTA_FAULT_WITHOUT_CODE);
+		enqueueShellReplacement("SHELL-2");
+		server.enqueue(500, QUOTA_FAULT_WITHOUT_CODE);
+
+		try (WinRMClient client = builder(PASSWORD).build()) {
+			assertEquals("first", client.command("first.exe").execute().stdout());
+			final WinRMFaultException e = assertThrows(
+				WinRMFaultException.class,
+				() -> client.command("second.exe").execute()
+			);
+			assertEquals("QuotaLimit", e.getFaultSubcode());
+			final long commands = server.decryptedRequests().stream().filter(r -> r.contains(":CommandLine>")).count();
+			assertEquals(3, commands, "the first command, the refused one, and a single retry");
+		}
 	}
 }

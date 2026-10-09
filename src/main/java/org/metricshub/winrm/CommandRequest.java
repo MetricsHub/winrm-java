@@ -192,8 +192,9 @@ public final class CommandRequest {
 
 	/**
 	 * Set the working directory of the remote process. The remote command shell is created on
-	 * the first command a client executes and is reused afterward, so this setting takes effect
-	 * only when this is the client's first command.
+	 * the first command a client executes and is reused afterward (every shell that replaces it
+	 * gets the same settings), so this setting takes effect only when this is the client's first
+	 * command.
 	 *
 	 * @param workingDirectory the working directory path on the remote host
 	 * @return this request
@@ -209,7 +210,8 @@ public final class CommandRequest {
 	 * be called several times; insertion order is preserved, and setting the same name again
 	 * replaces its value. Like {@link #workingDirectory(String)}, the environment is shell-scoped:
 	 * the remote command shell is created on the first command a client executes and is reused
-	 * afterward, so this setting takes effect only when this is the client's first command.
+	 * afterward (every shell that replaces it gets the same settings), so this setting takes
+	 * effect only when this is the client's first command.
 	 *
 	 * <pre>{@code
 	 * CommandResult result = client.command("build.cmd")

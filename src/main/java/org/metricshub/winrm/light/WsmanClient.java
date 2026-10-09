@@ -20,6 +20,7 @@ package org.metricshub.winrm.light;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -58,6 +59,14 @@ final class WsmanClient implements AutoCloseable {
 	private static final String FAULT_OPERATION_TIMEOUT = "2150858793";
 	private static final String FAULT_SHELL_NOT_FOUND = "2150858843";
 
+	// The user's MaxConcurrentOperationsPerUser quota is full. Some hosts (a French Windows Server
+	// 2022) send this fault without any WSManFault code, so it is also recognized by its SOAP
+	// subcode, which is never translated.
+	private static final String FAULT_OPERATION_QUOTA = "2150859174";
+	private static final String SUBCODE_QUOTA_LIMIT = "QuotaLimit";
+
+	private static final String SOAP_ENVELOPE_NS = "http://www.w3.org/2003/05/soap-envelope";
+
 	// A Send answered with this Windows error (ERROR_NO_DATA, "The pipe is being closed") found the
 	// command no longer reading its standard input: it exited, or closed its stdin, first.
 	private static final String FAULT_PIPE_CLOSING = "232";
@@ -92,6 +101,7 @@ final class WsmanClient implements AutoCloseable {
 	private final int consoleCodePage;
 	private final boolean loadUserProfile;
 	private final String arraySeparator;
+	private final int maxCommandsPerShell;
 	private final String url;
 	private final String rawUsername;
 	private final AuthScheme auth;
@@ -107,13 +117,22 @@ final class WsmanClient implements AutoCloseable {
 	private String pendingAuthorization;
 	private String shellId;
 
-	// A shell no longer reused because one of its commands may never have been terminated: its
-	// terminate Signal faulted, failed in transit, or found no budget (issue #196). Such a command
-	// keeps holding one of the user's WSMan operations until its shell is deleted, so reusing the
-	// shell would pile them up until MaxConcurrentOperationsPerUser refuses every command. Deleted
-	// before the next shell is created, or by close(); never set together with shellId. Guarded by
-	// connectionPermit, like shellId.
+	// A shell no longer reused: it ran maxCommandsPerShell commands, the quota refused a command in
+	// it, or one of its commands may never have been terminated (its terminate Signal faulted, failed
+	// in transit, or found no budget). Its commands hold the user's WSMan operations until it is
+	// deleted, so reusing it would pile them up until MaxConcurrentOperationsPerUser refuses every
+	// command (issue #196). Deleted before the next shell is created, or by close(); never set
+	// together with shellId. Guarded by connectionPermit, like shellId.
 	private String retiredShellId;
+
+	// How many commands the current shell has run. Each one holds one of the user's WSMan operations
+	// until the shell is deleted, even once cleanly terminated (measured on Windows Server 2008 R2
+	// and 2022, issue #196), so the shell is retired after maxCommandsPerShell of them. Guarded by
+	// connectionPermit, like shellId.
+	@SuppressFBWarnings(value = "AT_STALE_THREAD_WRITE_OF_PRIMITIVE", justification = "Only accessed while holding connectionPermit, "
+		+
+		"whose release/acquire orders every write before the next holder's reads")
+	private int shellCommands;
 
 	// The shell's working directory and environment variables are pinned by the FIRST command on
 	// this connection and reused whenever the shell must be (re)created — e.g. after the server
@@ -199,6 +218,7 @@ final class WsmanClient implements AutoCloseable {
 		final int consoleCodePage,
 		final boolean loadUserProfile,
 		final String arraySeparator,
+		final int maxCommandsPerShell,
 		final int connectRetries,
 		final long retryDelayMs
 	) {
@@ -206,6 +226,7 @@ final class WsmanClient implements AutoCloseable {
 		this.consoleCodePage = consoleCodePage;
 		this.loadUserProfile = loadUserProfile;
 		this.arraySeparator = arraySeparator;
+		this.maxCommandsPerShell = maxCommandsPerShell;
 		this.connectRetries = connectRetries;
 		this.retryDelayMs = retryDelayMs;
 		// A non-null socket factory selects HTTPS: TLS wraps the transport and the SOAP travels plaintext.
@@ -567,6 +588,11 @@ final class WsmanClient implements AutoCloseable {
 					: new LinkedHashMap<>(environment);
 				shellSettingsPinned = true;
 			}
+			if (shellId != null && shellCommands >= maxCommandsPerShell) {
+				// The shell's commands hold as many of the user's WSMan operations: replace it before
+				// they exhaust the quota shared by every connection of this user.
+				retireShell();
+			}
 			if (shellId == null) {
 				if (retiredShellId != null) {
 					deleteRetiredShell(operationTimeoutMs);
@@ -583,18 +609,26 @@ final class WsmanClient implements AutoCloseable {
 			try {
 				commandId = sendCommand(commandLine, operationTimeoutMs, failOnQuietTimeout, consoleModeStdin);
 			} catch (final WinRMFaultException e) {
-				if (!FAULT_SHELL_NOT_FOUND.equals(e.getFaultCode())) {
+				// Either way the Command was rejected before it could run, so it is safe to recreate
+				// the shell — with its ORIGINAL working directory and environment — and retry once.
+				if (FAULT_SHELL_NOT_FOUND.equals(e.getFaultCode())) {
+					// The server reaped the cached shell between commands (e.g. its IdleTimeout expired on
+					// a long-lived client).
+					shellId = null;
+				} else if (shellCommands > 0 && isQuotaFault(e)) {
+					// The user's operation quota is full, and this shell holds one operation per command
+					// it ran: deleting it releases them.
+					retireShell();
+					deleteRetiredShell(operationTimeoutMs);
+					checkNotCancelled();
+				} else {
 					throw e;
 				}
-				// The server reaped the cached shell between commands (e.g. its IdleTimeout expired on a
-				// long-lived client). The Command was rejected before it could run, so it is safe to
-				// recreate the shell — with its ORIGINAL working directory and environment — and retry
-				// once.
-				shellId = null;
 				createShell(shellWorkingDirectory, shellEnvironment, operationTimeoutMs, failOnQuietTimeout);
 				checkNotCancelled();
 				commandId = sendCommand(commandLine, operationTimeoutMs, failOnQuietTimeout, consoleModeStdin);
 			}
+			shellCommands++;
 			opened = true;
 			return new RemoteCommand(commandId, operationTimeoutMs, failOnQuietTimeout);
 		} finally {
@@ -1036,6 +1070,7 @@ final class WsmanClient implements AutoCloseable {
 			final Element selector = (Element) selectors.item(i);
 			if ("ShellId".equals(selector.getAttribute("Name"))) {
 				shellId = selector.getTextContent();
+				shellCommands = 0;
 				return;
 			}
 		}
@@ -1084,10 +1119,9 @@ final class WsmanClient implements AutoCloseable {
 	}
 
 	/**
-	 * Stop reusing the current shell: one of its commands may never have been terminated, and only
-	 * deleting the shell releases the WSMan operation that command holds (issue #196). The Delete
-	 * is deferred to the next shell creation or to {@link #close()}: the failed or skipped Signal
-	 * that got us here leaves no budget, and possibly no connection, to send it now.
+	 * Stop reusing the current shell: only deleting it releases the WSMan operations its commands
+	 * hold (issue #196). The Delete is deferred to the next shell creation or to {@link #close()}:
+	 * a failed or skipped Signal leaves no budget, and possibly no connection, to send it now.
 	 */
 	private void retireShell() {
 		if (shellId != null) {
@@ -1185,6 +1219,7 @@ final class WsmanClient implements AutoCloseable {
 			operation + " failed: " + faultSummary(resp),
 			resp.status,
 			trimToNull(wsmanFaultCode(resp.document)),
+			trimToNull(faultSubcode(resp.document)),
 			trimToNull(text(resp.document, "Text")),
 			trimToNull(wsmanFaultMessage(resp.document))
 		);
@@ -1454,6 +1489,28 @@ final class WsmanClient implements AutoCloseable {
 	private static String wsmanFaultCode(final Document doc) {
 		final NodeList faults = doc.getElementsByTagNameNS("*", "WSManFault");
 		return faults.getLength() > 0 ? ((Element) faults.item(0)).getAttribute("Code") : null;
+	}
+
+	/**
+	 * The SOAP fault subcode without its namespace prefix (e.g. {@code QuotaLimit}), or null: the
+	 * fault's name, never translated, which some hosts send without any WSManFault code.
+	 */
+	private static String faultSubcode(final Document doc) {
+		final NodeList subcodes = doc.getElementsByTagNameNS(SOAP_ENVELOPE_NS, "Subcode");
+		if (subcodes.getLength() == 0) {
+			return null;
+		}
+		final NodeList values = ((Element) subcodes.item(0)).getElementsByTagNameNS(SOAP_ENVELOPE_NS, "Value");
+		if (values.getLength() == 0) {
+			return null;
+		}
+		final String value = values.item(0).getTextContent().trim();
+		return value.substring(value.indexOf(':') + 1);
+	}
+
+	/** Whether the fault says the user's WSMan operation quota (MaxConcurrentOperationsPerUser) is full. */
+	private static boolean isQuotaFault(final WinRMFaultException fault) {
+		return FAULT_OPERATION_QUOTA.equals(fault.getFaultCode()) || SUBCODE_QUOTA_LIMIT.equals(fault.getFaultSubcode());
 	}
 
 	/**
