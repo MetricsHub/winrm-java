@@ -122,7 +122,8 @@ class WsmanClientParityTest {
 
 	@Test
 	void arrayPropertyElementsAreJoinedWithTheSeparator() throws Exception {
-		// WS-Management sends a WMI array as sibling elements sharing one name; a WMI NULL is xsi:nil.
+		// WS-Management sends a WMI array as sibling elements sharing one name; a scalar NULL is xsi:nil
+		// (an empty or NULL array is left out).
 		final Document doc = parse(
 			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
 				"<s:Body><wsen:PullResponse xmlns:wsen=\"" +
@@ -136,7 +137,7 @@ class WsmanClientParityTest {
 				"<p:IPAddress>192.0.2.10</p:IPAddress>" +
 				"<p:Caption>eth0</p:Caption>" +
 				"<p:IPAddress>fe80::1</p:IPAddress>" +
-				"<p:DefaultIPGateway xsi:nil=\"true\"/>" +
+				"<p:DNSDomain xsi:nil=\"true\"/>" +
 				"</p:Cfg>" +
 				"</wsman:Items>" +
 				"</wsen:PullResponse></s:Body></s:Envelope>"
@@ -146,7 +147,30 @@ class WsmanClientParityTest {
 		assertEquals(1, rows.size());
 		assertEquals("192.0.2.10, fe80::1", rows.get(0).get("IPAddress"));
 		assertEquals("eth0", rows.get(0).get("Caption"));
-		assertEquals("", rows.get(0).get("DefaultIPGateway"));
+		assertEquals("", rows.get(0).get("DNSDomain"));
+	}
+
+	@Test
+	void instanceWithNoPropertyElementIsStillARow() throws Exception {
+		// WinRM leaves out an empty array: selecting only such a property yields an empty fragment
+		final Document doc = parse(
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
+				"<s:Body><wsen:PullResponse xmlns:wsen=\"" +
+				WSEN +
+				"\">" +
+				"<wsman:Items xmlns:wsman=\"" +
+				WSMAN +
+				"\">" +
+				"<wsman:XmlFragment/>" +
+				"<wsman:XmlFragment><IPSecPermitTCPPorts>80</IPSecPermitTCPPorts></wsman:XmlFragment>" +
+				"</wsman:Items>" +
+				"</wsen:PullResponse></s:Body></s:Envelope>"
+		);
+		final List<Map<String, String>> rows = new ArrayList<>();
+		WsmanClient.collectItems(doc, rows, "|");
+		assertEquals(2, rows.size());
+		assertEquals(Map.of(), rows.get(0));
+		assertEquals("80", rows.get(1).get("IPSecPermitTCPPorts"));
 	}
 
 	@Test

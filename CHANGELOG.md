@@ -185,6 +185,14 @@ Consequences:
   `WinRMClient.Builder.arraySeparator(String)` changes the separator. The `WqlRow` Javadoc now
   says what the code does: a WMI `NULL` is an empty string, `null` means "no such property".
 
+- **A WQL row is no longer dropped when none of its selected properties came back** (#201).
+  WinRM leaves an empty or `NULL` array out of the response, so `SELECT IPSecPermitTCPPorts FROM
+  Win32_NetworkAdapterConfiguration` returned no rows at all, where WMI returns one per adapter.
+  Each instance is now a row, on which `string()` returns `null` for the missing property.
+  `WqlResult.columns()` now also reads the property names of every row, not just the first one:
+  with `SELECT * FROM Win32_NetworkAdapterConfiguration`, a first adapter without IP configuration
+  hid `IPAddress`, `DefaultIPGateway`, ... from the columns of all the rows.
+
 - **Streaming terminals now report protocol failures as `WinRMClientException`** (#188).
   `WqlRequest.stream()`, `CommandRequest.start()`, `RemoteFile.openStream()`/`openReader()`,
   `RemoteDirectoryListing.stream()` and the closing of a `RemoteProcess` let raw
