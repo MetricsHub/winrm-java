@@ -19,12 +19,39 @@ package org.metricshub.winrm;
  * limitations under the License.
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class WmiHelperTest {
+
+	@Test
+	void extractPropertiesFromResultReadsTheNamesOfEveryRow() {
+		// WinRM leaves out an empty or NULL array: the first row may lack properties others have
+		final List<Map<String, Object>> rows = List.of(
+			Map.of("Index", "0"),
+			Map.of("Index", "1", "IPAddress", "192.0.2.10")
+		);
+		assertEquals(
+			List.of("Index", "IPAddress"),
+			WmiHelper.extractPropertiesFromResult(rows, "SELECT index, ipaddress FROM Win32_NetworkAdapterConfiguration")
+		);
+		assertEquals(
+			List.of("Index", "IPAddress"),
+			WmiHelper.extractPropertiesFromResult(rows, "SELECT * FROM Win32_NetworkAdapterConfiguration")
+		);
+		assertEquals(
+			List.of("IPAddress"),
+			WmiHelper.extractPropertiesFromResult(
+				List.of(Map.of(), Map.of("IPAddress", "192.0.2.10")),
+				"SELECT ipaddress FROM Win32_NetworkAdapterConfiguration"
+			)
+		);
+	}
 
 	@Test
 	void isValidWqlAcceptsSingleLineQueries() {

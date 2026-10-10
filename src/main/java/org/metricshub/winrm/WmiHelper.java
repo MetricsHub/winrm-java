@@ -20,7 +20,8 @@ package org.metricshub.winrm;
  * ╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱
  */
 
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
@@ -150,7 +151,7 @@ public abstract class WmiHelper {
 	 * Note: The exact case cannot be retrieved if result is empty, in which case all
 	 * names are reported in lower case
 	 *
-	 * @param resultRows The result whose first row will be parsed
+	 * @param resultRows The result whose rows will be parsed
 	 * @param wqlQuery The WQL query that was used (so we make sure to return the properties in the same order)
 	 * @return a list of property names
 	 */
@@ -165,23 +166,22 @@ public abstract class WmiHelper {
 			return wqlQuery.getSelectedProperties();
 		}
 
-		// Extract the actual property names
-		final String[] resultPropertyArray = resultRows.get(0).keySet().toArray(new String[0]);
+		// Extract the actual property names from every row (lower case -> actual case): WinRM
+		// leaves out an empty or NULL array, so a row may lack properties that others have
+		final Map<String, String> resultProperties = new LinkedHashMap<>();
+		resultRows.forEach(row -> row.keySet().forEach(name -> resultProperties.putIfAbsent(name.toLowerCase(), name)));
 
 		// First case: we don't have any specified properties in the WQL Query, so we just
 		// return the properties from the result set in alphabetical order
 		if (wqlQuery.getSelectedProperties().isEmpty()) {
-			Arrays.sort(resultPropertyArray, String.CASE_INSENSITIVE_ORDER);
-			return Arrays.asList(resultPropertyArray);
+			final List<String> properties = new ArrayList<>(resultProperties.values());
+			properties.sort(String.CASE_INSENSITIVE_ORDER);
+			return properties;
 		}
 
 		// Create a new list based on queryPropertyArray (with its order), but with the values
-		// from resultPropertyArray
+		// from resultProperties
 		final List<String> queryProperties = wqlQuery.getSelectedProperties();
-		final Map<String, String> resultProperties = Arrays
-			.asList(resultPropertyArray)
-			.stream()
-			.collect(Collectors.toMap(String::toLowerCase, property -> property));
 		return queryProperties
 			.stream()
 			.map(property -> resultProperties.getOrDefault(property.toLowerCase(), property))
