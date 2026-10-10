@@ -77,7 +77,12 @@ transparently when the server drops an idle one). What is **never** retried:
 * credential rejections
   ([`WinRMAuthenticationException`](apidocs/org/metricshub/winrm/exceptions/WinRMAuthenticationException.html));
 * WSMan faults
-  ([`WinRMFaultException`](apidocs/org/metricshub/winrm/exceptions/WinRMFaultException.html)).
+  ([`WinRMFaultException`](apidocs/org/metricshub/winrm/exceptions/WinRMFaultException.html)),
+  except the refusals that prove a command never ran, whatever the policy: a shell the host
+  reaped and, on Windows Server 2008 R2, the operation quota are retried once in a new shell (see
+  [Shell reuse](commands.html#shell-reuse)), and [file transfers](file-transfers.html) and
+  [remote file operations](files.html) then retry a quota refusal up to 4 more times, with
+  escalating delays (5/10/15/20&nbsp;s) bounded by their timeout.
 
 Retries stay inside each operation's **wall-clock deadline**: when the timeout elapses mid-pause,
 the operation fails with

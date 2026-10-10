@@ -46,7 +46,7 @@ Everything between `command(...)` and `execute()` is optional (see
 | --- | --- | --- |
 | `timeout(Duration)` | the client's timeout | Wall-clock deadline covering file uploads and the command itself with `execute()`; inactivity timeout with `start()`. |
 | `charset(Charset)` | `UTF-8` | The charset used to decode the command output (see below). |
-| `workingDirectory(String)` | remote default | Working directory of the remote process. The remote shell is created by the client's **first** command (remote file operations and `uploadFile(...)` count too) and reused afterward, so this only takes effect on that first command, and never on a request with `upload(...)`. |
+| `workingDirectory(String)` | remote default | Working directory of the remote process. The remote shell is created by the client's **first** command (remote file operations and `uploadFile(...)` count too) and reused afterward (every shell that [replaces it](#shell-reuse) gets the same settings), so this only takes effect on that first command, and never on a request with `upload(...)`. |
 | `environment(String, String)` | none | Environment variable set in the remote shell, like `winrs -env` — call it once per variable, insertion order is preserved. Shell-scoped like `workingDirectory`: only takes effect on the client's **first** command. |
 | `upload(Path...)` | none | Local files to copy to the host before running (see below). |
 | `stdin(String)` / `stdin(Path)` / `stdin(InputStream)` | none | Standard input fed to the command — the remote equivalent of a `< file` redirection (see below). |

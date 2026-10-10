@@ -2,7 +2,43 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased] — 2.0.0
+## 3.1.00
+
+### Fixed
+
+- **A long-lived client no longer exhausts the host's operation quota** (#196). Every command
+  run in a shell holds one of the user's WSMan operations until the shell is deleted, even once
+  terminated, and the client reused its shell forever: a client polling indefinitely ended up
+  with every command refused with WSManFault 2150859174 (*the maximum number of concurrent
+  operations for this user has been exceeded*), after 15 commands on Windows Server 2008 R2 and
+  1500 on later versions, until it was recreated. The client now replaces its shell every 10
+  commands (the new `WinRMClient.Builder.maxCommandsPerShell(int)` changes that number) and never
+  reuses a shell holding a command it could not terminate (its terminate `Signal` failed or was
+  skipped). On Windows Server 2008 R2, whose quota fault carries its WSManFault code, a command
+  the quota refuses in a shell that already ran commands is also retried once in a new shell;
+  later versions send that fault with no code, so nothing reliable identifies it. The new shell
+  gets the same working directory, environment and profile; deleting the old one ends any process
+  a previous command left running in it, as closing the client always did.
+
+- **A streaming read resumed after a long pause no longer times out spuriously** (#198). When a
+  streaming consumer (e.g. a `RemoteProcess` read slowly) paused longer than the inactivity
+  timeout and the host dropped the idle connection meanwhile, the reconnection inherited the
+  expired deadline of the previous request: its TCP connect and TLS handshake got a 1 ms budget
+  and failed with a timeout (*No response from the WinRM service*). Each
+  reconnection now gets a full inactivity timeout of its own.
+
+- **A WQL row is no longer dropped when none of its selected properties came back** (#201).
+  WinRM leaves an empty or `NULL` array out of the response, so `SELECT IPSecPermitTCPPorts FROM
+  Win32_NetworkAdapterConfiguration` returned no rows at all, where WMI returns one per adapter.
+  Each instance is now a row, on which `string()` returns `null` for the missing property.
+  `WqlResult.columns()` now also reads the property names of every row, not just the first one:
+  with `SELECT * FROM Win32_NetworkAdapterConfiguration`, a first adapter without IP configuration
+  hid `IPAddress`, `DefaultIPGateway`, ... from the columns of all the rows.
+
+## 2.0.00 to 3.0.00
+
+Highlights of these versions; see [GitHub Releases](https://github.com/metricshub/winrm-java/releases)
+for the complete notes of each one.
 
 ### Added — HTTP Basic authentication
 
@@ -158,40 +194,11 @@ Consequences:
 
 ### Fixed
 
-- **A long-lived client no longer exhausts the host's operation quota** (#196). Every command
-  run in a shell holds one of the user's WSMan operations until the shell is deleted, even once
-  terminated, and the client reused its shell forever: a client polling indefinitely ended up
-  with every command refused with WSManFault 2150859174 (*the maximum number of concurrent
-  operations for this user has been exceeded*), after 15 commands on Windows Server 2008 R2 and
-  1500 on later versions, until it was recreated. The client now replaces its shell every 10
-  commands (the new `WinRMClient.Builder.maxCommandsPerShell(int)` changes that number) and never
-  reuses a shell holding a command it could not terminate (its terminate `Signal` failed or was
-  skipped). On Windows Server 2008 R2, whose quota fault carries its WSManFault code, a command
-  the quota refuses in a shell that already ran commands is also retried once in a new shell;
-  later versions send that fault with no code, so nothing reliable identifies it. The new shell
-  gets the same working directory, environment and profile; deleting the old one ends any process
-  a previous command left running in it, as closing the client always did.
-
-- **A streaming read resumed after a long pause no longer times out spuriously** (#198). When a
-  streaming consumer (e.g. a `RemoteProcess` read slowly) paused longer than the inactivity
-  timeout and the host dropped the idle connection meanwhile, the reconnection inherited the
-  expired deadline of the previous request: its TCP connect and TLS handshake got a 1 ms budget
-  and failed with a timeout (*No response from the WinRM service*). Each
-  reconnection now gets a full inactivity timeout of its own.
-
 - **WQL array properties keep all their elements** (#189). A WMI array (`IPAddress`,
   `DefaultIPGateway`, `Capabilities`, ...) used to yield only its last element, without any
   error. Its elements are now joined with `|` (`"192.0.2.10|fe80::1"`); the new
   `WinRMClient.Builder.arraySeparator(String)` changes the separator. The `WqlRow` Javadoc now
   says what the code does: a WMI `NULL` is an empty string, `null` means "no such property".
-
-- **A WQL row is no longer dropped when none of its selected properties came back** (#201).
-  WinRM leaves an empty or `NULL` array out of the response, so `SELECT IPSecPermitTCPPorts FROM
-  Win32_NetworkAdapterConfiguration` returned no rows at all, where WMI returns one per adapter.
-  Each instance is now a row, on which `string()` returns `null` for the missing property.
-  `WqlResult.columns()` now also reads the property names of every row, not just the first one:
-  with `SELECT * FROM Win32_NetworkAdapterConfiguration`, a first adapter without IP configuration
-  hid `IPAddress`, `DefaultIPGateway`, ... from the columns of all the rows.
 
 - **Streaming terminals now report protocol failures as `WinRMClientException`** (#188).
   `WqlRequest.stream()`, `CommandRequest.start()`, `RemoteFile.openStream()`/`openReader()`,
