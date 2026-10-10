@@ -134,7 +134,8 @@ lookups in it are case-sensitive.
 
 * When you select explicit properties (`SELECT Name, State FROM ...`), the columns keep the **order
   of the query** and the **exact case reported by WMI**.
-* With `SELECT * FROM ...`, the columns are in **alphabetical order** (case-insensitive).
+* With `SELECT * FROM ...`, the columns are the properties of **every** row (a row may lack an
+  empty array that others have), in **alphabetical order** (case-insensitive).
 * If the query returns no rows, the columns are the selected property names in lower case (WMI's
   own casing cannot be recovered from an empty result set), or an empty list for `SELECT *`.
 
