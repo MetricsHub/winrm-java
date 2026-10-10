@@ -30,8 +30,8 @@ import java.util.Map;
  * <p>
  * A WMI array property is a single string, its elements joined with the client's array
  * separator ({@code a|b}, no trailing separator). WinRM sends no type information: a
- * one-element array reads like a scalar ({@code a}), and an empty array is left out of the
- * response, so the row has no such property.
+ * one-element array reads like a scalar ({@code a}), and an empty or {@code NULL} array is left
+ * out of the response, so the row has no such property.
  */
 public final class WqlRow {
 

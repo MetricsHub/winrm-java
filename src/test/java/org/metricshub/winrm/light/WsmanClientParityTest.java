@@ -150,6 +150,29 @@ class WsmanClientParityTest {
 	}
 
 	@Test
+	void instanceWithNoPropertyElementIsStillARow() throws Exception {
+		// WinRM leaves out an empty array: selecting only such a property yields an empty fragment
+		final Document doc = parse(
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
+				"<s:Body><wsen:PullResponse xmlns:wsen=\"" +
+				WSEN +
+				"\">" +
+				"<wsman:Items xmlns:wsman=\"" +
+				WSMAN +
+				"\">" +
+				"<wsman:XmlFragment/>" +
+				"<wsman:XmlFragment><IPSecPermitTCPPorts>80</IPSecPermitTCPPorts></wsman:XmlFragment>" +
+				"</wsman:Items>" +
+				"</wsen:PullResponse></s:Body></s:Envelope>"
+		);
+		final List<Map<String, String>> rows = new ArrayList<>();
+		WsmanClient.collectItems(doc, rows, "|");
+		assertEquals(2, rows.size());
+		assertEquals(Map.of(), rows.get(0));
+		assertEquals("80", rows.get(1).get("IPSecPermitTCPPorts"));
+	}
+
+	@Test
 	void wmiPropertyNamedItemsIsNotMistakenForTheWrapper() throws Exception {
 		// A structured WMI property called Items (in the class's namespace) must not be read as a
 		// second Items wrapper producing phantom rows.

@@ -1437,11 +1437,11 @@ final class WsmanClient implements AutoCloseable {
 						value.append(arraySeparator).append(prop.getTextContent());
 					}
 				}
-				if (!values.isEmpty()) {
-					final Map<String, String> row = new LinkedHashMap<>();
-					values.forEach((name, value) -> row.put(name, value.toString()));
-					rows.add(row);
-				}
+				// An instance with no property element is still a row: WinRM leaves out an empty (or
+				// NULL) array, so selecting only such a property yields empty instances
+				final Map<String, String> row = new LinkedHashMap<>();
+				values.forEach((name, value) -> row.put(name, value.toString()));
+				rows.add(row);
 			}
 		}
 	}

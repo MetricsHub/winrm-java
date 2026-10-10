@@ -123,8 +123,9 @@ A WMI **array** property (`IPAddress` in `Win32_NetworkAdapterConfiguration`, `C
 `"192.0.2.10|fe80::1"`. The builder's `arraySeparator(String)` changes the separator.
 
 There is no trailing separator, and WinRM sends no type information: a one-element array reads
-like a scalar (`"fr-FR"` for `MUILanguages`), and an empty array is left out of the response, so
-`string()` returns `null` for it.
+like a scalar (`"fr-FR"` for `MUILanguages`), and an empty or `NULL` array is left out of the
+response, so `string()` returns `null` for it. The instance is still a row, even when that array is
+the only selected property.
 
 ### Column order and case
 
