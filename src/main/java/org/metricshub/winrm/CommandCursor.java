@@ -169,8 +169,7 @@ public interface CommandCursor extends AutoCloseable {
 		 * @param stderr the raw stderr bytes of this chunk (possibly empty, never null)
 		 */
 		@SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Chunks are transient carriers on the output hot path; defensive copies "
-			+
-			"would double the allocation for no benefit")
+			+ "would double the allocation for no benefit")
 		public Chunk(final byte[] stdout, final byte[] stderr) {
 			this.stdout = stdout;
 			this.stderr = stderr;
@@ -182,8 +181,7 @@ public interface CommandCursor extends AutoCloseable {
 		 * @return the stdout bytes, possibly empty
 		 */
 		@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = "Chunks are transient carriers on the output hot path; defensive copies "
-			+
-			"would double the allocation for no benefit")
+			+ "would double the allocation for no benefit")
 		public byte[] stdout() {
 			return stdout;
 		}
@@ -194,8 +192,7 @@ public interface CommandCursor extends AutoCloseable {
 		 * @return the stderr bytes, possibly empty
 		 */
 		@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = "Chunks are transient carriers on the output hot path; defensive copies "
-			+
-			"would double the allocation for no benefit")
+			+ "would double the allocation for no benefit")
 		public byte[] stderr() {
 			return stderr;
 		}

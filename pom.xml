@@ -104,7 +104,7 @@
 		<dependency>
 			<groupId>com.github.spotbugs</groupId>
 			<artifactId>spotbugs-annotations</artifactId>
-			<version>4.10.4</version>
+			<version>4.10.5</version>
 			<scope>provided</scope>
 		</dependency>
 		<dependency>
@@ -356,7 +356,7 @@
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-surefire-report-plugin</artifactId>
-				<version>3.6.0</version>
+				<version>3.6.1</version>
 			</plugin>
 
 			<!-- spotbugs: same version as the build gate above, so the report shows what the gate

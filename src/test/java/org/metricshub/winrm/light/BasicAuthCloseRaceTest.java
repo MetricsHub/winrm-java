@@ -59,17 +59,14 @@ class BasicAuthCloseRaceTest {
 		// close() runs — long after the worker is parked.
 		server.enqueueDelayed(200, plaintextEnvelope("enumerate"), 1500L);
 
-		final Thread worker = new Thread(
-			() -> {
-				try {
-					client.openWql("ROOT/CIMV2", "SELECT Name FROM Win32_Service", TIMEOUT, 1000, 0, false);
-				} catch (final Exception ignored) {
-					// close() hard-cuts the read (or the server 401s/500s): the outcome is irrelevant —
-					// what matters is that the operation ran to the end and released the connection.
-				}
-			},
-			"basic-close-race-worker"
-		);
+		final Thread worker = new Thread(() -> {
+			try {
+				client.openWql("ROOT/CIMV2", "SELECT Name FROM Win32_Service", TIMEOUT, 1000, 0, false);
+			} catch (final Exception ignored) {
+				// close() hard-cuts the read (or the server 401s/500s): the outcome is irrelevant —
+				// what matters is that the operation ran to the end and released the connection.
+			}
+		}, "basic-close-race-worker");
 		worker.start();
 
 		// Wait until the worker has authenticated and sent its first request, so it is now blocked
@@ -89,10 +86,8 @@ class BasicAuthCloseRaceTest {
 	}
 
 	private static String headerFor(final String username) {
-		return "Basic "
-			+ java.util.Base64.getEncoder().encodeToString(
-				(username + ":" + new String(PASSWORD)).getBytes(java.nio.charset.StandardCharsets.UTF_8)
-			);
+		return "Basic " + java.util.Base64.getEncoder()
+			.encodeToString((username + ":" + new String(PASSWORD)).getBytes(java.nio.charset.StandardCharsets.UTF_8));
 	}
 
 	private static String plaintextEnvelope(final String marker) {

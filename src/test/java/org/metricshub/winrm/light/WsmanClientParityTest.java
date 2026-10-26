@@ -30,12 +30,8 @@ class WsmanClientParityTest {
 	@Test
 	void endOfSequenceDetectedInWsEnumerationNamespace() throws Exception {
 		final Document doc = parse(
-			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
-				"<s:Body><wsen:PullResponse xmlns:wsen=\"" +
-				WSEN +
-				"\">" +
-				"<wsen:EndOfSequence/>" +
-				"</wsen:PullResponse></s:Body></s:Envelope>"
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" + "<s:Body><wsen:PullResponse xmlns:wsen=\""
+				+ WSEN + "\">" + "<wsen:EndOfSequence/>" + "</wsen:PullResponse></s:Body></s:Envelope>"
 		);
 		assertTrue(WsmanClient.hasEnumerationElement(doc, "EndOfSequence"));
 	}
@@ -45,14 +41,9 @@ class WsmanClientParityTest {
 		// WinRM can emit the marker in its own WSMan namespace instead of WS-Enumeration; the CXF
 		// backend accepts both variants, so the light backend must too.
 		final Document doc = parse(
-			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
-				"<s:Body><wsen:EnumerateResponse xmlns:wsen=\"" +
-				WSEN +
-				"\">" +
-				"<wsman:EndOfSequence xmlns:wsman=\"" +
-				WSMAN +
-				"\"/>" +
-				"</wsen:EnumerateResponse></s:Body></s:Envelope>"
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">"
+				+ "<s:Body><wsen:EnumerateResponse xmlns:wsen=\"" + WSEN + "\">" + "<wsman:EndOfSequence xmlns:wsman=\"" + WSMAN
+				+ "\"/>" + "</wsen:EnumerateResponse></s:Body></s:Envelope>"
 		);
 		assertTrue(WsmanClient.hasEnumerationElement(doc, "EndOfSequence"));
 	}
@@ -62,18 +53,11 @@ class WsmanClientParityTest {
 		// A WMI property that happens to be called EndOfSequence lives in the class's own namespace
 		// and must not terminate the enumeration.
 		final Document doc = parse(
-			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
-				"<s:Body><wsen:PullResponse xmlns:wsen=\"" +
-				WSEN +
-				"\">" +
-				"<wsman:Items xmlns:wsman=\"" +
-				WSMAN +
-				"\">" +
-				"<p:MyClass xmlns:p=\"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/MyClass\">" +
-				"<p:EndOfSequence>oops</p:EndOfSequence>" +
-				"</p:MyClass>" +
-				"</wsman:Items>" +
-				"</wsen:PullResponse></s:Body></s:Envelope>"
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" + "<s:Body><wsen:PullResponse xmlns:wsen=\""
+				+ WSEN + "\">" + "<wsman:Items xmlns:wsman=\"" + WSMAN + "\">"
+				+ "<p:MyClass xmlns:p=\"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/MyClass\">"
+				+ "<p:EndOfSequence>oops</p:EndOfSequence>" + "</p:MyClass>" + "</wsman:Items>"
+				+ "</wsen:PullResponse></s:Body></s:Envelope>"
 		);
 		assertFalse(WsmanClient.hasEnumerationElement(doc, "EndOfSequence"));
 	}
@@ -84,31 +68,16 @@ class WsmanClientParityTest {
 	void itemsCollectedFromBothNamespaceVariants() throws Exception {
 		// EnumerateResponse carries wsen:Items, PullResponse carries wsman:Items; both must yield rows.
 		final String instance = "<p:Win32_Service xmlns:p=\"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/Win32_Service\">"
-			+
-			"<p:Name>Spooler</p:Name>" +
-			"<p:State>Running</p:State>" +
-			"</p:Win32_Service>";
+			+ "<p:Name>Spooler</p:Name>" + "<p:State>Running</p:State>" + "</p:Win32_Service>";
 		final Document wsenItems = parse(
-			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
-				"<s:Body><wsen:EnumerateResponse xmlns:wsen=\"" +
-				WSEN +
-				"\">" +
-				"<wsen:Items>" +
-				instance +
-				"</wsen:Items>" +
-				"</wsen:EnumerateResponse></s:Body></s:Envelope>"
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">"
+				+ "<s:Body><wsen:EnumerateResponse xmlns:wsen=\"" + WSEN + "\">" + "<wsen:Items>" + instance + "</wsen:Items>"
+				+ "</wsen:EnumerateResponse></s:Body></s:Envelope>"
 		);
 		final Document wsmanItems = parse(
-			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
-				"<s:Body><wsen:PullResponse xmlns:wsen=\"" +
-				WSEN +
-				"\">" +
-				"<wsman:Items xmlns:wsman=\"" +
-				WSMAN +
-				"\">" +
-				instance +
-				"</wsman:Items>" +
-				"</wsen:PullResponse></s:Body></s:Envelope>"
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" + "<s:Body><wsen:PullResponse xmlns:wsen=\""
+				+ WSEN + "\">" + "<wsman:Items xmlns:wsman=\"" + WSMAN + "\">" + instance + "</wsman:Items>"
+				+ "</wsen:PullResponse></s:Body></s:Envelope>"
 		);
 
 		for (final Document doc : List.of(wsenItems, wsmanItems)) {
@@ -125,22 +94,12 @@ class WsmanClientParityTest {
 		// WS-Management sends a WMI array as sibling elements sharing one name; a scalar NULL is xsi:nil
 		// (an empty or NULL array is left out).
 		final Document doc = parse(
-			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
-				"<s:Body><wsen:PullResponse xmlns:wsen=\"" +
-				WSEN +
-				"\">" +
-				"<wsman:Items xmlns:wsman=\"" +
-				WSMAN +
-				"\">" +
-				"<p:Cfg xmlns:p=\"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/Cfg\"" +
-				" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">" +
-				"<p:IPAddress>192.0.2.10</p:IPAddress>" +
-				"<p:Caption>eth0</p:Caption>" +
-				"<p:IPAddress>fe80::1</p:IPAddress>" +
-				"<p:DNSDomain xsi:nil=\"true\"/>" +
-				"</p:Cfg>" +
-				"</wsman:Items>" +
-				"</wsen:PullResponse></s:Body></s:Envelope>"
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" + "<s:Body><wsen:PullResponse xmlns:wsen=\""
+				+ WSEN + "\">" + "<wsman:Items xmlns:wsman=\"" + WSMAN + "\">"
+				+ "<p:Cfg xmlns:p=\"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/Cfg\""
+				+ " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">" + "<p:IPAddress>192.0.2.10</p:IPAddress>"
+				+ "<p:Caption>eth0</p:Caption>" + "<p:IPAddress>fe80::1</p:IPAddress>" + "<p:DNSDomain xsi:nil=\"true\"/>"
+				+ "</p:Cfg>" + "</wsman:Items>" + "</wsen:PullResponse></s:Body></s:Envelope>"
 		);
 		final List<Map<String, String>> rows = new ArrayList<>();
 		WsmanClient.collectItems(doc, rows, ", ");
@@ -154,17 +113,10 @@ class WsmanClientParityTest {
 	void instanceWithNoPropertyElementIsStillARow() throws Exception {
 		// WinRM leaves out an empty array: selecting only such a property yields an empty fragment
 		final Document doc = parse(
-			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
-				"<s:Body><wsen:PullResponse xmlns:wsen=\"" +
-				WSEN +
-				"\">" +
-				"<wsman:Items xmlns:wsman=\"" +
-				WSMAN +
-				"\">" +
-				"<wsman:XmlFragment/>" +
-				"<wsman:XmlFragment><IPSecPermitTCPPorts>80</IPSecPermitTCPPorts></wsman:XmlFragment>" +
-				"</wsman:Items>" +
-				"</wsen:PullResponse></s:Body></s:Envelope>"
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" + "<s:Body><wsen:PullResponse xmlns:wsen=\""
+				+ WSEN + "\">" + "<wsman:Items xmlns:wsman=\"" + WSMAN + "\">" + "<wsman:XmlFragment/>"
+				+ "<wsman:XmlFragment><IPSecPermitTCPPorts>80</IPSecPermitTCPPorts></wsman:XmlFragment>" + "</wsman:Items>"
+				+ "</wsen:PullResponse></s:Body></s:Envelope>"
 		);
 		final List<Map<String, String>> rows = new ArrayList<>();
 		WsmanClient.collectItems(doc, rows, "|");
@@ -178,19 +130,11 @@ class WsmanClientParityTest {
 		// A structured WMI property called Items (in the class's namespace) must not be read as a
 		// second Items wrapper producing phantom rows.
 		final Document doc = parse(
-			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
-				"<s:Body><wsen:PullResponse xmlns:wsen=\"" +
-				WSEN +
-				"\">" +
-				"<wsman:Items xmlns:wsman=\"" +
-				WSMAN +
-				"\">" +
-				"<p:MyClass xmlns:p=\"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/MyClass\">" +
-				"<p:Name>real-row</p:Name>" +
-				"<p:Items><p:Nested>phantom</p:Nested></p:Items>" +
-				"</p:MyClass>" +
-				"</wsman:Items>" +
-				"</wsen:PullResponse></s:Body></s:Envelope>"
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" + "<s:Body><wsen:PullResponse xmlns:wsen=\""
+				+ WSEN + "\">" + "<wsman:Items xmlns:wsman=\"" + WSMAN + "\">"
+				+ "<p:MyClass xmlns:p=\"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/MyClass\">"
+				+ "<p:Name>real-row</p:Name>" + "<p:Items><p:Nested>phantom</p:Nested></p:Items>" + "</p:MyClass>"
+				+ "</wsman:Items>" + "</wsen:PullResponse></s:Body></s:Envelope>"
 		);
 		final List<Map<String, String>> rows = new ArrayList<>();
 		WsmanClient.collectItems(doc, rows, "|");
@@ -205,16 +149,12 @@ class WsmanClientParityTest {
 		// MetricsHub tells an "acceptable" WMI error (bad class/namespace) from a broken connection by
 		// matching WBEM_E_* in the exception message — the detail Message text must surface.
 		final Document doc = parse(
-			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
-				"<s:Body><s:Fault>" +
-				"<s:Reason><s:Text xml:lang=\"en-US\">The WS-Management service cannot process the request.</s:Text></s:Reason>"
-				+
-				"<s:Detail>" +
-				"<f:WSManFault xmlns:f=\"http://schemas.microsoft.com/wbem/wsman/1/wsmanfault\" Code=\"2150858778\">" +
-				"<f:Message>The WMI service or the WMI provider returned an unknown error: WBEM_E_INVALID_CLASS</f:Message>" +
-				"</f:WSManFault>" +
-				"</s:Detail>" +
-				"</s:Fault></s:Body></s:Envelope>"
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" + "<s:Body><s:Fault>"
+				+ "<s:Reason><s:Text xml:lang=\"en-US\">The WS-Management service cannot process the request.</s:Text></s:Reason>"
+				+ "<s:Detail>"
+				+ "<f:WSManFault xmlns:f=\"http://schemas.microsoft.com/wbem/wsman/1/wsmanfault\" Code=\"2150858778\">"
+				+ "<f:Message>The WMI service or the WMI provider returned an unknown error: WBEM_E_INVALID_CLASS</f:Message>"
+				+ "</f:WSManFault>" + "</s:Detail>" + "</s:Fault></s:Body></s:Envelope>"
 		);
 		final String summary = WsmanClient.faultSummary(500, doc);
 		assertTrue(summary.contains("HTTP 500"), summary);
@@ -228,19 +168,11 @@ class WsmanClientParityTest {
 		// WinRM usually repeats the same text in Reason and in the WSManFault Message; it must appear once.
 		final String message = "The WMI service or the WMI provider returned an unknown error: WBEM_E_INVALID_NAMESPACE";
 		final Document doc = parse(
-			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
-				"<s:Body><s:Fault>" +
-				"<s:Reason><s:Text xml:lang=\"en-US\">" +
-				message +
-				" </s:Text></s:Reason>" +
-				"<s:Detail>" +
-				"<f:WSManFault xmlns:f=\"http://schemas.microsoft.com/wbem/wsman/1/wsmanfault\" Code=\"2150858778\">" +
-				"<f:Message>" +
-				message +
-				" </f:Message>" +
-				"</f:WSManFault>" +
-				"</s:Detail>" +
-				"</s:Fault></s:Body></s:Envelope>"
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" + "<s:Body><s:Fault>"
+				+ "<s:Reason><s:Text xml:lang=\"en-US\">" + message + " </s:Text></s:Reason>" + "<s:Detail>"
+				+ "<f:WSManFault xmlns:f=\"http://schemas.microsoft.com/wbem/wsman/1/wsmanfault\" Code=\"2150858778\">"
+				+ "<f:Message>" + message + " </f:Message>" + "</f:WSManFault>" + "</s:Detail>"
+				+ "</s:Fault></s:Body></s:Envelope>"
 		);
 		final String summary = WsmanClient.faultSummary(500, doc);
 		final int first = summary.indexOf("WBEM_E_INVALID_NAMESPACE");
@@ -252,10 +184,9 @@ class WsmanClientParityTest {
 	@Test
 	void faultSummaryWithoutWsmanFaultDetailStillReadable() throws Exception {
 		final Document doc = parse(
-			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" +
-				"<s:Body><s:Fault>" +
-				"<s:Reason><s:Text xml:lang=\"en-US\">Some transport-level failure</s:Text></s:Reason>" +
-				"</s:Fault></s:Body></s:Envelope>"
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">" + "<s:Body><s:Fault>"
+				+ "<s:Reason><s:Text xml:lang=\"en-US\">Some transport-level failure</s:Text></s:Reason>"
+				+ "</s:Fault></s:Body></s:Envelope>"
 		);
 		assertEquals("HTTP 500: Some transport-level failure", WsmanClient.faultSummary(500, doc));
 	}
@@ -273,12 +204,7 @@ class WsmanClientParityTest {
 	}
 
 	private static String timeoutOf(final long timeoutMs) {
-		return Envelopes.enumerateWql(
-			"http://host:5985/wsman",
-			"root/cimv2",
-			"SELECT * FROM Win32_OperatingSystem",
-			timeoutMs,
-			32000
-		);
+		return Envelopes
+			.enumerateWql("http://host:5985/wsman", "root/cimv2", "SELECT * FROM Win32_OperatingSystem", timeoutMs, 32000);
 	}
 }

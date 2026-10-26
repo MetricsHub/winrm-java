@@ -1,0 +1,3 @@
+# Bulk reformat commits, skipped by git blame (git config blame.ignoreRevsFile .git-blame-ignore-revs)
+# Formatter: keep a single selector or argument on the same line; join wrapped lines (#209)
+a5b6869baff4de951dce91a7ce8a55d9cc98e06a

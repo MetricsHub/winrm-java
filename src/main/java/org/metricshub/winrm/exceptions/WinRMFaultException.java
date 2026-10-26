@@ -48,10 +48,7 @@ public class WinRMFaultException extends WinRMClientException {
 	 * @param faultDetail the detailed WSManFault message (provider-level detail), or {@code null}
 	 */
 	public WinRMFaultException(
-		final String message,
-		final int httpStatus,
-		final String faultCode,
-		final String faultReason,
+		final String message, final int httpStatus, final String faultCode, final String faultReason,
 		final String faultDetail
 	) {
 		super(message);

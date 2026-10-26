@@ -52,18 +52,12 @@ class Type1Message extends NTLMMessage {
 	static int getDefaultFlags() {
 		// Required flags
 		return NTLMEngineUtils.FLAG_REQUEST_NTLM_V1
-			|
-			NTLMEngineUtils.FLAG_REQUEST_NTLM2_SESSION
-			|
-			NTLMEngineUtils.FLAG_REQUEST_VERSION
-			|
-			NTLMEngineUtils.FLAG_REQUEST_ALWAYS_SIGN
-			|
-			NTLMEngineUtils.FLAG_REQUEST_128BIT_KEY_EXCH
-			|
-			NTLMEngineUtils.FLAG_REQUEST_56BIT_ENCRYPTION
-			|
-			NTLMEngineUtils.FLAG_REQUEST_UNICODE_ENCODING;
+			| NTLMEngineUtils.FLAG_REQUEST_NTLM2_SESSION
+			| NTLMEngineUtils.FLAG_REQUEST_VERSION
+			| NTLMEngineUtils.FLAG_REQUEST_ALWAYS_SIGN
+			| NTLMEngineUtils.FLAG_REQUEST_128BIT_KEY_EXCH
+			| NTLMEngineUtils.FLAG_REQUEST_56BIT_ENCRYPTION
+			| NTLMEngineUtils.FLAG_REQUEST_UNICODE_ENCODING;
 	}
 
 	/**

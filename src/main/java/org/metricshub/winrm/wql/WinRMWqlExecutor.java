@@ -56,8 +56,7 @@ public class WinRMWqlExecutor {
 		this.headers = headers != null ? new ArrayList<>(headers) : null;
 		// Deep copy: each row is copied too, so a caller retaining a row list cannot mutate this result
 		this.rows = rows != null
-			? rows
-				.stream()
+			? rows.stream()
 				.map(row -> row != null ? Collections.unmodifiableList(new ArrayList<>(row)) : null)
 				.collect(Collectors.toList())
 			: null;
@@ -128,19 +127,14 @@ public class WinRMWqlExecutor {
 		final WinRMEndpoint winRMEndpoint = new WinRMEndpoint(protocol, hostname, port, username, password, namespace);
 
 		try (
-			WindowsRemoteExecutor winRMService = WinRMExecutorFactory.createInstance(
-				winRMEndpoint,
-				timeout,
-				ticketCache,
-				authentications
-			)) {
+			WindowsRemoteExecutor winRMService = WinRMExecutorFactory
+				.createInstance(winRMEndpoint, timeout, ticketCache, authentications)) {
 			final List<Map<String, Object>> result = winRMService.executeWql(wqlQuery, timeout);
 
 			// Extract the list of properties from the result, with same order as in the WQL query
 			final List<String> headers = WmiHelper.extractPropertiesFromResult(result, wqlQuery);
 
-			final List<List<String>> rows = result
-				.stream()
+			final List<List<String>> rows = result.stream()
 				.map(row -> headers.stream().map(header -> (String) row.get(header)).collect(Collectors.toList()))
 				.collect(Collectors.toList());
 

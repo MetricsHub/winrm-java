@@ -47,9 +47,8 @@ final class NtlmCrypto {
 			// Plain concatenation (not String.format) so the protocol-mandated CRLF cannot be mistaken
 			// for a platform line separator
 			out.write(
-				("\tOriginalContent: type=application/soap+xml;charset=UTF-8;Length=" + messageBody.length + "\r\n").getBytes(
-					StandardCharsets.US_ASCII
-				)
+				("\tOriginalContent: type=application/soap+xml;charset=UTF-8;Length=" + messageBody.length + "\r\n")
+					.getBytes(StandardCharsets.US_ASCII)
 			);
 			out.write(BOUNDARY_CR.getBytes(StandardCharsets.US_ASCII));
 			out.write("\tContent-Type: application/octet-stream\r\n".getBytes(StandardCharsets.US_ASCII));
@@ -94,10 +93,8 @@ final class NtlmCrypto {
 		final long expectedSeqNum = ByteArrayUtils.readLittleEndianUnsignedInt(expected.toByteArray(), 12);
 		if (!Arrays.equals(checksum, expectedChecksum)) {
 			throw new IllegalStateException(
-				"Checksum mismatch\n" +
-					ByteArrayUtils.formatHexDump(checksum) +
-					"--\n" +
-					ByteArrayUtils.formatHexDump(expectedChecksum)
+				"Checksum mismatch\n" + ByteArrayUtils.formatHexDump(checksum) + "--\n"
+					+ ByteArrayUtils.formatHexDump(expectedChecksum)
 			);
 		}
 		if (expectedSeqNum != seqNum) {
@@ -120,10 +117,8 @@ final class NtlmCrypto {
 		try {
 			final byte[] signingKey = outgoing ? session.getClientSigningKey() : session.getServerSigningKey();
 			if (session.hasNegotiateFlag(NTLMEngineUtils.NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY)) {
-				byte[] checksum = EncryptionUtils.hmacMd5(
-					signingKey,
-					ByteArrayUtils.concat(ByteArrayUtils.getLittleEndianUnsignedInt(seqNum), messageBody)
-				);
+				byte[] checksum = EncryptionUtils
+					.hmacMd5(signingKey, ByteArrayUtils.concat(ByteArrayUtils.getLittleEndianUnsignedInt(seqNum), messageBody));
 				checksum = Arrays.copyOfRange(checksum, 0, 8);
 				if (session.hasNegotiateFlag(NTLMEngineUtils.NTLMSSP_NEGOTIATE_KEY_EXCH)) {
 					checksum = outgoing ? session.seal(checksum) : session.unseal(checksum);

@@ -30,8 +30,7 @@ class StandaloneJarIT {
 			assertEquals(projectVersion, attributes.getValue("Implementation-Version"));
 
 			// winrm-java is dependency-free: no third-party classes may leak into the standalone JAR
-			jar
-				.stream()
+			jar.stream()
 				.map(entry -> entry.getName())
 				.filter(name -> name.endsWith(".class"))
 				.forEach(
@@ -54,8 +53,7 @@ class StandaloneJarIT {
 	}
 
 	private static ProcessResult launch(final Path jar, final String argument) throws Exception {
-		final String javaExecutable = Path
-			.of(System.getProperty("java.home"), "bin", isWindows() ? "java.exe" : "java")
+		final String javaExecutable = Path.of(System.getProperty("java.home"), "bin", isWindows() ? "java.exe" : "java")
 			.toString();
 		final Process process = new ProcessBuilder(javaExecutable, "-jar", jar.toString(), argument).start();
 		final boolean finished = process.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);

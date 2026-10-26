@@ -78,8 +78,7 @@ class RemoteFileListingTest {
 	}
 
 	private WinRMClient client() {
-		return WinRMClient
-			.builder("127.0.0.1")
+		return WinRMClient.builder("127.0.0.1")
 			.port(server.port())
 			.credentials(DOMAIN + "\\" + USER, PASSWORD.toCharArray())
 			.timeout(Duration.ofSeconds(10))
@@ -122,8 +121,7 @@ class RemoteFileListingTest {
 
 	/** The PowerShell script the client sent, decoded from its -EncodedCommand. */
 	private String sentScript() {
-		final String command = server
-			.decryptedRequests()
+		final String command = server.decryptedRequests()
 			.stream()
 			.filter(r -> r.contains("-EncodedCommand"))
 			.findFirst()
@@ -189,17 +187,13 @@ class RemoteFileListingTest {
 			"! " + b64("C:\\x"), // ! record without message
 			"garbage"
 		)) {
-			final WinRMClientException e = assertThrows(
-				WinRMClientException.class,
-				() -> {
-					if (bad.startsWith("!")) {
-						RemoteFiles.parseInaccessible(bad);
-					} else {
-						RemoteFiles.parseEntry(bad);
-					}
-				},
-				bad
-			);
+			final WinRMClientException e = assertThrows(WinRMClientException.class, () -> {
+				if (bad.startsWith("!")) {
+					RemoteFiles.parseInaccessible(bad);
+				} else {
+					RemoteFiles.parseEntry(bad);
+				}
+			}, bad);
 			assertTrue(e.getMessage().startsWith("Malformed remote file record: "), e.getMessage());
 		}
 	}
@@ -208,8 +202,7 @@ class RemoteFileListingTest {
 	void executeCollectsEntriesAndInaccessibleDirectories() {
 		// Records cut across Receive chunks, keepalive blank lines in between.
 		final String records = file(DIR + "\\a.log", 10) + "\n" + dir(DIR + "\\W3SVC1") + denied(DIR + "\\W3SVC1\\private")
-			+
-			file(DIR + "\\W3SVC1\\u_ex260101.log", 5_000_000_000L) + "\n";
+			+ file(DIR + "\\W3SVC1\\u_ex260101.log", 5_000_000_000L) + "\n";
 		enqueue(0, records.substring(0, 30), records.substring(30, 100), records.substring(100));
 
 		final List<String> reported = new ArrayList<>();
@@ -229,8 +222,8 @@ class RemoteFileListingTest {
 		// Recursive, unlimited, no filter.
 		assertTrue(
 			script.contains(
-				"FromBase64String(''));$k=0;$mn=0;$mx=" + Long.MAX_VALUE + ";$ta=-1;$tb=" + Long.MAX_VALUE + ";$md=" +
-					Integer.MAX_VALUE + ";"
+				"FromBase64String(''));$k=0;$mn=0;$mx=" + Long.MAX_VALUE + ";$ta=-1;$tb=" + Long.MAX_VALUE + ";$md="
+					+ Integer.MAX_VALUE + ";"
 			),
 			script
 		);
@@ -254,8 +247,7 @@ class RemoteFileListingTest {
 		final Instant after = Instant.parse("2026-01-01T00:00:00Z");
 		final Instant before = Instant.parse("2026-02-01T00:00:00Z");
 		try (WinRMClient client = client()) {
-			client
-				.file(DIR)
+			client.file(DIR)
 				.list()
 				.glob("u_ex*.log")
 				.maxDepth(3)
@@ -268,11 +260,10 @@ class RemoteFileListingTest {
 				.execute();
 		}
 		assertTrue(
-			sentScript()
-				.contains(
-					"FromBase64String('" + b64("^u_ex.*\\.log$") + "'));$k=1;$mn=1024;$mx=1048576;$ta=" +
-						RemoteFiles.toFileTime(after) + ";$tb=" + RemoteFiles.toFileTime(before) + ";$md=3;"
-				),
+			sentScript().contains(
+				"FromBase64String('" + b64("^u_ex.*\\.log$") + "'));$k=1;$mn=1024;$mx=1048576;$ta="
+					+ RemoteFiles.toFileTime(after) + ";$tb=" + RemoteFiles.toFileTime(before) + ";$md=3;"
+			),
 			sentScript()
 		);
 	}
@@ -284,10 +275,7 @@ class RemoteFileListingTest {
 		try (
 			WinRMClient client = client();
 			Stream<RemoteFileInfo> entries = client.file(DIR).list().recursive().onInaccessible(reported::add).stream()) {
-			assertEquals(
-				List.of("a", "c.log"),
-				entries.map(RemoteFileInfo::name).collect(Collectors.toList())
-			);
+			assertEquals(List.of("a", "c.log"), entries.map(RemoteFileInfo::name).collect(Collectors.toList()));
 			assertEquals(List.of(DIR + "\\a\\b"), reported);
 		}
 	}

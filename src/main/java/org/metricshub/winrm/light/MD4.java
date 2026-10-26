@@ -104,10 +104,8 @@ public class MD4 {
 		final int[] d = new int[16];
 
 		for (int i = 0; i < 16; i++) {
-			d[i] = (dataBuffer[i * 4] & 0xff) +
-				((dataBuffer[i * 4 + 1] & 0xff) << 8) +
-				((dataBuffer[i * 4 + 2] & 0xff) << 16) +
-				((dataBuffer[i * 4 + 3] & 0xff) << 24);
+			d[i] = (dataBuffer[i * 4] & 0xff) + ((dataBuffer[i * 4 + 1] & 0xff) << 8) + ((dataBuffer[i * 4 + 2] & 0xff) << 16)
+				+ ((dataBuffer[i * 4 + 3] & 0xff) << 24);
 		}
 
 		// Do a round of processing

@@ -85,8 +85,7 @@ public final class FakeWsmanServer implements AutoCloseable {
 			(byte) 0x89,
 			(byte) 0xab,
 			(byte) 0xcd,
-			(byte) 0xef
-	};
+			(byte) 0xef };
 
 	// Type 2 flags: UNICODE | SIGN | SEAL | EXTENDED_SESSIONSECURITY | TARGETINFO | 128 | KEY_EXCH —
 	// what a real WinRM host negotiates for encrypted HTTP, and what drives the client down the
@@ -290,18 +289,13 @@ public final class FakeWsmanServer implements AutoCloseable {
 	 */
 	public List<StdinChunk> stdinChunks() {
 		final List<StdinChunk> chunks = new ArrayList<>();
-		final java.util.regex.Pattern stream = java.util.regex.Pattern.compile(
-			"<rsp:Send><rsp:Stream Name=\"stdin\"([^>]*)>([^<]*)</rsp:Stream></rsp:Send>"
-		);
+		final java.util.regex.Pattern stream = java.util.regex.Pattern
+			.compile("<rsp:Send><rsp:Stream Name=\"stdin\"([^>]*)>([^<]*)</rsp:Stream></rsp:Send>");
 		for (final String request : decryptedRequests) {
 			final java.util.regex.Matcher matcher = stream.matcher(request);
 			while (matcher.find()) {
-				chunks.add(
-					new StdinChunk(
-						Base64.getDecoder().decode(matcher.group(2)),
-						matcher.group(1).contains("End=\"true\"")
-					)
-				);
+				chunks
+					.add(new StdinChunk(Base64.getDecoder().decode(matcher.group(2)), matcher.group(1).contains("End=\"true\"")));
 			}
 		}
 		return chunks;
@@ -425,9 +419,9 @@ public final class FakeWsmanServer implements AutoCloseable {
 			// Loud, decryptable failure so an over-consuming test fails on an assertion, not a hang.
 			next = new Scripted(
 				500,
-				"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\"><s:Body><s:Fault>" +
-					"<s:Reason><s:Text xml:lang=\"en-US\">FakeWsmanServer: no scripted response left</s:Text></s:Reason>" +
-					"</s:Fault></s:Body></s:Envelope>"
+				"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\"><s:Body><s:Fault>"
+					+ "<s:Reason><s:Text xml:lang=\"en-US\">FakeWsmanServer: no scripted response left</s:Text></s:Reason>"
+					+ "</s:Fault></s:Body></s:Envelope>"
 			);
 		}
 		if (next.delayMillis > 0) {
@@ -463,9 +457,9 @@ public final class FakeWsmanServer implements AutoCloseable {
 		if (next == null) {
 			next = new Scripted(
 				500,
-				"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\"><s:Body><s:Fault>" +
-					"<s:Reason><s:Text xml:lang=\"en-US\">FakeWsmanServer: no scripted response left</s:Text></s:Reason>" +
-					"</s:Fault></s:Body></s:Envelope>"
+				"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\"><s:Body><s:Fault>"
+					+ "<s:Reason><s:Text xml:lang=\"en-US\">FakeWsmanServer: no scripted response left</s:Text></s:Reason>"
+					+ "</s:Fault></s:Body></s:Envelope>"
 			);
 		}
 		if (next.delayMillis > 0) {
@@ -682,10 +676,8 @@ public final class FakeWsmanServer implements AutoCloseable {
 			while ((line = readLine(in)) != null && !line.isEmpty()) {
 				final int colon = line.indexOf(':');
 				if (colon > 0) {
-					request.headers.put(
-						line.substring(0, colon).trim().toLowerCase(Locale.ROOT),
-						line.substring(colon + 1).trim()
-					);
+					request.headers
+						.put(line.substring(0, colon).trim().toLowerCase(Locale.ROOT), line.substring(colon + 1).trim());
 				}
 			}
 			final String contentLength = request.header("content-length");

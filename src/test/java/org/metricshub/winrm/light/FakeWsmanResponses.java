@@ -69,8 +69,7 @@ public final class FakeWsmanResponses {
 		final StringBuilder xml = new StringBuilder();
 		xml.append("<p:").append(className).append(" xmlns:p=\"").append(WMI_NS_PREFIX).append(className).append("\">");
 		for (int i = 0; i + 1 < properties.length; i += 2) {
-			xml
-				.append("<p:")
+			xml.append("<p:")
 				.append(properties[i])
 				.append('>')
 				.append(properties[i + 1])
@@ -90,8 +89,7 @@ public final class FakeWsmanResponses {
 	 */
 	public static String enumerationDone(final String... instances) {
 		final StringBuilder xml = new StringBuilder();
-		xml
-			.append("<wsen:EnumerateResponse xmlns:wsen=\"")
+		xml.append("<wsen:EnumerateResponse xmlns:wsen=\"")
 			.append(WSEN)
 			.append("\" xmlns:wsman=\"")
 			.append(WSMAN)
@@ -109,19 +107,11 @@ public final class FakeWsmanResponses {
 	 * @return the ResourceCreated body
 	 */
 	public static String resourceCreated(final String shellId) {
-		return ("<x:ResourceCreated xmlns:x=\"http://schemas.xmlsoap.org/ws/2004/09/transfer\"" +
-			" xmlns:wsa=\"http://schemas.xmlsoap.org/ws/2004/08/addressing\" xmlns:wsman=\"" +
-			WSMAN +
-			"\">" +
-			"<wsa:Address>http://127.0.0.1/wsman</wsa:Address>" +
-			"<wsa:ReferenceParameters>" +
-			"<wsman:ResourceURI>" +
-			RSP +
-			"/cmd</wsman:ResourceURI>" +
-			"<wsman:SelectorSet><wsman:Selector Name=\"ShellId\">" +
-			shellId +
-			"</wsman:Selector></wsman:SelectorSet>" +
-			"</wsa:ReferenceParameters></x:ResourceCreated>");
+		return ("<x:ResourceCreated xmlns:x=\"http://schemas.xmlsoap.org/ws/2004/09/transfer\""
+			+ " xmlns:wsa=\"http://schemas.xmlsoap.org/ws/2004/08/addressing\" xmlns:wsman=\"" + WSMAN + "\">"
+			+ "<wsa:Address>http://127.0.0.1/wsman</wsa:Address>" + "<wsa:ReferenceParameters>" + "<wsman:ResourceURI>" + RSP
+			+ "/cmd</wsman:ResourceURI>" + "<wsman:SelectorSet><wsman:Selector Name=\"ShellId\">" + shellId
+			+ "</wsman:Selector></wsman:SelectorSet>" + "</wsa:ReferenceParameters></x:ResourceCreated>");
 	}
 
 	/**
@@ -131,11 +121,8 @@ public final class FakeWsmanResponses {
 	 * @return the CommandResponse body
 	 */
 	public static String commandResponse(final String commandId) {
-		return ("<rsp:CommandResponse xmlns:rsp=\"" +
-			RSP +
-			"\"><rsp:CommandId>" +
-			commandId +
-			"</rsp:CommandId></rsp:CommandResponse>");
+		return ("<rsp:CommandResponse xmlns:rsp=\"" + RSP + "\"><rsp:CommandId>" + commandId
+			+ "</rsp:CommandId></rsp:CommandResponse>");
 	}
 
 	/**
@@ -147,12 +134,8 @@ public final class FakeWsmanResponses {
 	 * @return the ReceiveResponse body
 	 */
 	public static String receiveResponse(final String streams, final String commandState) {
-		return ("<rsp:ReceiveResponse xmlns:rsp=\"" +
-			RSP +
-			"\">" +
-			streams +
-			(commandState == null ? "" : commandState) +
-			"</rsp:ReceiveResponse>");
+		return ("<rsp:ReceiveResponse xmlns:rsp=\"" + RSP + "\">" + streams + (commandState == null ? "" : commandState)
+			+ "</rsp:ReceiveResponse>");
 	}
 
 	/**
@@ -164,13 +147,8 @@ public final class FakeWsmanResponses {
 	 * @return the Stream element
 	 */
 	public static String stream(final String name, final String commandId, final byte[] content) {
-		return ("<rsp:Stream Name=\"" +
-			name +
-			"\" CommandId=\"" +
-			commandId +
-			"\">" +
-			Base64.getEncoder().encodeToString(content) +
-			"</rsp:Stream>");
+		return ("<rsp:Stream Name=\"" + name + "\" CommandId=\"" + commandId + "\">"
+			+ Base64.getEncoder().encodeToString(content) + "</rsp:Stream>");
 	}
 
 	/**
@@ -181,13 +159,8 @@ public final class FakeWsmanResponses {
 	 * @return the CommandState element
 	 */
 	public static String done(final String commandId, final int exitCode) {
-		return ("<rsp:CommandState CommandId=\"" +
-			commandId +
-			"\" State=\"" +
-			RSP +
-			"/CommandState/Done\"><rsp:ExitCode>" +
-			exitCode +
-			"</rsp:ExitCode></rsp:CommandState>");
+		return ("<rsp:CommandState CommandId=\"" + commandId + "\" State=\"" + RSP + "/CommandState/Done\"><rsp:ExitCode>"
+			+ exitCode + "</rsp:ExitCode></rsp:CommandState>");
 	}
 
 	/**
@@ -229,22 +202,11 @@ public final class FakeWsmanResponses {
 	 * @return the fault envelope
 	 */
 	public static String fault(final String code, final String reason, final String detailMessage) {
-		return ("<s:Envelope xmlns:s=\"" +
-			SOAP_NS +
-			"\"><s:Body><s:Fault>" +
-			"<s:Code><s:Value>s:Receiver</s:Value></s:Code>" +
-			"<s:Reason><s:Text xml:lang=\"en-US\">" +
-			reason +
-			"</s:Text></s:Reason>" +
-			"<s:Detail><f:WSManFault xmlns:f=\"" +
-			FAULT_NS +
-			"\" Code=\"" +
-			code +
-			"\" Machine=\"fake\">" +
-			"<f:Message>" +
-			(detailMessage == null ? reason : detailMessage) +
-			"</f:Message></f:WSManFault></s:Detail>" +
-			"</s:Fault></s:Body></s:Envelope>");
+		return ("<s:Envelope xmlns:s=\"" + SOAP_NS + "\"><s:Body><s:Fault>"
+			+ "<s:Code><s:Value>s:Receiver</s:Value></s:Code>" + "<s:Reason><s:Text xml:lang=\"en-US\">" + reason
+			+ "</s:Text></s:Reason>" + "<s:Detail><f:WSManFault xmlns:f=\"" + FAULT_NS + "\" Code=\"" + code
+			+ "\" Machine=\"fake\">" + "<f:Message>" + (detailMessage == null ? reason : detailMessage)
+			+ "</f:Message></f:WSManFault></s:Detail>" + "</s:Fault></s:Body></s:Envelope>");
 	}
 
 	// --- whole-exchange enqueue helpers ---------------------------------------
@@ -292,8 +254,7 @@ public final class FakeWsmanResponses {
 		if (stderr.length > 0) {
 			streams.append(stream("stderr", COMMAND_ID, stderr));
 		}
-		server
-			.enqueue(200, envelope(commandResponse(COMMAND_ID)))
+		server.enqueue(200, envelope(commandResponse(COMMAND_ID)))
 			.enqueue(200, envelope(receiveResponse(streams.toString(), done(COMMAND_ID, exitCode))))
 			.enqueue(200, envelope(signalResponse()));
 	}

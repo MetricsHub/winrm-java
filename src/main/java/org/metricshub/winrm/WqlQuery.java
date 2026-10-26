@@ -56,10 +56,7 @@ public class WqlQuery {
 	private String cleanWql;
 
 	private WqlQuery(
-		String wql,
-		List<String> selectedProperties,
-		Map<String, Set<String>> subPropertiesMap,
-		String cleanWql
+		String wql, List<String> selectedProperties, Map<String, Set<String>> subPropertiesMap, String cleanWql
 	) {
 		this.wql = wql;
 		this.selectedProperties = selectedProperties;
@@ -148,31 +145,25 @@ public class WqlQuery {
 		}
 
 		Map<String, Set<String>> subPropertiesMap = new LinkedHashMap<>();
-		properties
-			.stream()
-			.filter(Utils::isNotBlank)
-			.forEachOrdered(property -> {
-				// Split the property into fragments:
-				// propA => ["propA"]
-				// propA.subProp => ["propA", "subProp"]
-				String[] propertyFragmentArray = property.toLowerCase().split("\\.", 2);
-				String mainProperty = propertyFragmentArray[0];
-				String subProperty = propertyFragmentArray.length == 2 ? propertyFragmentArray[1] : null;
+		properties.stream().filter(Utils::isNotBlank).forEachOrdered(property -> {
+			// Split the property into fragments:
+			// propA => ["propA"]
+			// propA.subProp => ["propA", "subProp"]
+			String[] propertyFragmentArray = property.toLowerCase().split("\\.", 2);
+			String mainProperty = propertyFragmentArray[0];
+			String subProperty = propertyFragmentArray.length == 2 ? propertyFragmentArray[1] : null;
 
-				// Add this entry to the map
-				subPropertiesMap.compute(
-					mainProperty,
-					(key, subPropertiesSet) -> {
-						if (subPropertiesSet == null) {
-							subPropertiesSet = new HashSet<>();
-						}
-						if (subProperty != null) {
-							subPropertiesSet.add(subProperty);
-						}
-						return subPropertiesSet;
-					}
-				);
+			// Add this entry to the map
+			subPropertiesMap.compute(mainProperty, (key, subPropertiesSet) -> {
+				if (subPropertiesSet == null) {
+					subPropertiesSet = new HashSet<>();
+				}
+				if (subProperty != null) {
+					subPropertiesSet.add(subProperty);
+				}
+				return subPropertiesSet;
 			});
+		});
 
 		return subPropertiesMap;
 	}

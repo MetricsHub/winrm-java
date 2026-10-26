@@ -131,8 +131,7 @@ public final class WqlRequest {
 		final long timeoutMillis = WinRMClient.toMillis(timeout);
 		final long pullTimeoutMillis = pullTimeout != null ? WinRMClient.toMillis(pullTimeout) : 0;
 		try {
-			final List<Map<String, Object>> result = client
-				.executor()
+			final List<Map<String, Object>> result = client.executor()
 				.executeWql(namespace, query, timeoutMillis, pageSize, pullTimeoutMillis);
 
 			// Extract the list of properties from the result, with same order as in the WQL query

@@ -112,10 +112,8 @@ class WinRmCliTest {
 
 		assertEquals(0, invocation.exitCode);
 		assertEquals(
-			"{\"Name\":\"Spooler\",\"State\":\"Running\"}" +
-				System.lineSeparator() +
-				"{\"Name\":\"WinRM\",\"State\":\"Running\"}" +
-				System.lineSeparator(),
+			"{\"Name\":\"Spooler\",\"State\":\"Running\"}" + System.lineSeparator()
+				+ "{\"Name\":\"WinRM\",\"State\":\"Running\"}" + System.lineSeparator(),
 			invocation.stdout
 		);
 		assertEquals("", invocation.stderr);
@@ -204,8 +202,7 @@ class WinRmCliTest {
 						"BUILD_NUMBER=42",
 						"--profile",
 						"exec",
-						"build.cmd"
-				},
+						"build.cmd" },
 				WinRmCli::connect
 			);
 
@@ -252,8 +249,7 @@ class WinRmCliTest {
 				)
 			);
 			enqueueShellCreation(server);
-			server
-				.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.commandResponse("CMD-1")))
+			server.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.commandResponse("CMD-1")))
 				.enqueue(
 					200,
 					FakeWsmanResponses.envelope(FakeWsmanResponses.receiveResponse("", FakeWsmanResponses.done("CMD-1", 0)))
@@ -293,8 +289,7 @@ class WinRmCliTest {
 						"--env",
 						"CONFIG=release",
 						"--profile",
-						"shell"
-				},
+						"shell" },
 				WinRmCli::connect,
 				new WinRmCli.LocalInput(true, never)
 			);
@@ -385,11 +380,7 @@ class WinRmCliTest {
 
 		// From an interactive console, nothing is forwarded implicitly.
 		final FakeRemote interactive = new FakeRemote();
-		invocation = invoke(
-			concat(REQUIRED, "command", "sort"),
-			args -> interactive,
-			new WinRmCli.LocalInput(true, piped)
-		);
+		invocation = invoke(concat(REQUIRED, "command", "sort"), args -> interactive, new WinRmCli.LocalInput(true, piped));
 		assertEquals(0, invocation.exitCode);
 		org.junit.jupiter.api.Assertions.assertNull(interactive.forwardedStdin);
 	}
@@ -404,21 +395,17 @@ class WinRmCliTest {
 		assertFalse(WinRmCli.stdinHasAvailableInput(new java.io.ByteArrayInputStream(new byte[0])));
 
 		// A probe failure counts as not redirected: never risk blocking on a terminal.
-		assertFalse(
-			WinRmCli.stdinHasAvailableInput(
-				new java.io.InputStream() {
-					@Override
-					public int read() {
-						return -1;
-					}
+		assertFalse(WinRmCli.stdinHasAvailableInput(new java.io.InputStream() {
+			@Override
+			public int read() {
+				return -1;
+			}
 
-					@Override
-					public int available() throws java.io.IOException {
-						throw new java.io.IOException("probe failure");
-					}
-				}
-			)
-		);
+			@Override
+			public int available() throws java.io.IOException {
+				throw new java.io.IOException("probe failure");
+			}
+		}));
 	}
 
 	@Test
@@ -540,14 +527,8 @@ class WinRmCliTest {
 					"whoami"
 				),
 				arguments -> {
-					assertEquals(
-						"camus.internal.sentrysoftware.net",
-						System.getProperty(KERBEROS_KDC_PROPERTY)
-					);
-					assertEquals(
-						"INTERNAL.SENTRYSOFTWARE.NET",
-						System.getProperty(KERBEROS_REALM_PROPERTY)
-					);
+					assertEquals("camus.internal.sentrysoftware.net", System.getProperty(KERBEROS_KDC_PROPERTY));
+					assertEquals("INTERNAL.SENTRYSOFTWARE.NET", System.getProperty(KERBEROS_REALM_PROPERTY));
 					return new FakeRemote();
 				}
 			);
@@ -555,8 +536,7 @@ class WinRmCliTest {
 			assertEquals(0, invocation.exitCode);
 			assertTrue(
 				invocation.stderr.contains(
-					"using Kerberos realm INTERNAL.SENTRYSOFTWARE.NET inferred from KDC " +
-						"camus.internal.sentrysoftware.net"
+					"using Kerberos realm INTERNAL.SENTRYSOFTWARE.NET inferred from KDC " + "camus.internal.sentrysoftware.net"
 				)
 			);
 			assertEquals("previous-kdc.example.net", System.getProperty(KERBEROS_KDC_PROPERTY));
@@ -572,13 +552,10 @@ class WinRmCliTest {
 		final String original = System.getProperty(INSECURE_TLS_PROPERTY);
 		System.setProperty(INSECURE_TLS_PROPERTY, Boolean.TRUE.toString());
 		try {
-			final Invocation invocation = invoke(
-				concat(REQUIRED, "--https", "command", "whoami"),
-				arguments -> {
-					assertEquals(Boolean.TRUE.toString(), System.getProperty(INSECURE_TLS_PROPERTY));
-					return new FakeRemote();
-				}
-			);
+			final Invocation invocation = invoke(concat(REQUIRED, "--https", "command", "whoami"), arguments -> {
+				assertEquals(Boolean.TRUE.toString(), System.getProperty(INSECURE_TLS_PROPERTY));
+				return new FakeRemote();
+			});
 
 			assertEquals(0, invocation.exitCode);
 			assertEquals(Boolean.TRUE.toString(), System.getProperty(INSECURE_TLS_PROPERTY));
@@ -612,8 +589,7 @@ class WinRmCliTest {
 						"-t",
 						"30000",
 						"exec",
-						"whoami"
-				},
+						"whoami" },
 				WinRmCli::connect
 			);
 
@@ -663,8 +639,8 @@ class WinRmCliTest {
 
 			assertEquals(WinRmCli.EXIT_PARTIAL, invocation.exitCode);
 			assertEquals(
-				"d-----            0 " + TIMESTAMP + " " + DIR + "\\W3SVC1" + System.lineSeparator() +
-					"-a----   5000000000 " + TIMESTAMP + " " + DIR + "\\W3SVC1\\u_ex260101.log" + System.lineSeparator(),
+				"d-----            0 " + TIMESTAMP + " " + DIR + "\\W3SVC1" + System.lineSeparator() + "-a----   5000000000 "
+					+ TIMESTAMP + " " + DIR + "\\W3SVC1\\u_ex260101.log" + System.lineSeparator(),
 				invocation.stdout
 			);
 			assertEquals(
@@ -709,8 +685,8 @@ class WinRmCliTest {
 			assertTrue(script.contains(b64(DIR)), script);
 			assertTrue(
 				script.contains(
-					"FromBase64String('" + b64("^.*\\.log$") + "'));$k=1;$mn=1024;$mx=" + Long.MAX_VALUE + ";$ta=" + after +
-						";$tb=" + Long.MAX_VALUE + ";$md=3;"
+					"FromBase64String('" + b64("^.*\\.log$") + "'));$k=1;$mn=1024;$mx=" + Long.MAX_VALUE + ";$ta=" + after
+						+ ";$tb=" + Long.MAX_VALUE + ";$md=3;"
 				),
 				script
 			);
@@ -738,8 +714,7 @@ class WinRmCliTest {
 					"lastModified: " + TIMESTAMP,
 					"created: " + TIMESTAMP,
 					"lastAccessed: " + TIMESTAMP
-				) +
-					System.lineSeparator(),
+				) + System.lineSeparator(),
 				invocation.stdout
 			);
 			assertTrue(sentScripts(server).get(0).contains(b64(DIR)), sentScripts(server).get(0));
@@ -849,22 +824,17 @@ class WinRmCliTest {
 		try (FakeWsmanServer server = new FakeWsmanServer("FAKE", "user", "secret")) {
 			enqueueShellCreation(server);
 			// The first block of a longer file: the read is still running...
-			server
-				.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.commandResponse(COMMAND_ID)))
-				.enqueue(
-					200,
-					FakeWsmanResponses.envelope(FakeWsmanResponses.receiveResponse(stdoutStream(new byte[]
-					{ 1, 2, 3 }), null))
-				)
+			server.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.commandResponse(COMMAND_ID)))
+				.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.receiveResponse(stdoutStream(new byte[]
+				{ 1, 2, 3 }), null)))
 				// ...when the closed output makes the CLI stop it: the terminate Signal, which a real
 				// host answers only when its OperationTimeout expires, the read being blocked writing
 				.enqueue(
 					500,
-					FakeWsmanResponses
-						.fault(
-							"2150858793",
-							"The WS-Management service cannot complete the operation within the time specified in OperationTimeout."
-						)
+					FakeWsmanResponses.fault(
+						"2150858793",
+						"The WS-Management service cannot complete the operation within the time specified in OperationTimeout."
+					)
 				);
 			enqueueShellDeletion(server);
 
@@ -953,15 +923,13 @@ class WinRmCliTest {
 	/** The --json line of an entry whose three timestamps are {@link #TIMESTAMP}. */
 	private static String json(final String path, final String mode, final int attributes, final long size) {
 		return "{\"path\":\"" + path.replace("\\", "\\\\") + "\",\"mode\":\"" + mode + "\",\"attributes\":" + attributes
-			+ ",\"size\":" +
-			size + ",\"lastModified\":\"" + TIMESTAMP + "\",\"created\":\"" + TIMESTAMP + "\",\"lastAccessed\":\"" + TIMESTAMP
-			+ "\"}";
+			+ ",\"size\":" + size + ",\"lastModified\":\"" + TIMESTAMP + "\",\"created\":\"" + TIMESTAMP
+			+ "\",\"lastAccessed\":\"" + TIMESTAMP + "\"}";
 	}
 
 	/** The probe output of a download: the size (8 bytes, little-endian), then the SHA-256 digest. */
 	private static byte[] probe(final byte[] content) throws Exception {
-		return ByteBuffer
-			.allocate(40)
+		return ByteBuffer.allocate(40)
 			.order(ByteOrder.LITTLE_ENDIAN)
 			.putLong(content.length)
 			.put(MessageDigest.getInstance("SHA-256").digest(content))
@@ -991,11 +959,10 @@ class WinRmCliTest {
 			final boolean last = i == chunks.length - 1;
 			server.enqueue(
 				200,
-				FakeWsmanResponses
-					.envelope(
-						FakeWsmanResponses
-							.receiveResponse(stdoutStream(chunks[i]), last ? FakeWsmanResponses.done(COMMAND_ID, exitCode) : null)
-					)
+				FakeWsmanResponses.envelope(
+					FakeWsmanResponses
+						.receiveResponse(stdoutStream(chunks[i]), last ? FakeWsmanResponses.done(COMMAND_ID, exitCode) : null)
+				)
 			);
 		}
 		server.enqueue(200, FakeWsmanResponses.envelope(FakeWsmanResponses.signalResponse()));
@@ -1004,8 +971,7 @@ class WinRmCliTest {
 	/** The PowerShell scripts the client sent, in order, decoded from their -EncodedCommand. */
 	private static List<String> sentScripts(final FakeWsmanServer server) {
 		final Pattern encoded = Pattern.compile("-EncodedCommand ([A-Za-z0-9+/=]+)");
-		return server
-			.decryptedRequests()
+		return server.decryptedRequests()
 			.stream()
 			.map(encoded::matcher)
 			.filter(Matcher::find)
@@ -1040,25 +1006,20 @@ class WinRmCliTest {
 		final FakeWsmanServer server,
 		final OutputStream stdoutTarget,
 		final String... subcommand
-	)
-		throws Exception {
+	) throws Exception {
 		final ByteArrayOutputStream stderrBytes = new ByteArrayOutputStream();
 		try (
 			PrintStream stdout = new PrintStream(stdoutTarget, true, StandardCharsets.UTF_8.name());
 			PrintStream stderr = new PrintStream(stderrBytes, true, StandardCharsets.UTF_8.name())) {
-			final int exitCode = WinRmCli.run(
-				concat(fakeServerOptions(server), subcommand),
-				stdout,
-				stderr,
-				WinRmCli::connect,
-				() -> {
+			final int exitCode = WinRmCli
+				.run(concat(fakeServerOptions(server), subcommand), stdout, stderr, WinRmCli::connect, () -> {
 					throw new AssertionError("No password prompt expected");
-				}
-			);
+				});
 			return new Invocation(
 				exitCode,
 				stdoutTarget instanceof ByteArrayOutputStream
-					? ((ByteArrayOutputStream) stdoutTarget).toByteArray() : new byte[0],
+					? ((ByteArrayOutputStream) stdoutTarget).toByteArray()
+					: new byte[0],
 				stderrBytes.toString(StandardCharsets.UTF_8.name())
 			);
 		}
@@ -1069,13 +1030,9 @@ class WinRmCliTest {
 	}
 
 	private static Invocation invoke(final String[] arguments, final WinRmCli.RemoteFactory factory) throws Exception {
-		return invoke(
-			arguments,
-			factory,
-			() -> {
-				throw new AssertionError("No password prompt expected");
-			}
-		);
+		return invoke(arguments, factory, () -> {
+			throw new AssertionError("No password prompt expected");
+		});
 	}
 
 	private static Invocation invoke(
@@ -1103,16 +1060,9 @@ class WinRmCliTest {
 		try (
 			PrintStream stdout = new PrintStream(stdoutBytes, true, StandardCharsets.UTF_8.name());
 			PrintStream stderr = new PrintStream(stderrBytes, true, StandardCharsets.UTF_8.name())) {
-			final int exitCode = WinRmCli.run(
-				arguments,
-				stdout,
-				stderr,
-				factory,
-				() -> {
-					throw new AssertionError("No password prompt expected");
-				},
-				localInput
-			);
+			final int exitCode = WinRmCli.run(arguments, stdout, stderr, factory, () -> {
+				throw new AssertionError("No password prompt expected");
+			}, localInput);
 			return new Invocation(exitCode, stdoutBytes.toByteArray(), stderrBytes.toString(StandardCharsets.UTF_8.name()));
 		}
 	}

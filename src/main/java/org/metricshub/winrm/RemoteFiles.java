@@ -100,25 +100,21 @@ final class RemoteFiles {
 	 * base64 of the path's UTF-8 bytes.
 	 */
 	private static final String PREAMBLE = "if($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage'){exit 5};"
-		+
-		"$ErrorActionPreference='Stop';" +
-		"function fail($e){if($e.InnerException){$e=$e.InnerException};" +
-		"[Console]::Error.WriteLine($e.Message);" +
-		"if($e -is [IO.FileNotFoundException] -or $e -is [IO.DirectoryNotFoundException]){exit 2};" +
-		"if($e -is [UnauthorizedAccessException]){exit 4};" +
-		"$h=[Runtime.InteropServices.Marshal]::GetHRForException($e) -band 0xFFFF;" +
-		"if($h -eq 32 -or $h -eq 33){exit 3};" +
-		"exit 1};" +
-		"$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'));";
+		+ "$ErrorActionPreference='Stop';" + "function fail($e){if($e.InnerException){$e=$e.InnerException};"
+		+ "[Console]::Error.WriteLine($e.Message);"
+		+ "if($e -is [IO.FileNotFoundException] -or $e -is [IO.DirectoryNotFoundException]){exit 2};"
+		+ "if($e -is [UnauthorizedAccessException]){exit 4};"
+		+ "$h=[Runtime.InteropServices.Marshal]::GetHRForException($e) -band 0xFFFF;"
+		+ "if($h -eq 32 -or $h -eq 33){exit 3};" + "exit 1};"
+		+ "$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'));";
 
 	/**
 	 * Open the file with a share mode that tolerates other writers ({@code ReadWrite}) — a log
 	 * written by a running service is the most common thing to read, and {@code File.OpenRead}
 	 * fails on it.
 	 */
-	private static final String OPEN_FILE = PREAMBLE +
-		"if([IO.Directory]::Exists($p)){exit 6};" +
-		"try{$f=[IO.File]::Open($p,'Open','Read','ReadWrite')}catch{fail $_.Exception};";
+	private static final String OPEN_FILE = PREAMBLE + "if([IO.Directory]::Exists($p)){exit 6};"
+		+ "try{$f=[IO.File]::Open($p,'Open','Read','ReadWrite')}catch{fail $_.Exception};";
 
 	/**
 	 * The opening of the metadata scripts, after {@link #PREAMBLE}: the record writer and the path
@@ -136,16 +132,15 @@ final class RemoteFiles {
 	 * <li>{@code $a} gets the attributes of the path, failing with the documented exit codes.
 	 * </ul>
 	 */
-	private static final String METADATA = PREAMBLE +
-		"$o=[Console]::OpenStandardOutput();$u=[Text.Encoding]::UTF8;$w=New-Object Text.StringBuilder;" +
-		"$v=[Diagnostics.Stopwatch]::StartNew();" +
-		"function out{$y=$u.GetBytes(\"$w`n\");$o.Write($y,0,$y.Length);$o.Flush();$w.Length=0;" +
-		"$v.Reset();$v.Start()};" +
-		"try{$q=[IO.Path]::GetFullPath($p);" +
-		"try{$q=[IO.Path]::GetFullPath((($q-replace'^\\\\\\\\(?=[^\\\\?.])','\\\\?\\UNC\\')" +
-		"-replace'^(?=[A-Za-z]:\\\\)','\\\\?\\'))}catch{};" +
-		"$a=[int][IO.File]::GetAttributes($q)}catch{fail $_.Exception};" +
-		"$pn=0;$pa='';if($q -match '^\\\\\\\\\\?\\\\(UNC)?'){$pn=$matches[0].Length;if($matches[1]){$pa='\\'}};";
+	private static final String METADATA = PREAMBLE
+		+ "$o=[Console]::OpenStandardOutput();$u=[Text.Encoding]::UTF8;$w=New-Object Text.StringBuilder;"
+		+ "$v=[Diagnostics.Stopwatch]::StartNew();"
+		+ "function out{$y=$u.GetBytes(\"$w`n\");$o.Write($y,0,$y.Length);$o.Flush();$w.Length=0;"
+		+ "$v.Reset();$v.Start()};" + "try{$q=[IO.Path]::GetFullPath($p);"
+		+ "try{$q=[IO.Path]::GetFullPath((($q-replace'^\\\\\\\\(?=[^\\\\?.])','\\\\?\\UNC\\')"
+		+ "-replace'^(?=[A-Za-z]:\\\\)','\\\\?\\'))}catch{};"
+		+ "$a=[int][IO.File]::GetAttributes($q)}catch{fail $_.Exception};"
+		+ "$pn=0;$pa='';if($q -match '^\\\\\\\\\\?\\\\(UNC)?'){$pn=$matches[0].Length;if($matches[1]){$pa='\\'}};";
 
 	/**
 	 * Buffer the {@code F} record of the {@code FileSystemInfo} in {@code $e}: plain integers
@@ -153,14 +148,14 @@ final class RemoteFiles {
 	 * Inlined wherever it is used: a PowerShell function call costs more than the record itself
 	 * (about 45 µs, measured), which would make a large listing 10 times slower.
 	 */
-	private static final String RECORD = "$l=0;if($e -is [IO.FileInfo]){$l=$e.Length};" +
-		"[void]$w.Append(\"F $([int]$e.Attributes) $l $($e.LastWriteTimeUtc.ToFileTimeUtc()) " +
-		"$($e.CreationTimeUtc.ToFileTimeUtc()) $($e.LastAccessTimeUtc.ToFileTimeUtc()) " +
-		"$([Convert]::ToBase64String($u.GetBytes($pa+$e.FullName.Substring($pn))))`n\")";
+	private static final String RECORD = "$l=0;if($e -is [IO.FileInfo]){$l=$e.Length};"
+		+ "[void]$w.Append(\"F $([int]$e.Attributes) $l $($e.LastWriteTimeUtc.ToFileTimeUtc()) "
+		+ "$($e.CreationTimeUtc.ToFileTimeUtc()) $($e.LastAccessTimeUtc.ToFileTimeUtc()) "
+		+ "$([Convert]::ToBase64String($u.GetBytes($pa+$e.FullName.Substring($pn))))`n\")";
 
 	/** Write the record of the path itself, a file or a directory. */
-	private static final String INFO = "try{if($a -band 16){$e=New-Object IO.DirectoryInfo $q}" +
-		"else{$e=New-Object IO.FileInfo $q};" + RECORD + ";out}catch{fail $_.Exception}";
+	private static final String INFO = "try{if($a -band 16){$e=New-Object IO.DirectoryInfo $q}"
+		+ "else{$e=New-Object IO.FileInfo $q};" + RECORD + ";out}catch{fail $_.Exception}";
 
 	/**
 	 * Walk the directory with an explicit stack of {@code (DirectoryInfo, depth)} pairs:
@@ -173,21 +168,21 @@ final class RemoteFiles {
 	 * base64 name regex (see {@link #globRegex(String)}; empty: any name), the type (0: all, 1:
 	 * files, 2: directories), the size bounds, the exclusive FileTime bounds and the maximum depth.
 	 */
-	private static final String LIST = "if(!($a -band 16)){exit 7};" +
-		"$g=$u.GetString([Convert]::FromBase64String('%s'));$k=%d;$mn=%d;$mx=%d;$ta=%d;$tb=%d;$md=%d;" +
-		"$m=[IO.DirectoryInfo].GetMethod('EnumerateFileSystemInfos',[Type[]]@());" +
-		"$s=New-Object Collections.Stack;$s.Push(@((New-Object IO.DirectoryInfo $q),1));" +
-		"while($s.Count){$d,$n=$s.Pop();" +
-		"try{if($m){$c=$d.EnumerateFileSystemInfos()}else{$c=$d.GetFileSystemInfos()};" +
-		"foreach($e in $c){$i=$e -is [IO.DirectoryInfo];" +
-		"if($i -and !([int]$e.Attributes -band 1024) -and $n -lt $md){$s.Push(@($e,($n+1)))};" +
-		"$f=$e.LastWriteTimeUtc.ToFileTimeUtc();" +
-		"if(($k -eq 0 -or ($k -eq 2) -eq $i) -and ($i -or ($e.Length -ge $mn -and $e.Length -le $mx)) -and " +
-		"$f -gt $ta -and $f -lt $tb -and $e.Name -match $g){" + RECORD + "};" +
-		"if($w.Length -gt 32000 -or $v.ElapsedMilliseconds -gt 1000){out}}}" +
-		"catch{if($n -eq 1){fail $_.Exception};$x=$_.Exception;if($x.InnerException){$x=$x.InnerException};" +
-		"[void]$w.Append(\"! $([Convert]::ToBase64String($u.GetBytes($pa+$d.FullName.Substring($pn)))) " +
-		"$([Convert]::ToBase64String($u.GetBytes($x.Message)))`n\")}};out";
+	private static final String LIST = "if(!($a -band 16)){exit 7};"
+		+ "$g=$u.GetString([Convert]::FromBase64String('%s'));$k=%d;$mn=%d;$mx=%d;$ta=%d;$tb=%d;$md=%d;"
+		+ "$m=[IO.DirectoryInfo].GetMethod('EnumerateFileSystemInfos',[Type[]]@());"
+		+ "$s=New-Object Collections.Stack;$s.Push(@((New-Object IO.DirectoryInfo $q),1));"
+		+ "while($s.Count){$d,$n=$s.Pop();"
+		+ "try{if($m){$c=$d.EnumerateFileSystemInfos()}else{$c=$d.GetFileSystemInfos()};"
+		+ "foreach($e in $c){$i=$e -is [IO.DirectoryInfo];"
+		+ "if($i -and !([int]$e.Attributes -band 1024) -and $n -lt $md){$s.Push(@($e,($n+1)))};"
+		+ "$f=$e.LastWriteTimeUtc.ToFileTimeUtc();"
+		+ "if(($k -eq 0 -or ($k -eq 2) -eq $i) -and ($i -or ($e.Length -ge $mn -and $e.Length -le $mx)) -and "
+		+ "$f -gt $ta -and $f -lt $tb -and $e.Name -match $g){" + RECORD + "};"
+		+ "if($w.Length -gt 32000 -or $v.ElapsedMilliseconds -gt 1000){out}}}"
+		+ "catch{if($n -eq 1){fail $_.Exception};$x=$_.Exception;if($x.InnerException){$x=$x.InnerException};"
+		+ "[void]$w.Append(\"! $([Convert]::ToBase64String($u.GetBytes($pa+$d.FullName.Substring($pn)))) "
+		+ "$([Convert]::ToBase64String($u.GetBytes($x.Message)))`n\")}};out";
 
 	/**
 	 * Read a byte range: resolve a negative offset from the size of the <i>open</i> stream (so a
@@ -200,18 +195,17 @@ final class RemoteFiles {
 	 * auto-flushing writer with a small buffer) cuts its output into 256-byte writes that leave each
 	 * read with about 4 KiB — 5 to 6 times slower (measured on Windows 2008 R2 and 2022).
 	 */
-	private static final String READ_RANGE = "try{$n=[long]%d;$l=[long]%d;" +
-		"if($n -lt 0){$n=[Math]::Max([long]0,$f.Length+$n)};" +
-		"$f.Position=$n;$b=New-Object byte[] %d;$o=[Console]::OpenStandardOutput();" +
-		"while($l -ne 0){$c=$b.Length;if($l -gt 0 -and $l -lt $c){$c=[int]$l};" +
-		"$r=$f.Read($b,0,$c);if($r -le 0){break};" +
-		"$o.Write($b,0,$r);if($l -gt 0){$l-=$r}};" +
-		"$o.Flush()}catch{fail $_.Exception}finally{$f.Close()}";
+	private static final String READ_RANGE = "try{$n=[long]%d;$l=[long]%d;"
+		+ "if($n -lt 0){$n=[Math]::Max([long]0,$f.Length+$n)};"
+		+ "$f.Position=$n;$b=New-Object byte[] %d;$o=[Console]::OpenStandardOutput();"
+		+ "while($l -ne 0){$c=$b.Length;if($l -gt 0 -and $l -lt $c){$c=[int]$l};"
+		+ "$r=$f.Read($b,0,$c);if($r -le 0){break};" + "$o.Write($b,0,$r);if($l -gt 0){$l-=$r}};"
+		+ "$o.Flush()}catch{fail $_.Exception}finally{$f.Close()}";
 
 	/** Hash the whole file and write the raw digest. {@code %s} is the algorithm. */
-	private static final String DIGEST = "try{$h=[Security.Cryptography.HashAlgorithm]::Create('%s');" +
-		"$y=$h.ComputeHash($f);$o=[Console]::OpenStandardOutput();$o.Write($y,0,$y.Length)}" +
-		"catch{fail $_.Exception}finally{$f.Close()}";
+	private static final String DIGEST = "try{$h=[Security.Cryptography.HashAlgorithm]::Create('%s');"
+		+ "$y=$h.ComputeHash($f);$o=[Console]::OpenStandardOutput();$o.Write($y,0,$y.Length)}"
+		+ "catch{fail $_.Exception}finally{$f.Close()}";
 
 	/**
 	 * What a download is verified against, {@link #PROBE_LENGTH} raw bytes: the number of bytes
@@ -219,9 +213,9 @@ final class RemoteFiles {
 	 * after hashing, not the file length read beforehand, so both describe the same bytes even when
 	 * the file changes during the probe.
 	 */
-	private static final String PROBE = "try{$h=[Security.Cryptography.HashAlgorithm]::Create('SHA256');" +
-		"$d=$h.ComputeHash($f);$y=[byte[]]([BitConverter]::GetBytes($f.Position)+$d);" +
-		"$o=[Console]::OpenStandardOutput();$o.Write($y,0,$y.Length)}catch{fail $_.Exception}finally{$f.Close()}";
+	private static final String PROBE = "try{$h=[Security.Cryptography.HashAlgorithm]::Create('SHA256');"
+		+ "$d=$h.ComputeHash($f);$y=[byte[]]([BitConverter]::GetBytes($f.Position)+$d);"
+		+ "$o=[Console]::OpenStandardOutput();$o.Write($y,0,$y.Length)}catch{fail $_.Exception}finally{$f.Close()}";
 
 	/** The length of the {@link #probeScript(String)} output: an 8-byte size and a 32-byte SHA-256 digest. */
 	static final int PROBE_LENGTH = 40;
@@ -248,8 +242,8 @@ final class RemoteFiles {
 	static String digestScript(final String path, final String algorithm) {
 		if (!DIGEST_ALGORITHMS.contains(algorithm)) {
 			throw new IllegalArgumentException(
-				"Unsupported digest algorithm: " + algorithm + " (supported: " +
-					DIGEST_ALGORITHMS.stream().sorted().collect(Collectors.joining(", ")) + ")"
+				"Unsupported digest algorithm: " + algorithm + " (supported: "
+					+ DIGEST_ALGORITHMS.stream().sorted().collect(Collectors.joining(", ")) + ")"
 			);
 		}
 		return openFile(path) + String.format(DIGEST, algorithm);
@@ -308,8 +302,8 @@ final class RemoteFiles {
 		final long before,
 		final int maxDepth
 	) {
-		return String.format(METADATA, base64(path)) +
-			String.format(LIST, glob == null ? "" : base64(globRegex(glob)), type, minSize, maxSize, after, before, maxDepth);
+		return String.format(METADATA, base64(path)) + String
+			.format(LIST, glob == null ? "" : base64(globRegex(glob)), type, minSize, maxSize, after, before, maxDepth);
 	}
 
 	/**
@@ -483,10 +477,8 @@ final class RemoteFiles {
 				final long delay = ShellFileCopy.QUOTA_RETRY_DELAY_MILLIS * (attempt + 1);
 				// No retry once the pause would reach the timeout: it must start within it.
 				if (attempt >= ShellFileCopy.QUOTA_RETRIES
-					||
-					!ShellFileCopy.isRetryableQuotaRejection(e)
-					||
-					Utils.getCurrentTimeMillis() - begin + delay >= WinRMClient.toMillis(timeout)) {
+					|| !ShellFileCopy.isRetryableQuotaRejection(e)
+					|| Utils.getCurrentTimeMillis() - begin + delay >= WinRMClient.toMillis(timeout)) {
 					throw e;
 				}
 				try {
@@ -539,8 +531,7 @@ final class RemoteFiles {
 		// modules for first use"): noise, not the error message.
 		final String stderr = exitCode == 0
 			? ""
-			: process
-				.stderr()
+			: process.stderr()
 				.lines()
 				.filter(line -> !line.startsWith("#< CLIXML") && !line.startsWith("<Objs "))
 				.collect(Collectors.joining("\n"));

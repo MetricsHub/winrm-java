@@ -188,10 +188,8 @@ public class ShellFileCopy {
 			TimeoutHelper.getRemainingTime(timeout, start, "No time left to locate the remote Windows directory")
 		);
 
-		final String remoteDirectory = WindowsTempShare.buildRemotePath(
-			windowsDirectory,
-			WindowsTempShare.buildShareName()
-		);
+		final String remoteDirectory = WindowsTempShare
+			.buildRemotePath(windowsDirectory, WindowsTempShare.buildShareName());
 
 		// One leg (through the local, quota-retrying runChecked): first purge entries older than
 		// CLEANUP_AGE_DAYS (best-effort, stderr suppressed — reclaims obsolete content-addressed
@@ -200,8 +198,8 @@ public class ShellFileCopy {
 		runChecked(
 			windowsRemoteExecutor,
 			String
-				.format("forfiles /P \"%s\" /D -%d /C \"cmd /c del /f /q @path\" 2>NUL & ", remoteDirectory, CLEANUP_AGE_DAYS) +
-				WindowsTempShare.buildCreateRemoteDirectoryCommand(remoteDirectory),
+				.format("forfiles /P \"%s\" /D -%d /C \"cmd /c del /f /q @path\" 2>NUL & ", remoteDirectory, CLEANUP_AGE_DAYS)
+				+ WindowsTempShare.buildCreateRemoteDirectoryCommand(remoteDirectory),
 			environment,
 			"create the remote temporary directory",
 			timeout,
@@ -345,10 +343,8 @@ public class ShellFileCopy {
 	 */
 	static void checkEmbeddableRemotePath(final String path) {
 		if (path.contains("%")
-			||
-			path.contains("!")
-			||
-			path.chars().anyMatch(c -> c < 0x20 || "<>\"/|?*".indexOf(c) >= 0)) {
+			|| path.contains("!")
+			|| path.chars().anyMatch(c -> c < 0x20 || "<>\"/|?*".indexOf(c) >= 0)) {
 			throw new IllegalArgumentException(
 				String.format("Remote path %s cannot be used on a Windows host safely.", path)
 			);
@@ -401,9 +397,8 @@ public class ShellFileCopy {
 				windowsRemoteExecutor,
 				(mismatchedDestination
 					? String.format("TYPE NUL >\"%s\"", remoteFile)
-					: String.format("IF NOT EXIST \"%s\" TYPE NUL >\"%s\"", remoteFile, remoteFile)) +
-					" & " +
-					digestProbe(remoteFile),
+					: String.format("IF NOT EXIST \"%s\" TYPE NUL >\"%s\"", remoteFile, remoteFile)) + " & "
+					+ digestProbe(remoteFile),
 				environment,
 				"create an empty file",
 				timeout,
@@ -500,13 +495,9 @@ public class ShellFileCopy {
 			windowsRemoteExecutor,
 			(replaceMismatched
 				? String.format("MOVE /Y \"%s\" \"%s\"", stagingFile, remoteFile)
-				: String.format(
-					"IF EXIST \"%2$s\" (DEL /F /Q \"%1$s\") ELSE (MOVE /Y \"%1$s\" \"%2$s\")",
-					stagingFile,
-					remoteFile
-				)) +
-				" & " +
-				digestProbe(remoteFile),
+				: String
+					.format("IF EXIST \"%2$s\" (DEL /F /Q \"%1$s\") ELSE (MOVE /Y \"%1$s\" \"%2$s\")", stagingFile, remoteFile))
+				+ " & " + digestProbe(remoteFile),
 			environment,
 			"publish the transferred file",
 			timeout,
@@ -563,18 +554,14 @@ public class ShellFileCopy {
 		final String base64File = remoteFile + ".b64";
 
 		try {
-			for (final String uploadCommand : buildUploadCommands(
-				Base64.getEncoder().encodeToString(content),
-				base64File
-			)) {
+			for (final String uploadCommand : buildUploadCommands(Base64.getEncoder().encodeToString(content), base64File)) {
 				runChecked(windowsRemoteExecutor, uploadCommand, environment, "upload the file content", timeout, start);
 			}
 
 			final WindowsRemoteCommandResult decoded = run(
 				windowsRemoteExecutor,
-				String.format("certutil -f -decode \"%s\" \"%s\" && DEL /F /Q \"%s\"", base64File, remoteFile, base64File) +
-					" & " +
-					digestProbe(remoteFile),
+				String.format("certutil -f -decode \"%s\" \"%s\" && DEL /F /Q \"%s\"", base64File, remoteFile, base64File)
+					+ " & " + digestProbe(remoteFile),
 				environment,
 				"decode the transferred file",
 				timeout,
@@ -723,8 +710,7 @@ public class ShellFileCopy {
 
 		return output == null
 			? Optional.empty()
-			: output
-				.lines()
+			: output.lines()
 				.map(line -> line.replaceAll("\\s", Utils.EMPTY).toLowerCase(Locale.ROOT))
 				.filter(line -> line.length() == expectedLength && line.matches("[0-9a-f]+"))
 				.findFirst();
@@ -830,10 +816,8 @@ public class ShellFileCopy {
 		final String message = exception.getMessage();
 
 		return message != null
-			&&
-			message.contains(FAULT_OPERATION_QUOTA)
-			&&
-			(message.contains("Command failed") || message.contains("Create shell failed"));
+			&& message.contains(FAULT_OPERATION_QUOTA)
+			&& (message.contains("Command failed") || message.contains("Create shell failed"));
 	}
 
 	/**
@@ -933,10 +917,8 @@ public class ShellFileCopy {
 	 * @return the maximum name length
 	 */
 	static int maxRemoteNameLength(final String remoteDirectory) {
-		return Math.min(
-			MAX_REMOTE_NAME_LENGTH,
-			MAX_WINDOWS_PATH_LENGTH - remoteDirectory.length() - 1 - STAGING_SUFFIX_BUDGET
-		);
+		return Math
+			.min(MAX_REMOTE_NAME_LENGTH, MAX_WINDOWS_PATH_LENGTH - remoteDirectory.length() - 1 - STAGING_SUFFIX_BUDGET);
 	}
 
 	/**
@@ -974,18 +956,12 @@ public class ShellFileCopy {
 	 */
 	static void checkTransferableFileName(final String fileName) {
 		if (fileName.isEmpty()
-			||
-			fileName.contains("%")
-			||
-			fileName.contains("!")
-			||
-			fileName.chars().anyMatch(c -> c < 0x20 || WINDOWS_FORBIDDEN_CHARACTERS.indexOf(c) >= 0)
-			||
-			fileName.endsWith(".")
-			||
-			fileName.endsWith(" ")
-			||
-			RESERVED_DEVICE_NAME.matcher(fileName).matches()) {
+			|| fileName.contains("%")
+			|| fileName.contains("!")
+			|| fileName.chars().anyMatch(c -> c < 0x20 || WINDOWS_FORBIDDEN_CHARACTERS.indexOf(c) >= 0)
+			|| fileName.endsWith(".")
+			|| fileName.endsWith(" ")
+			|| RESERVED_DEVICE_NAME.matcher(fileName).matches()) {
 			throw new IllegalArgumentException(
 				String.format("File name %s cannot be transferred to a Windows host safely.", fileName)
 			);

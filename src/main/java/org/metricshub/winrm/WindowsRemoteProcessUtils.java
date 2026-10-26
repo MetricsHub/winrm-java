@@ -95,24 +95,18 @@ public class WindowsRemoteProcessUtils {
 	 *             genuinely wrote in the ANSI code page.
 	 */
 	@Deprecated(since = "2.0.00", forRemoval = false)
-	public static Charset getWindowsEncodingCharset(
-		final WindowsRemoteExecutor windowsRemoteExecutor,
-		final long timeout
-	) throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
+	public static Charset getWindowsEncodingCharset(final WindowsRemoteExecutor windowsRemoteExecutor, final long timeout)
+		throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
 		if (windowsRemoteExecutor == null || timeout < 1) {
 			return DEFAULT_CHARSET;
 		}
 
 		// Explicitly in ROOT\CIMV2: the executor's default namespace may be a custom one, where
 		// Win32_OperatingSystem does not exist.
-		final List<Map<String, Object>> result = WmiHelper.executeWqlInCimv2(
-			windowsRemoteExecutor,
-			"SELECT CodeSet FROM Win32_OperatingSystem",
-			timeout
-		);
+		final List<Map<String, Object>> result = WmiHelper
+			.executeWqlInCimv2(windowsRemoteExecutor, "SELECT CodeSet FROM Win32_OperatingSystem", timeout);
 
-		final String codeSet = result
-			.stream()
+		final String codeSet = result.stream()
 			.map(row -> (String) row.get("CodeSet"))
 			.filter(Objects::nonNull)
 			.findFirst()
@@ -149,8 +143,7 @@ public class WindowsRemoteProcessUtils {
 	static String caseInsensitiveReplace(final String string, final String target, final String replacement) {
 		return string == null || target == null
 			? string
-			: Pattern
-				.compile(target, Pattern.LITERAL | Pattern.CASE_INSENSITIVE)
+			: Pattern.compile(target, Pattern.LITERAL | Pattern.CASE_INSENSITIVE)
 				.matcher(string)
 				.replaceAll(Matcher.quoteReplacement(replacement == null ? Utils.EMPTY : replacement));
 	}

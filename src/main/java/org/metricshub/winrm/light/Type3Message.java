@@ -63,18 +63,11 @@ public class Type3Message extends NTLMMessage {
 	 * More primitive constructor: don't include cert or previous messages.
 	 */
 	@SuppressFBWarnings(value = "CT_CONSTRUCTOR_THROW", justification = "Computing the NTLM responses in the constructor is the upstream NTLM engine "
-		+
-		"design: a failed crypto step must abort construction. The only constructor is package-private, " +
-		"so no attacker subclass can mount a finalizer attack on the partially-built instance")
+		+ "design: a failed crypto step must abort construction. The only constructor is package-private, "
+		+ "so no attacker subclass can mount a finalizer attack on the partially-built instance")
 	Type3Message(
-		final String domain,
-		final String host,
-		final String user,
-		final char[] password,
-		final byte[] nonce,
-		final int type2Flags,
-		final String target,
-		final byte[] targetInformation
+		final String domain, final String host, final String user, final char[] password, final byte[] nonce,
+		final int type2Flags, final String target, final byte[] targetInformation
 	) throws NtlmException {
 		final Random random = RND_GEN;
 		if (random == null) {

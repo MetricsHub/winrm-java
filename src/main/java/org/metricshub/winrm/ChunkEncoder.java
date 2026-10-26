@@ -47,8 +47,7 @@ final class ChunkEncoder {
 	private char[] pending = new char[0];
 
 	ChunkEncoder(final Charset charset) {
-		this.encoder = charset
-			.newEncoder()
+		this.encoder = charset.newEncoder()
 			.onMalformedInput(CodingErrorAction.REPLACE)
 			.onUnmappableCharacter(CodingErrorAction.REPLACE);
 	}

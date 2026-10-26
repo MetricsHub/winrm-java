@@ -40,8 +40,7 @@ class KerberosAuthSchemeTest {
 	@Test
 	void requestsDelegationOnlyWhenAllowed() throws Exception {
 		// A realm-qualified name: a host-based one would need a Kerberos configuration to resolve
-		final GSSName name = GSSManager
-			.getInstance()
+		final GSSName name = GSSManager.getInstance()
 			.createName("HTTP/server.example.net@EXAMPLE.NET", GSSName.NT_USER_NAME);
 		final GSSContext plain = KerberosAuthScheme.createContext(name, false);
 		final GSSContext delegating = KerberosAuthScheme.createContext(name, true);
