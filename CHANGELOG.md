@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## 3.2.00
+
+### Fixed
+
+- **A client no longer stays stuck on a failing authentication scheme** (#212). With an ordered
+  fallback list such as `(KERBEROS, NTLM)` or `(NTLM, BASIC)`, a client that had moved past a
+  scheme never went back to it: once the last scheme failed too (Basic disabled on the host, NTLM
+  blocked by policy), every later request failed until the client was recreated, even after a
+  transient failure of the first scheme (an unreachable KDC, a host restarting) was over. Once
+  every scheme has failed, the next request now starts over from the first one.
+
 ## 3.1.00
 
 ### Fixed
