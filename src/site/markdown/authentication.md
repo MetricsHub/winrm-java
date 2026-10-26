@@ -29,7 +29,9 @@ When `authentication(...)` is not called, **NTLM** is used.
 
 Several schemes form an **ordered fallback list**: each is tried in the given order until one
 succeeds. `authentication(KERBEROS, NTLM)` attempts Kerberos first and falls back to NTLM — for
-example when the KDC is unreachable or the clock skew is too large.
+example when the KDC is unreachable or the clock skew is too large. The scheme that succeeded is
+retried first when the connection is re-established; once every scheme has failed, the next request
+starts over from the first one.
 
 ## User name and domain
 

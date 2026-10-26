@@ -25,7 +25,8 @@ import java.util.List;
 /**
  * Tries several {@link AuthScheme}s in the caller's order, using the first whose handshake succeeds
  * (e.g. {@code [KERBEROS, NTLM]}: attempt Kerberos, fall back to NTLM). Once a scheme authenticates
- * it becomes the active one for the rest of the connection; on reconnect the fallback runs again.
+ * it becomes the active one for the rest of the connection; on reconnect the fallback runs again
+ * from that scheme. Once every scheme has failed, the next request starts over from the first one.
  * <p>
  * Fallback triggers on a failed handshake — the common case being Kerberos unavailable (no TGT,
  * no reachable KDC, unconfigured realm), which fails client-side before any SOAP is sent.
@@ -68,6 +69,9 @@ final class FallbackAuthScheme implements AuthScheme {
 				}
 			}
 		}
+		// Every remaining candidate failed: rewind so the next request starts over from the first
+		// scheme instead of staying on the last one for good (issue #212).
+		startIndex = 0;
 		throw new IllegalStateException(
 			"All requested authentication schemes failed"
 				+ (lastFailure == null ? "" : " (last: " + lastFailure.getMessage() + ")"),
@@ -108,6 +112,10 @@ final class FallbackAuthScheme implements AuthScheme {
 			startIndex++;
 			return true;
 		}
+		// The last candidate was rejected too: rewind so the next request starts over from the first
+		// scheme instead of staying on the last one for good (issue #212).
+		active = null;
+		startIndex = 0;
 		return false;
 	}
 

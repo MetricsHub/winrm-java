@@ -138,6 +138,44 @@ class FallbackAuthSchemeTest {
 	}
 
 	@Test
+	void rejectionOfEverySchemeRewindsToTheFirstOne() throws Exception {
+		// Issue #212: [NTLM, Basic] where the server rejects both (e.g. a transient logon failure,
+		// then Basic disabled on the host). The next request must start over from NTLM, not stay on
+		// Basic for the rest of the client's life.
+		final FakeScheme ntlm = new FakeScheme("ntlm", NEVER);
+		final FakeScheme basic = new FakeScheme("basic", NEVER, "Basic dXNlcjpwYXNz");
+		final FallbackAuthScheme fallback = new FallbackAuthScheme(List.of(ntlm, basic));
+		final HttpTransport transport = dummyTransport();
+
+		assertEquals("Negotiate ntlm", fallback.authenticate(transport));
+		assertTrue(fallback.advance()); // 401 on ntlm -> basic
+		assertEquals("Negotiate basic", fallback.authenticate(transport));
+		fallback.reset();
+		assertFalse(fallback.advance()); // 401 on basic too -> nothing left, rewound
+		assertFalse(fallback.isAuthenticated());
+
+		assertEquals("Negotiate ntlm", fallback.authenticate(transport)); // starts over from ntlm
+		assertEquals(2, ntlm.authenticateCalls);
+		assertEquals(1, basic.authenticateCalls);
+	}
+
+	@Test
+	void clientSideFailureOfEverySchemeRewindsToTheFirstOne() throws Exception {
+		// Issue #212, the other path: the last scheme fails client-side inside authenticate(), so
+		// advance() is never called. The next handshake must still start over from the first scheme.
+		final FakeScheme kerberos = new FakeScheme("kerberos", NEVER);
+		final FakeScheme ntlm = new FakeScheme("ntlm", ALWAYS);
+		final FallbackAuthScheme fallback = new FallbackAuthScheme(List.of(kerberos, ntlm));
+		final HttpTransport transport = dummyTransport();
+
+		assertEquals("Negotiate kerberos", fallback.authenticate(transport));
+		assertTrue(fallback.advance()); // 401 on kerberos -> ntlm
+		assertThrows(IllegalStateException.class, () -> fallback.authenticate(transport)); // ntlm fails
+		assertEquals("Negotiate kerberos", fallback.authenticate(transport)); // rewound to kerberos
+		assertEquals(2, kerberos.authenticateCalls);
+	}
+
+	@Test
 	void requestAuthorizationForwardsToTheActiveStatelessScheme() throws Exception {
 		// A stateless candidate (e.g. Basic) repeats its Authorization header on EVERY request, so
 		// the wrapper must forward it — the interface default of null would drop the header and
