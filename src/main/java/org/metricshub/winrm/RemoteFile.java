@@ -89,8 +89,7 @@ import org.metricshub.winrm.exceptions.WinRMTimeoutException;
  * A request is not thread-safe; configure it and call its terminals from one thread.
  */
 @SuppressFBWarnings(value = "AT_NONATOMIC_64BIT_PRIMITIVE", justification = "A request is not thread-safe (documented): it is configured, "
-	+
-	"then used, from one thread; a blocking terminal's worker only starts after the configuration")
+	+ "then used, from one thread; a blocking terminal's worker only starts after the configuration")
 public final class RemoteFile {
 
 	/** Default cap of {@link #readBytes()} and {@link #readText(Charset)}: 64 MiB. */
@@ -413,11 +412,12 @@ public final class RemoteFile {
 		// file is created with them: set afterward, a reader could open it in between and keep its
 		// descriptor. Windows has no such mode bits.
 		final Set<PosixFilePermission> permissions = replacing
-			&&
-			target.getFileSystem().supportedFileAttributeViews().contains("posix")
-				? Files.getPosixFilePermissions(target) : null;
+			&& target.getFileSystem().supportedFileAttributeViews().contains("posix")
+				? Files.getPosixFilePermissions(target)
+				: null;
 		final FileAttribute<?>[] attributes = permissions == null
-			? new FileAttribute<?>[0] : new FileAttribute<?>[]
+			? new FileAttribute<?>[0]
+			: new FileAttribute<?>[]
 			{ PosixFilePermissions.asFileAttribute(permissions) };
 
 		final Path absolute = target.toAbsolutePath();
@@ -435,17 +435,14 @@ public final class RemoteFile {
 		// The name is cut so the staging name fits the file-name limits (255 UTF-16 units on NTFS,
 		// 255 bytes on ext4) whatever the length of the destination's name.
 		final Path part = directory.resolve(
-			ShellFileCopy.truncateAtCodePoint(name.toString(), MAX_PART_PREFIX_LENGTH) + "." +
-				Long.toHexString(ThreadLocalRandom.current().nextLong()) + ".part"
+			ShellFileCopy.truncateAtCodePoint(name.toString(), MAX_PART_PREFIX_LENGTH) + "."
+				+ Long.toHexString(ThreadLocalRandom.current().nextLong()) + ".part"
 		);
 		try {
 			try (
 				InputStream in = RemoteFiles.open(client, path, RemoteFiles.readScript(path, 0, -1), timeout);
-				FileChannel out = FileChannel.open(
-					part,
-					EnumSet.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
-					attributes
-				)) {
+				FileChannel out = FileChannel
+					.open(part, EnumSet.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE), attributes)) {
 				if (permissions != null) {
 					// The umask can only have narrowed the creation mode: restore the exact permissions.
 					Files.setPosixFilePermissions(part, permissions);
@@ -454,8 +451,8 @@ public final class RemoteFile {
 				if (transferred.get() != size.get() || !MessageDigest.isEqual(received, digest)) {
 					throw new WinRMClientException(
 						String.format(
-							"Integrity check failed after downloading %s from %s to %s (%d bytes received, %d expected): " +
-								"the file changed during the transfer, or its content was corrupted",
+							"Integrity check failed after downloading %s from %s to %s (%d bytes received, %d expected): "
+								+ "the file changed during the transfer, or its content was corrupted",
 							path,
 							client.hostname(),
 							target,
@@ -562,8 +559,7 @@ public final class RemoteFile {
 		return blocking(() -> {
 			final RemoteProcess process = RemoteFiles.start(client, path, script, timeout);
 			try {
-				final RemoteFileInfo info = process
-					.stdout()
+				final RemoteFileInfo info = process.stdout()
 					.lines()
 					.filter(line -> !line.isBlank())
 					.map(line -> RemoteFiles.parseEntry(line.strip()))

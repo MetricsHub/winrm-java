@@ -69,8 +69,8 @@ final class FallbackAuthScheme implements AuthScheme {
 			}
 		}
 		throw new IllegalStateException(
-			"All requested authentication schemes failed" +
-				(lastFailure == null ? "" : " (last: " + lastFailure.getMessage() + ")"),
+			"All requested authentication schemes failed"
+				+ (lastFailure == null ? "" : " (last: " + lastFailure.getMessage() + ")"),
 			lastFailure
 		);
 	}

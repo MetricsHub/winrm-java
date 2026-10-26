@@ -32,10 +32,8 @@ class WmiHelperTest {
 	@Test
 	void extractPropertiesFromResultReadsTheNamesOfEveryRow() {
 		// WinRM leaves out an empty or NULL array: the first row may lack properties others have
-		final List<Map<String, Object>> rows = List.of(
-			Map.of("Index", "0"),
-			Map.of("Index", "1", "IPAddress", "192.0.2.10")
-		);
+		final List<Map<String, Object>> rows = List
+			.of(Map.of("Index", "0"), Map.of("Index", "1", "IPAddress", "192.0.2.10"));
 		assertEquals(
 			List.of("Index", "IPAddress"),
 			WmiHelper.extractPropertiesFromResult(rows, "SELECT index, ipaddress FROM Win32_NetworkAdapterConfiguration")

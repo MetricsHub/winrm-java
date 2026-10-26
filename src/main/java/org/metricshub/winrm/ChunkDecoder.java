@@ -62,8 +62,7 @@ final class ChunkDecoder {
 	private boolean dropBom;
 
 	ChunkDecoder(final Charset charset) {
-		this.decoder = charset
-			.newDecoder()
+		this.decoder = charset.newDecoder()
 			.onMalformedInput(CodingErrorAction.REPLACE)
 			.onUnmappableCharacter(CodingErrorAction.REPLACE);
 		this.dropBom = StandardCharsets.UTF_8.equals(charset);

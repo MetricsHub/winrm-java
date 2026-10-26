@@ -117,8 +117,7 @@ class WinRMClientBuilderTest {
 
 	@Test
 	void sslContextAndTrustAllAreMutuallyExclusive() throws NoSuchAlgorithmException {
-		final WinRMClient.Builder builder = validBuilder()
-			.https()
+		final WinRMClient.Builder builder = validBuilder().https()
 			.sslContext(SSLContext.getDefault())
 			.trustAllCertificates();
 		assertThrows(IllegalStateException.class, builder::build);
@@ -141,13 +140,11 @@ class WinRMClientBuilderTest {
 			assertTrue(e.getMessage().contains("delegation requires Kerberos"), e.getMessage());
 		}
 		// Kerberos alone, or in an ordered fallback: accepted (build() does not connect)
-		try (
-			WinRMClient client = validBuilder().https().authentication(AuthScheme.KERBEROS).allowDelegation().build()) {
+		try (WinRMClient client = validBuilder().https().authentication(AuthScheme.KERBEROS).allowDelegation().build()) {
 			assertEquals("host", client.hostname());
 		}
 		try (
-			WinRMClient client = validBuilder()
-				.https()
+			WinRMClient client = validBuilder().https()
 				.authentication(AuthScheme.KERBEROS, AuthScheme.NTLM)
 				.allowDelegation()
 				.build()) {

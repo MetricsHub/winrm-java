@@ -129,7 +129,8 @@ class WinRMLiveTest {
 	}
 
 	private static WinRMClient.Builder builder() {
-		final WinRMClient.Builder builder = WinRMClient.builder(host).credentials(username, password)
+		final WinRMClient.Builder builder = WinRMClient.builder(host)
+			.credentials(username, password)
 			.timeout(Duration.ofSeconds(60));
 		if (protocol == WinRMHttpProtocolEnum.HTTPS) {
 			builder.https();
@@ -175,8 +176,8 @@ class WinRMLiveTest {
 		try (WinRMClient client = client()) {
 			client
 				.powerShell(
-					"$b=New-Object byte[] " + content.length + ";for($i=0;$i -lt $b.Length;$i++){$b[$i]=$i % 251}" +
-						";[IO.File]::WriteAllBytes('" + remote + "',$b)"
+					"$b=New-Object byte[] " + content.length + ";for($i=0;$i -lt $b.Length;$i++){$b[$i]=$i % 251}"
+						+ ";[IO.File]::WriteAllBytes('" + remote + "',$b)"
 				)
 				.execute();
 			try {
@@ -202,8 +203,8 @@ class WinRMLiveTest {
 			// 1 GiB of zeros: reading it whole through base64 would take many minutes.
 			client
 				.powerShell(
-					"$f=[IO.File]::Create('" + big + "');$f.SetLength(1073741824);$f.Close();" +
-						"[IO.File]::WriteAllText('" + log + "','first line')"
+					"$f=[IO.File]::Create('" + big + "');$f.SetLength(1073741824);$f.Close();" + "[IO.File]::WriteAllText('" + log
+						+ "','first line')"
 				)
 				.execute();
 			final long start = System.nanoTime();
@@ -233,31 +234,28 @@ class WinRMLiveTest {
 
 		try (WinRMClient client = client()) {
 			// .NET 4.6.2+ accepts \\?\ paths (long paths); PowerShell 2.0 on .NET 2.0 does not.
-			final boolean longPaths = client
-				.powerShell("try{[void][IO.Path]::GetFullPath('\\\\?\\C:\\x');'yes'}catch{'no'}")
+			final boolean longPaths = client.powerShell("try{[void][IO.Path]::GetFullPath('\\\\?\\C:\\x');'yes'}catch{'no'}")
 				.execute()
 				.stdout()
 				.contains("yes");
 			client
 				.powerShell(
-					"$b='" + base + "';" +
-						"foreach($d in 'sub\\deep','secret'){[void][IO.Directory]::CreateDirectory(\"$b\\$d\")};" +
-						"foreach($f in 'a.log','sub\\b.log','sub\\deep\\c.log','secret\\hidden.txt'){" +
-						"[IO.File]::WriteAllText(\"$b\\$f\",'x')};" +
-						"[IO.File]::WriteAllText('" + nonAscii + "','x');" +
-						"cmd /c mklink /J \"$b\\loop\" \"$b\" | Out-Null;" +
-						"icacls \"$b\\secret\" /deny '*S-1-1-0:(RD)' | Out-Null;" +
-						(longPaths
-							? "[void][IO.Directory]::CreateDirectory('\\\\?\\" + longDir + "');" +
-								"[IO.File]::WriteAllText('\\\\?\\" + longFile + "','0123456789')"
+					"$b='" + base + "';"
+						+ "foreach($d in 'sub\\deep','secret'){[void][IO.Directory]::CreateDirectory(\"$b\\$d\")};"
+						+ "foreach($f in 'a.log','sub\\b.log','sub\\deep\\c.log','secret\\hidden.txt'){"
+						+ "[IO.File]::WriteAllText(\"$b\\$f\",'x')};" + "[IO.File]::WriteAllText('" + nonAscii + "','x');"
+						+ "cmd /c mklink /J \"$b\\loop\" \"$b\" | Out-Null;"
+						+ "icacls \"$b\\secret\" /deny '*S-1-1-0:(RD)' | Out-Null;"
+						+ (longPaths
+							? "[void][IO.Directory]::CreateDirectory('\\\\?\\" + longDir + "');" + "[IO.File]::WriteAllText('\\\\?\\"
+								+ longFile + "','0123456789')"
 							: "")
 				)
 				.execute();
 			try {
 				// A plain listing of C:\Windows\Temp.
 				assertTrue(
-					client
-						.file("C:\\Windows\\Temp")
+					client.file("C:\\Windows\\Temp")
 						.list()
 						.directoriesOnly()
 						.execute()
@@ -287,8 +285,7 @@ class WinRMLiveTest {
 				} else {
 					assertEquals(List.of(base + "\\secret"), all.inaccessible());
 				}
-				final RemoteFileInfo loop = all
-					.entries()
+				final RemoteFileInfo loop = all.entries()
 					.stream()
 					.filter(e -> e.path().equals(base + "\\loop"))
 					.findFirst()
@@ -320,8 +317,8 @@ class WinRMLiveTest {
 			} finally {
 				client
 					.powerShell(
-						"$b='" + base + "';icacls \"$b\\secret\" /remove:d '*S-1-1-0' | Out-Null;" +
-							"cmd /c rmdir \"$b\\loop\";cmd /c rmdir /s /q \"\\\\?\\$b\""
+						"$b='" + base + "';icacls \"$b\\secret\" /remove:d '*S-1-1-0' | Out-Null;"
+							+ "cmd /c rmdir \"$b\\loop\";cmd /c rmdir /s /q \"\\\\?\\$b\""
 					)
 					.execute();
 			}
@@ -374,17 +371,14 @@ class WinRMLiveTest {
 		try (WinRMClient client = client()) {
 			client
 				.powerShell(
-					"$r=New-Object Random 42;$b=New-Object byte[] 1048576;$f=[IO.File]::Create('" + remote + "');" +
-						"for($i=0;$i -lt " + mebibytes + ";$i++){$r.NextBytes($b);$f.Write($b,0,$b.Length)};$f.Close()"
+					"$r=New-Object Random 42;$b=New-Object byte[] 1048576;$f=[IO.File]::Create('" + remote + "');"
+						+ "for($i=0;$i -lt " + mebibytes + ";$i++){$r.NextBytes($b);$f.Write($b,0,$b.Length)};$f.Close()"
 				)
 				.execute();
 			try {
 				final Path local = directory.resolve("download.bin");
 				final long start = System.nanoTime();
-				assertEquals(
-					mebibytes * 1048576L,
-					client.file(remote).timeout(Duration.ofMinutes(15)).downloadTo(local)
-				);
+				assertEquals(mebibytes * 1048576L, client.file(remote).timeout(Duration.ofMinutes(15)).downloadTo(local));
 				final long millis = (System.nanoTime() - start) / 1_000_000L;
 				System.out.printf(
 					"Downloaded %d MiB in %d ms (%.2f MB/s) with a %d MiB heap%n",

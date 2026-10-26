@@ -17,9 +17,8 @@ class BasicAuthSchemeTest {
 	void encodesDomainQualifiedCredentialAsBasicHeader() {
 		final BasicAuthScheme scheme = new BasicAuthScheme("DOMAIN\\user", "s3cret".toCharArray());
 
-		final String expected = "Basic " + Base64.getEncoder().encodeToString(
-			("DOMAIN\\user:s3cret").getBytes(StandardCharsets.UTF_8)
-		);
+		final String expected = "Basic "
+			+ Base64.getEncoder().encodeToString(("DOMAIN\\user:s3cret").getBytes(StandardCharsets.UTF_8));
 		assertEquals(expected, scheme.requestAuthorization());
 	}
 
@@ -48,11 +47,7 @@ class BasicAuthSchemeTest {
 		scheme.authenticate(new HttpTransport("localhost", 1, 1000));
 		assertTrue(scheme.isAuthenticated());
 		assertEquals(
-			"Basic " + Base64.getEncoder().encodeToString(
-				"user:password".getBytes(
-					StandardCharsets.UTF_8
-				)
-			),
+			"Basic " + Base64.getEncoder().encodeToString("user:password".getBytes(StandardCharsets.UTF_8)),
 			scheme.requestAuthorization()
 		);
 
@@ -94,14 +89,7 @@ class BasicAuthSchemeTest {
 		final char[] password = "s3cret".toCharArray();
 		final BasicAuthScheme scheme = new BasicAuthScheme("user", password);
 		final String header = scheme.requestAuthorization();
-		assertEquals(
-			"Basic " + Base64.getEncoder().encodeToString(
-				"user:s3cret".getBytes(
-					StandardCharsets.UTF_8
-				)
-			),
-			header
-		);
+		assertEquals("Basic " + Base64.getEncoder().encodeToString("user:s3cret".getBytes(StandardCharsets.UTF_8)), header);
 
 		java.util.Arrays.fill(password, '\0');
 		// The already-derived (and not yet reset) header is still servable...

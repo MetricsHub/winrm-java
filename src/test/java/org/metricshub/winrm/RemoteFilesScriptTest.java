@@ -101,9 +101,7 @@ class RemoteFilesScriptTest {
 			"-NonInteractive",
 			"-EncodedCommand",
 			encoded
-		)
-			.redirectError(ProcessBuilder.Redirect.DISCARD)
-			.start();
+		).redirectError(ProcessBuilder.Redirect.DISCARD).start();
 		process.getOutputStream().close();
 		final byte[] stdout = process.getInputStream().readAllBytes();
 		if (!process.waitFor(60, TimeUnit.SECONDS)) {
@@ -126,16 +124,14 @@ class RemoteFilesScriptTest {
 
 		/** The entries, parsed like the client does, by path relative to the test directory. */
 		Map<String, RemoteFileInfo> entries() {
-			return lines
-				.stream()
+			return lines.stream()
 				.filter(l -> l.startsWith("F "))
 				.map(RemoteFiles::parseEntry)
 				.collect(Collectors.toMap(i -> relative(i.path()), i -> i));
 		}
 
 		List<String> inaccessible() {
-			return lines
-				.stream()
+			return lines.stream()
 				.filter(l -> l.startsWith("! "))
 				.map(RemoteFiles::parseInaccessible)
 				.map(RemoteFilesScriptTest::relative)
@@ -151,8 +147,7 @@ class RemoteFilesScriptTest {
 
 	private static Listing exec(final String script) throws Exception {
 		final Outcome outcome = run(script);
-		final List<String> lines = Arrays
-			.stream(new String(outcome.bytes, StandardCharsets.US_ASCII).split("\r?\n"))
+		final List<String> lines = Arrays.stream(new String(outcome.bytes, StandardCharsets.US_ASCII).split("\r?\n"))
 			.filter(l -> !l.isBlank())
 			.map(String::strip)
 			.collect(Collectors.toList());
@@ -227,8 +222,7 @@ class RemoteFilesScriptTest {
 
 	/** The expected probe output: the size (8 bytes, little-endian), then the SHA-256 digest. */
 	private static byte[] probe(final byte[] bytes) throws Exception {
-		return ByteBuffer
-			.allocate(RemoteFiles.PROBE_LENGTH)
+		return ByteBuffer.allocate(RemoteFiles.PROBE_LENGTH)
 			.order(ByteOrder.LITTLE_ENDIAN)
 			.putLong(bytes.length)
 			.put(MessageDigest.getInstance("SHA-256").digest(bytes))

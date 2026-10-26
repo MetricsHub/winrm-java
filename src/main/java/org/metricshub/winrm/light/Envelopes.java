@@ -90,17 +90,10 @@ final class Envelopes {
 		final long timeoutMs,
 		final int maxElements
 	) {
-		return envelopeOpen(false) +
-			header(url, wmiResourceUri(namespace), ACTION_ENUMERATE, timeoutMs, null, null) +
-			"<s:Body><wsen:Enumerate>" +
-			"<wsman:OptimizeEnumeration/>" +
-			"<wsman:MaxElements>" +
-			maxElements +
-			"</wsman:MaxElements>" +
-			"<wsman:Filter Dialect=\"http://schemas.microsoft.com/wbem/wsman/1/WQL\">" +
-			escape(wql) +
-			"</wsman:Filter>" +
-			"</wsen:Enumerate></s:Body></s:Envelope>";
+		return envelopeOpen(false) + header(url, wmiResourceUri(namespace), ACTION_ENUMERATE, timeoutMs, null, null)
+			+ "<s:Body><wsen:Enumerate>" + "<wsman:OptimizeEnumeration/>" + "<wsman:MaxElements>" + maxElements
+			+ "</wsman:MaxElements>" + "<wsman:Filter Dialect=\"http://schemas.microsoft.com/wbem/wsman/1/WQL\">"
+			+ escape(wql) + "</wsman:Filter>" + "</wsen:Enumerate></s:Body></s:Envelope>";
 	}
 
 	static String pull(
@@ -114,30 +107,19 @@ final class Envelopes {
 		// Per WS-Enumeration, MaxTime precedes MaxElements inside Pull. MaxTime bounds how long the
 		// server may hold this single Pull open before answering with the rows it has; 0 omits it and
 		// the OperationTimeout header applies alone.
-		return envelopeOpen(false) +
-			header(url, wmiResourceUri(namespace), ACTION_PULL, timeoutMs, null, null) +
-			"<s:Body><wsen:Pull>" +
-			"<wsen:EnumerationContext>" +
-			escape(context) +
-			"</wsen:EnumerationContext>" +
-			(maxTimeMs > 0 ? "<wsen:MaxTime>" + operationTimeout(maxTimeMs) + "</wsen:MaxTime>" : "") +
-			"<wsen:MaxElements>" +
-			maxElements +
-			"</wsen:MaxElements>" +
-			"</wsen:Pull></s:Body></s:Envelope>";
+		return envelopeOpen(false) + header(url, wmiResourceUri(namespace), ACTION_PULL, timeoutMs, null, null)
+			+ "<s:Body><wsen:Pull>" + "<wsen:EnumerationContext>" + escape(context) + "</wsen:EnumerationContext>"
+			+ (maxTimeMs > 0 ? "<wsen:MaxTime>" + operationTimeout(maxTimeMs) + "</wsen:MaxTime>" : "") + "<wsen:MaxElements>"
+			+ maxElements + "</wsen:MaxElements>" + "</wsen:Pull></s:Body></s:Envelope>";
 	}
 
 	static String release(final String url, final String namespace, final String context, final long timeoutMs) {
 		// WS-Enumeration Release: tells the server to discard an enumeration context that will not be
 		// pulled to its end, freeing the server-side operation slot immediately instead of waiting for
 		// its idle timeout.
-		return envelopeOpen(false) +
-			header(url, wmiResourceUri(namespace), ACTION_RELEASE, timeoutMs, null, null) +
-			"<s:Body><wsen:Release>" +
-			"<wsen:EnumerationContext>" +
-			escape(context) +
-			"</wsen:EnumerationContext>" +
-			"</wsen:Release></s:Body></s:Envelope>";
+		return envelopeOpen(false) + header(url, wmiResourceUri(namespace), ACTION_RELEASE, timeoutMs, null, null)
+			+ "<s:Body><wsen:Release>" + "<wsen:EnumerationContext>" + escape(context) + "</wsen:EnumerationContext>"
+			+ "</wsen:Release></s:Body></s:Envelope>";
 	}
 
 	// --- Command shell -----------------------------------------------------
@@ -160,24 +142,18 @@ final class Envelopes {
 		final int codePage,
 		final boolean loadUserProfile
 	) {
-		final String optionSet = "<wsman:OptionSet>" +
-			"<wsman:Option Name=\"WINRS_NOPROFILE\">" + (loadUserProfile ? "FALSE" : "TRUE") + "</wsman:Option>" +
-			"<wsman:Option Name=\"WINRS_CODEPAGE\">" + (codePage > 0 ? String.valueOf(codePage) : CODEPAGE_UTF8)
-			+ "</wsman:Option>" +
-			"</wsman:OptionSet>";
+		final String optionSet = "<wsman:OptionSet>" + "<wsman:Option Name=\"WINRS_NOPROFILE\">"
+			+ (loadUserProfile ? "FALSE" : "TRUE") + "</wsman:Option>" + "<wsman:Option Name=\"WINRS_CODEPAGE\">"
+			+ (codePage > 0 ? String.valueOf(codePage) : CODEPAGE_UTF8) + "</wsman:Option>" + "</wsman:OptionSet>";
 		final String workingDir = (workingDirectory == null || workingDirectory.trim().isEmpty())
 			? ""
 			: "<rsp:WorkingDirectory>" + escape(workingDirectory) + "</rsp:WorkingDirectory>";
 		// The MS-WSMV Shell_Type schema is a sequence: Environment, then WorkingDirectory, then the
 		// stream declarations — the order of the protocol's own Create example.
-		return envelopeOpen(true) +
-			header(url, SHELL_RESOURCE_URI, ACTION_CREATE, timeoutMs, null, optionSet) +
-			"<s:Body><rsp:Shell>" +
-			environmentBlock(environment) +
-			workingDir +
-			"<rsp:InputStreams>stdin</rsp:InputStreams>" +
-			"<rsp:OutputStreams>stdout stderr</rsp:OutputStreams>" +
-			"</rsp:Shell></s:Body></s:Envelope>";
+		return envelopeOpen(true) + header(url, SHELL_RESOURCE_URI, ACTION_CREATE, timeoutMs, null, optionSet)
+			+ "<s:Body><rsp:Shell>" + environmentBlock(environment) + workingDir
+			+ "<rsp:InputStreams>stdin</rsp:InputStreams>" + "<rsp:OutputStreams>stdout stderr</rsp:OutputStreams>"
+			+ "</rsp:Shell></s:Body></s:Envelope>";
 	}
 
 	/** The {@code rsp:Environment} block of a Create request, or an empty string for no variables. */
@@ -187,8 +163,7 @@ final class Envelopes {
 		}
 		final StringBuilder block = new StringBuilder("<rsp:Environment>");
 		for (final Map.Entry<String, String> variable : environment.entrySet()) {
-			block
-				.append("<rsp:Variable Name=\"")
+			block.append("<rsp:Variable Name=\"")
 				.append(escape(variable.getKey()))
 				.append("\">")
 				.append(escape(variable.getValue()))
@@ -213,16 +188,13 @@ final class Envelopes {
 		final long timeoutMs,
 		final boolean consoleModeStdin
 	) {
-		final String optionSet = "<wsman:OptionSet>" +
-			"<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">" + (consoleModeStdin ? "TRUE" : "FALSE")
-			+ "</wsman:Option>" +
-			"<wsman:Option Name=\"WINRS_SKIP_CMD_SHELL\">FALSE</wsman:Option>" +
-			"</wsman:OptionSet>";
-		return envelopeOpen(true) +
-			header(url, SHELL_RESOURCE_URI, ACTION_COMMAND, timeoutMs, shellSelector(shellId), optionSet) +
-			"<s:Body><rsp:CommandLine><rsp:Command>" +
-			escape(commandLine) +
-			"</rsp:Command></rsp:CommandLine></s:Body></s:Envelope>";
+		final String optionSet = "<wsman:OptionSet>" + "<wsman:Option Name=\"WINRS_CONSOLEMODE_STDIN\">"
+			+ (consoleModeStdin ? "TRUE" : "FALSE") + "</wsman:Option>"
+			+ "<wsman:Option Name=\"WINRS_SKIP_CMD_SHELL\">FALSE</wsman:Option>" + "</wsman:OptionSet>";
+		return envelopeOpen(true)
+			+ header(url, SHELL_RESOURCE_URI, ACTION_COMMAND, timeoutMs, shellSelector(shellId), optionSet)
+			+ "<s:Body><rsp:CommandLine><rsp:Command>" + escape(commandLine)
+			+ "</rsp:Command></rsp:CommandLine></s:Body></s:Envelope>";
 	}
 
 	/**
@@ -239,23 +211,15 @@ final class Envelopes {
 		final boolean end,
 		final long timeoutMs
 	) {
-		return envelopeOpen(true) +
-			header(url, SHELL_RESOURCE_URI, ACTION_SEND, timeoutMs, shellSelector(shellId), null) +
-			"<s:Body><rsp:Send><rsp:Stream Name=\"stdin\" CommandId=\"" +
-			escape(commandId) +
-			"\"" +
-			(end ? " End=\"true\"" : "") +
-			">" +
-			base64Data +
-			"</rsp:Stream></rsp:Send></s:Body></s:Envelope>";
+		return envelopeOpen(true) + header(url, SHELL_RESOURCE_URI, ACTION_SEND, timeoutMs, shellSelector(shellId), null)
+			+ "<s:Body><rsp:Send><rsp:Stream Name=\"stdin\" CommandId=\"" + escape(commandId) + "\""
+			+ (end ? " End=\"true\"" : "") + ">" + base64Data + "</rsp:Stream></rsp:Send></s:Body></s:Envelope>";
 	}
 
 	static String receive(final String url, final String shellId, final String commandId, final long timeoutMs) {
-		return envelopeOpen(true) +
-			header(url, SHELL_RESOURCE_URI, ACTION_RECEIVE, timeoutMs, shellSelector(shellId), null) +
-			"<s:Body><rsp:Receive><rsp:DesiredStream CommandId=\"" +
-			escape(commandId) +
-			"\">stdout stderr</rsp:DesiredStream></rsp:Receive></s:Body></s:Envelope>";
+		return envelopeOpen(true) + header(url, SHELL_RESOURCE_URI, ACTION_RECEIVE, timeoutMs, shellSelector(shellId), null)
+			+ "<s:Body><rsp:Receive><rsp:DesiredStream CommandId=\"" + escape(commandId)
+			+ "\">stdout stderr</rsp:DesiredStream></rsp:Receive></s:Body></s:Envelope>";
 	}
 
 	/**
@@ -271,19 +235,14 @@ final class Envelopes {
 		final String code,
 		final long timeoutMs
 	) {
-		return envelopeOpen(true) +
-			header(url, SHELL_RESOURCE_URI, ACTION_SIGNAL, timeoutMs, shellSelector(shellId), null) +
-			"<s:Body><rsp:Signal CommandId=\"" +
-			escape(commandId) +
-			"\"><rsp:Code>" +
-			code +
-			"</rsp:Code></rsp:Signal></s:Body></s:Envelope>";
+		return envelopeOpen(true) + header(url, SHELL_RESOURCE_URI, ACTION_SIGNAL, timeoutMs, shellSelector(shellId), null)
+			+ "<s:Body><rsp:Signal CommandId=\"" + escape(commandId) + "\"><rsp:Code>" + code
+			+ "</rsp:Code></rsp:Signal></s:Body></s:Envelope>";
 	}
 
 	static String deleteShell(final String url, final String shellId, final long timeoutMs) {
-		return envelopeOpen(true) +
-			header(url, SHELL_RESOURCE_URI, ACTION_DELETE, timeoutMs, shellSelector(shellId), null) +
-			"<s:Body/></s:Envelope>";
+		return envelopeOpen(true) + header(url, SHELL_RESOURCE_URI, ACTION_DELETE, timeoutMs, shellSelector(shellId), null)
+			+ "<s:Body/></s:Envelope>";
 	}
 
 	// --- helpers -----------------------------------------------------------
@@ -315,46 +274,19 @@ final class Envelopes {
 		final String selectorSet,
 		final String optionSet
 	) {
-		return "<s:Header>" +
-			"<wsa:To>" +
-			url +
-			"</wsa:To>" +
-			"<wsman:ResourceURI s:mustUnderstand=\"true\">" +
-			resourceUri +
-			"</wsman:ResourceURI>" +
-			"<wsa:ReplyTo><wsa:Address s:mustUnderstand=\"true\">" +
-			ANONYMOUS +
-			"</wsa:Address></wsa:ReplyTo>" +
-			"<wsa:Action s:mustUnderstand=\"true\">" +
-			action +
-			"</wsa:Action>" +
-			"<wsman:MaxEnvelopeSize s:mustUnderstand=\"true\">" +
-			MAX_ENVELOPE_SIZE +
-			"</wsman:MaxEnvelopeSize>" +
-			"<wsa:MessageID>uuid:" +
-			UUID.randomUUID().toString().toUpperCase() +
-			"</wsa:MessageID>" +
-			"<wsman:Locale xml:lang=\"en-US\" s:mustUnderstand=\"false\"/>" +
-			(selectorSet == null ? "" : selectorSet) +
-			(optionSet == null ? "" : optionSet) +
-			"<wsman:OperationTimeout>" +
-			operationTimeout(timeoutMs) +
-			"</wsman:OperationTimeout>" +
-			"</s:Header>";
+		return "<s:Header>" + "<wsa:To>" + url + "</wsa:To>" + "<wsman:ResourceURI s:mustUnderstand=\"true\">" + resourceUri
+			+ "</wsman:ResourceURI>" + "<wsa:ReplyTo><wsa:Address s:mustUnderstand=\"true\">" + ANONYMOUS
+			+ "</wsa:Address></wsa:ReplyTo>" + "<wsa:Action s:mustUnderstand=\"true\">" + action + "</wsa:Action>"
+			+ "<wsman:MaxEnvelopeSize s:mustUnderstand=\"true\">" + MAX_ENVELOPE_SIZE + "</wsman:MaxEnvelopeSize>"
+			+ "<wsa:MessageID>uuid:" + UUID.randomUUID().toString().toUpperCase() + "</wsa:MessageID>"
+			+ "<wsman:Locale xml:lang=\"en-US\" s:mustUnderstand=\"false\"/>" + (selectorSet == null ? "" : selectorSet)
+			+ (optionSet == null ? "" : optionSet) + "<wsman:OperationTimeout>" + operationTimeout(timeoutMs)
+			+ "</wsman:OperationTimeout>" + "</s:Header>";
 	}
 
 	private static String envelopeOpen(final boolean shell) {
-		return "<s:Envelope xmlns:s=\"" +
-			SOAP +
-			"\" xmlns:wsa=\"" +
-			WSA +
-			"\" xmlns:wsman=\"" +
-			WSMAN +
-			"\" xmlns:wsen=\"" +
-			WSEN +
-			"\"" +
-			(shell ? " xmlns:rsp=\"" + RSP + "\"" : "") +
-			">";
+		return "<s:Envelope xmlns:s=\"" + SOAP + "\" xmlns:wsa=\"" + WSA + "\" xmlns:wsman=\"" + WSMAN + "\" xmlns:wsen=\""
+			+ WSEN + "\"" + (shell ? " xmlns:rsp=\"" + RSP + "\"" : "") + ">";
 	}
 
 	private static String escape(final String s) {

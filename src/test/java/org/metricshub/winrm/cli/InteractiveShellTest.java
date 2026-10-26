@@ -81,8 +81,7 @@ class InteractiveShellTest {
 	}
 
 	private WinRMClient client() {
-		return WinRMClient
-			.builder("127.0.0.1")
+		return WinRMClient.builder("127.0.0.1")
 			.port(server.port())
 			.credentials(DOMAIN + "\\" + USER, PASSWORD.toCharArray())
 			.timeout(Duration.ofSeconds(10))
@@ -100,11 +99,9 @@ class InteractiveShellTest {
 	 * Server 2008 R2 and 2022).
 	 */
 	private static RemoteProcess shellProcess(final WinRMClient client) {
-		return client
-			.command(WinRmCli.FluentRemoteOperations.SHELL_COMMAND)
+		return client.command(WinRmCli.FluentRemoteOperations.SHELL_COMMAND)
 			.charset(
-				WinRmCli.FluentRemoteOperations
-					.sessionEncoding(WinRmCli.FluentRemoteOperations.DEFAULT_SHELL_CODE_PAGE)
+				WinRmCli.FluentRemoteOperations.sessionEncoding(WinRmCli.FluentRemoteOperations.DEFAULT_SHELL_CODE_PAGE)
 					.charset()
 			)
 			.stdin()
@@ -260,29 +257,21 @@ class InteractiveShellTest {
 		try (WinRMClient client = client()) {
 			try (RemoteProcess process = shellProcess(client)) {
 				final PrintStream out = new PrintStream(stdout, true, "UTF-8");
-				exitCode = InteractiveShell.bridge(
-					process,
-					new InteractiveShell.InputSource() {
-						private int round;
+				exitCode = InteractiveShell.bridge(process, new InteractiveShell.InputSource() {
+					private int round;
 
-						@Override
-						public String nextPiece() {
-							round++;
-							// Round 1 (and the drain call right after "exit"): nothing queued.
-							return round == 2 ? "exit\r\n" : null;
-						}
+					@Override
+					public String nextPiece() {
+						round++;
+						// Round 1 (and the drain call right after "exit"): nothing queued.
+						return round == 2 ? "exit\r\n" : null;
+					}
 
-						@Override
-						public boolean endOfInput() {
-							return false;
-						}
-					},
-					out,
-					new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"),
-					new AtomicBoolean(),
-					POLL_MILLIS,
-					null
-				);
+					@Override
+					public boolean endOfInput() {
+						return false;
+					}
+				}, out, new PrintStream(new ByteArrayOutputStream(), true, "UTF-8"), new AtomicBoolean(), POLL_MILLIS, null);
 			}
 		}
 
@@ -458,8 +447,7 @@ class InteractiveShellTest {
 	@Test
 	void theSyntheticExitFollowsAProperlyTerminatedRecordDirectly() throws Exception {
 		enqueueStartup();
-		server
-			.enqueue(200, envelope(sendResponse()))
+		server.enqueue(200, envelope(sendResponse()))
 			.enqueue(200, envelope(receiveResponse("", done(COMMAND_ID, 0))))
 			.enqueue(200, envelope(signalResponse()));
 		enqueueShellDeletion(server);
@@ -504,10 +492,8 @@ class InteractiveShellTest {
 		pieces.readAll(failing);
 
 		assertEquals("ok\r\n", pieces.nextPiece());
-		final java.io.IOException failure = org.junit.jupiter.api.Assertions.assertThrows(
-			java.io.IOException.class,
-			pieces::nextPiece
-		);
+		final java.io.IOException failure = org.junit.jupiter.api.Assertions
+			.assertThrows(java.io.IOException.class, pieces::nextPiece);
 		assertEquals("disk error", failure.getCause().getMessage());
 		assertTrue(pieces.endOfInput());
 	}
@@ -533,10 +519,7 @@ class InteractiveShellTest {
 			)
 		);
 		// No signal at all: the process default.
-		assertEquals(
-			java.nio.charset.Charset.defaultCharset(),
-			InteractiveShell.localInputCharset(name -> null, null)
-		);
+		assertEquals(java.nio.charset.Charset.defaultCharset(), InteractiveShell.localInputCharset(name -> null, null));
 	}
 
 	@Test

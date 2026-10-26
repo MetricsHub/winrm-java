@@ -28,8 +28,7 @@ class JsonLinesWriterTest {
 
 		assertEquals(
 			"{\"Name\":\"Spooler\",\"Label\":\"Café 東京\",\"Path\":\"C:\\\\Windows\\nSystem32\",\"Missing\":null,\"Size\":5000000000}"
-				+
-				System.lineSeparator(),
+				+ System.lineSeparator(),
 			bytes.toString(StandardCharsets.UTF_8.name())
 		);
 	}

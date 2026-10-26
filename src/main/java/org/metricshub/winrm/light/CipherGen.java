@@ -43,10 +43,9 @@ public class CipherGen {
 
 	/** Shared justification for the SpotBugs EI_EXPOSE_REP/EI_EXPOSE_REP2 suppressions below */
 	private static final String EXPOSE_JUSTIFICATION = "Reference NTLM crypto port kept aligned with upstream: the lazily computed hashes/responses are "
-		+
-		"cached and returned by design, and the challenge/random/targetInformation inputs are " +
-		"handshake-scoped byte arrays owned by the single NTLM exchange - defensive copies would churn " +
-		"the port for no security benefit";
+		+ "cached and returned by design, and the challenge/random/targetInformation inputs are "
+		+ "handshake-scoped byte arrays owned by the single NTLM exchange - defensive copies would churn "
+		+ "the port for no security benefit";
 
 	private final Random random;
 	private final long currentTime;
@@ -97,13 +96,8 @@ public class CipherGen {
 	 */
 	@SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = EXPOSE_JUSTIFICATION)
 	public CipherGen(
-		final Random random,
-		final long currentTime,
-		final String domain,
-		final String user,
-		final char[] password,
-		final byte[] challenge,
-		final byte[] targetInformation
+		final Random random, final long currentTime, final String domain, final String user, final char[] password,
+		final byte[] challenge, final byte[] targetInformation
 	) {
 		this.random = random;
 		this.currentTime = currentTime;
@@ -233,13 +227,8 @@ public class CipherGen {
 		final byte[] reserved = new byte[] { (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00 };
 		final byte[] unknown1 = new byte[] { (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00 };
 		final byte[] unknown2 = new byte[] { (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00 };
-		final byte[] blob = new byte[blobSignature.length +
-			reserved.length +
-			timestamp.length +
-			8 +
-			unknown1.length +
-			targetInformation.length +
-			unknown2.length];
+		final byte[] blob = new byte[blobSignature.length + reserved.length + timestamp.length + 8 + unknown1.length
+			+ targetInformation.length + unknown2.length];
 		int offset = 0;
 		System.arraycopy(blobSignature, 0, blob, offset, blobSignature.length);
 		offset += blobSignature.length;

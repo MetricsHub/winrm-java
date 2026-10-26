@@ -60,14 +60,11 @@ class HttpTransportDeadlineTest {
 				// (legs 1-3 complete by ~1.8 s, leg 4 runs out of budget at 2 s).
 				transport.pollTimeout(2_000);
 				final long start = System.nanoTime();
-				assertThrows(
-					SocketTimeoutException.class,
-					() -> {
-						for (int leg = 0; leg < 8; leg++) {
-							transport.post("/wsman", new byte[0], null, null);
-						}
+				assertThrows(SocketTimeoutException.class, () -> {
+					for (int leg = 0; leg < 8; leg++) {
+						transport.post("/wsman", new byte[0], null, null);
 					}
-				);
+				});
 				final long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
 				assertTrue(
 					elapsedMillis < 3_000,
@@ -127,21 +124,18 @@ class HttpTransportDeadlineTest {
 	void aStreamingReconnectGetsAFreshDeadline() throws Exception {
 		try (ServerSocket server = new ServerSocket(0)) {
 			// Every connection: take the ClientHello, stay silent 200 ms, then hang up.
-			final Thread handler = new Thread(
-				() -> {
-					try {
-						while (true) {
-							try (Socket socket = server.accept()) {
-								socket.getInputStream().read(new byte[4096]);
-								Thread.sleep(200);
-							}
+			final Thread handler = new Thread(() -> {
+				try {
+					while (true) {
+						try (Socket socket = server.accept()) {
+							socket.getInputStream().read(new byte[4096]);
+							Thread.sleep(200);
 						}
-					} catch (final IOException | InterruptedException ignored) {
-						// server socket closed: test over
 					}
-				},
-				"hang-up-tls-server"
-			);
+				} catch (final IOException | InterruptedException ignored) {
+					// server socket closed: test over
+				}
+			}, "hang-up-tls-server");
 			handler.setDaemon(true);
 			handler.start();
 
@@ -180,26 +174,21 @@ class HttpTransportDeadlineTest {
 	 * clock and the ~40-byte response would take ~12 s.
 	 */
 	private static void startTricklingServer(final ServerSocket server) {
-		final Thread handler = new Thread(
-			() -> {
-				try (Socket socket = server.accept()) {
-					final InputStream in = new BufferedInputStream(socket.getInputStream());
-					final OutputStream out = socket.getOutputStream();
-					if (readRequestHead(in)) {
-						for (final byte b : "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".getBytes(
-							StandardCharsets.ISO_8859_1
-						)) {
-							Thread.sleep(300);
-							out.write(b);
-							out.flush();
-						}
+		final Thread handler = new Thread(() -> {
+			try (Socket socket = server.accept()) {
+				final InputStream in = new BufferedInputStream(socket.getInputStream());
+				final OutputStream out = socket.getOutputStream();
+				if (readRequestHead(in)) {
+					for (final byte b : "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1)) {
+						Thread.sleep(300);
+						out.write(b);
+						out.flush();
 					}
-				} catch (final IOException | InterruptedException ignored) {
-					// client timed out or test over
 				}
-			},
-			"trickle-http-server"
-		);
+			} catch (final IOException | InterruptedException ignored) {
+				// client timed out or test over
+			}
+		}, "trickle-http-server");
 		handler.setDaemon(true);
 		handler.start();
 	}

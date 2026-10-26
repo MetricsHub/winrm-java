@@ -89,9 +89,7 @@ public interface WindowsRemoteExecutor extends AutoCloseable {
 		final int maxElements,
 		final long pullTimeout
 	) throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
-		throw new UnsupportedOperationException(
-			getClass().getName() + " does not support WQL enumeration parameters."
-		);
+		throw new UnsupportedOperationException(getClass().getName() + " does not support WQL enumeration parameters.");
 	}
 
 	/**

@@ -86,8 +86,7 @@ class CommandStdinTest {
 	}
 
 	private WinRMClient.Builder builder() {
-		return WinRMClient
-			.builder("127.0.0.1")
+		return WinRMClient.builder("127.0.0.1")
 			.port(server.port())
 			.credentials(DOMAIN + "\\" + USER, PASSWORD.toCharArray())
 			.timeout(Duration.ofSeconds(10));
@@ -100,8 +99,7 @@ class CommandStdinTest {
 	@Test
 	void presuppliedStringStdinIsDeliveredWithPipeSemantics() throws Exception {
 		enqueueStartup();
-		server
-			.enqueue(200, envelope(sendResponse()))
+		server.enqueue(200, envelope(sendResponse()))
 			.enqueue(
 				200,
 				envelope(
@@ -142,8 +140,7 @@ class CommandStdinTest {
 		Files.write(file, content);
 
 		enqueueStartup();
-		server
-			.enqueue(200, envelope(sendResponse()))
+		server.enqueue(200, envelope(sendResponse()))
 			.enqueue(200, envelope(receiveResponse("", done(COMMAND_ID, 3))))
 			.enqueue(200, envelope(signalResponse()));
 		enqueueShellDeletion(server);
@@ -168,8 +165,7 @@ class CommandStdinTest {
 		}
 
 		enqueueStartup();
-		server
-			.enqueue(200, envelope(sendResponse()))
+		server.enqueue(200, envelope(sendResponse()))
 			.enqueue(200, envelope(sendResponse()))
 			.enqueue(200, envelope(sendResponse()))
 			.enqueue(200, envelope(receiveResponse("", done(COMMAND_ID, 0))))
@@ -197,8 +193,7 @@ class CommandStdinTest {
 	@Test
 	void emptyStdinAnnouncesOnlyTheEndOfInput() throws Exception {
 		enqueueStartup();
-		server
-			.enqueue(200, envelope(sendResponse()))
+		server.enqueue(200, envelope(sendResponse()))
 			.enqueue(200, envelope(receiveResponse("", done(COMMAND_ID, 0))))
 			.enqueue(200, envelope(signalResponse()));
 		enqueueShellDeletion(server);
@@ -216,8 +211,7 @@ class CommandStdinTest {
 	@Test
 	void presuppliedStdinWithStartClosesTheWriterFromTheStart() throws Exception {
 		enqueueStartup();
-		server
-			.enqueue(200, envelope(sendResponse()))
+		server.enqueue(200, envelope(sendResponse()))
 			.enqueue(200, envelope(receiveResponse("", done(COMMAND_ID, 0))))
 			.enqueue(200, envelope(signalResponse()));
 		enqueueShellDeletion(server);
@@ -279,8 +273,7 @@ class CommandStdinTest {
 		java.util.Arrays.fill(input, 'x');
 
 		enqueueStartup();
-		server
-			.enqueue(500, PIPE_CLOSING)
+		server.enqueue(500, PIPE_CLOSING)
 			.enqueue(
 				200,
 				envelope(
@@ -307,8 +300,7 @@ class CommandStdinTest {
 	@Test
 	void inputTheCommandDoesNotReadIsDiscardedByStart() throws Exception {
 		enqueueStartup();
-		server
-			.enqueue(500, PIPE_CLOSING)
+		server.enqueue(500, PIPE_CLOSING)
 			.enqueue(
 				200,
 				envelope(
@@ -364,8 +356,7 @@ class CommandStdinTest {
 	@Test
 	void anyOtherSendFaultStillFailsTheCommand() throws Exception {
 		enqueueStartup();
-		server
-			.enqueue(500, fault("5", "Access is denied."))
+		server.enqueue(500, fault("5", "Access is denied."))
 			// the failed command is terminated
 			.enqueue(200, envelope(signalResponse()));
 		enqueueShellDeletion(server);
@@ -432,8 +423,7 @@ class CommandStdinTest {
 		java.util.Arrays.fill(text, 'x');
 
 		enqueueStartup();
-		server
-			.enqueue(200, envelope(sendResponse()))
+		server.enqueue(200, envelope(sendResponse()))
 			.enqueue(200, envelope(sendResponse()))
 			.enqueue(200, envelope(sendResponse()))
 			.enqueue(200, envelope(signalResponse()));
@@ -486,9 +476,7 @@ class CommandStdinTest {
 	@Test
 	void stdinAfterCompletionIsSilentOnCloseAndRefusedOnWrite() throws Exception {
 		enqueueStartup();
-		server
-			.enqueue(200, envelope(receiveResponse("", done(COMMAND_ID, 5))))
-			.enqueue(200, envelope(signalResponse()));
+		server.enqueue(200, envelope(receiveResponse("", done(COMMAND_ID, 5)))).enqueue(200, envelope(signalResponse()));
 		enqueueShellDeletion(server);
 
 		try (WinRMClient client = builder().build()) {
@@ -549,19 +537,14 @@ class CommandStdinTest {
 		final String emoji = new String(new char[] { high, low });
 
 		enqueueStartup();
-		server
-			.enqueue(200, envelope(sendResponse()))
+		server.enqueue(200, envelope(sendResponse()))
 			.enqueue(200, envelope(sendResponse()))
 			.enqueue(200, envelope(sendResponse()))
 			.enqueue(200, envelope(signalResponse()));
 		enqueueShellDeletion(server);
 
 		try (WinRMClient client = builder().build()) {
-			try (
-				RemoteProcess process = client.command("consume.exe")
-					.charset(StandardCharsets.UTF_16)
-					.stdin()
-					.start()) {
+			try (RemoteProcess process = client.command("consume.exe").charset(StandardCharsets.UTF_16).stdin().start()) {
 				final BufferedWriter stdin = process.stdin();
 				// Two flushes of a charset with a byte-order mark, the second one ending on a lone
 				// high surrogate: incremental encoding must yield exactly one whole-string encode.

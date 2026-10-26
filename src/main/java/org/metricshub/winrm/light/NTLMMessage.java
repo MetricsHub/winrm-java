@@ -53,9 +53,8 @@ class NTLMMessage {
 
 	/** Constructor to use when message bytes are known */
 	@SuppressFBWarnings(value = "CT_CONSTRUCTOR_THROW", justification = "Parse-in-constructor is the upstream NTLM engine design: rejecting a malformed "
-		+
-		"message must abort construction. The class is package-private, so no attacker subclass can " +
-		"mount a finalizer attack on the partially-built instance")
+		+ "message must abort construction. The class is package-private, so no attacker subclass can "
+		+ "mount a finalizer attack on the partially-built instance")
 	NTLMMessage(final byte[] message, final int expectedType) throws NtlmException {
 		messageContents = message;
 		// Look for NTLM message
@@ -89,12 +88,9 @@ class NTLMMessage {
 			return 0;
 		}
 		return (src[index] & 0xff)
-			|
-			((src[index + 1] & 0xff) << 8)
-			|
-			((src[index + 2] & 0xff) << 16)
-			|
-			((src[index + 3] & 0xff) << 24);
+			| ((src[index + 1] & 0xff) << 8)
+			| ((src[index + 2] & 0xff) << 16)
+			| ((src[index + 3] & 0xff) << 24);
 	}
 
 	/**

@@ -49,9 +49,7 @@ public class WindowsTempShare {
 	 * @param remotePath The path on the remote system of the directory being shared
 	 */
 	public WindowsTempShare(
-		final WindowsRemoteExecutor windowsRemoteExecutor,
-		final String shareNameOrUnc,
-		final String remotePath
+		final WindowsRemoteExecutor windowsRemoteExecutor, final String shareNameOrUnc, final String remotePath
 	) {
 		Utils.checkNonNull(windowsRemoteExecutor, "windowsRemoteExecutor");
 		Utils.checkNonNull(shareNameOrUnc, "shareNameOrUnc");
@@ -262,8 +260,8 @@ public class WindowsTempShare {
 		try {
 			final Optional<WindowsTempShare> clusterShare = windowsRemoteExecutor
 				.executeWql(
-					"SELECT Name,Path FROM Win32_ClusterShare WHERE " +
-						"ServerName <> '*' AND (Type = 2147483648 OR Type = 3221225472) AND Name LIKE '%\\\\_$'",
+					"SELECT Name,Path FROM Win32_ClusterShare WHERE "
+						+ "ServerName <> '*' AND (Type = 2147483648 OR Type = 3221225472) AND Name LIKE '%\\\\_$'",
 					timeout
 				)
 				.stream()
@@ -273,8 +271,7 @@ public class WindowsTempShare {
 					windowsRemoteExecutor,
 					buildPathOnCluster((String) row.get("Name")),
 					buildPathOnCluster((String) row.get("Path"))
-				)
-				)
+				))
 				.findFirst();
 
 			if (clusterShare.isPresent()) {

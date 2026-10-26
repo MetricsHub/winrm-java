@@ -379,9 +379,9 @@ final class CliArguments implements AutoCloseable {
 		throws CliUsageException {
 		if (!Arrays.asList(operations).contains(builder.operation)) {
 			throw new CliUsageException(
-				option + " requires the " +
-					Arrays.stream(operations).map(o -> o.name().toLowerCase(Locale.ROOT)).collect(Collectors.joining(" or ")) +
-					" subcommand"
+				option + " requires the "
+					+ Arrays.stream(operations).map(o -> o.name().toLowerCase(Locale.ROOT)).collect(Collectors.joining(" or "))
+					+ " subcommand"
 			);
 		}
 	}
@@ -500,9 +500,7 @@ final class CliArguments implements AutoCloseable {
 		}
 		builder.kerberosRealm = inferKerberosRealm(builder.kerberosKdc);
 		if (builder.kerberosRealm == null) {
-			throw new CliUsageException(
-				"cannot infer a realm from --kerberos-kdc; specify --kerberos-realm"
-			);
+			throw new CliUsageException("cannot infer a realm from --kerberos-kdc; specify --kerberos-realm");
 		}
 		builder.kerberosRealmInferred = true;
 	}
@@ -563,8 +561,7 @@ final class CliArguments implements AutoCloseable {
 		CharBuffer characters = null;
 		char[] decoded = null;
 		try {
-			characters = StandardCharsets.UTF_8
-				.newDecoder()
+			characters = StandardCharsets.UTF_8.newDecoder()
 				.onMalformedInput(CodingErrorAction.REPORT)
 				.onUnmappableCharacter(CodingErrorAction.REPORT)
 				.decode(ByteBuffer.wrap(bytes));
@@ -644,18 +641,12 @@ final class CliArguments implements AutoCloseable {
 
 	private static boolean isSubcommand(final String value) {
 		return "wql".equals(value)
-			||
-			"command".equals(value)
-			||
-			"cmd".equals(value)
-			||
-			"exec".equals(value)
-			||
-			"run".equals(value)
-			||
-			"shell".equals(value)
-			||
-			isFileSubcommand(value);
+			|| "command".equals(value)
+			|| "cmd".equals(value)
+			|| "exec".equals(value)
+			|| "run".equals(value)
+			|| "shell".equals(value)
+			|| isFileSubcommand(value);
 	}
 
 	private static boolean isFileSubcommand(final String value) {

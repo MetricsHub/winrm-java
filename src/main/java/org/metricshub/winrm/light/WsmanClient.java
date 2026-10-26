@@ -127,8 +127,7 @@ final class WsmanClient implements AutoCloseable {
 	// and 2022, issue #196), so the shell is retired after maxCommandsPerShell of them. Guarded by
 	// connectionPermit, like shellId.
 	@SuppressFBWarnings(value = "AT_STALE_THREAD_WRITE_OF_PRIMITIVE", justification = "Only accessed while holding connectionPermit, "
-		+
-		"whose release/acquire orders every write before the next holder's reads")
+		+ "whose release/acquire orders every write before the next holder's reads")
 	private int shellCommands;
 
 	// The shell's working directory and environment variables are pinned by the FIRST command on
@@ -205,18 +204,9 @@ final class WsmanClient implements AutoCloseable {
 	}
 
 	WsmanClient(
-		final String host,
-		final int port,
-		final long timeoutMs,
-		final SSLSocketFactory sslSocketFactory,
-		final boolean verifyHostname,
-		final AuthScheme auth,
-		final String rawUsername,
-		final int consoleCodePage,
-		final boolean loadUserProfile,
-		final String arraySeparator,
-		final int maxCommandsPerShell,
-		final int connectRetries,
+		final String host, final int port, final long timeoutMs, final SSLSocketFactory sslSocketFactory,
+		final boolean verifyHostname, final AuthScheme auth, final String rawUsername, final int consoleCodePage,
+		final boolean loadUserProfile, final String arraySeparator, final int maxCommandsPerShell, final int connectRetries,
 		final long retryDelayMs
 	) {
 		this.timeoutMs = timeoutMs;
@@ -383,10 +373,7 @@ final class WsmanClient implements AutoCloseable {
 		private boolean broken;
 
 		private WqlEnumeration(
-			final String namespace,
-			final long operationTimeoutMs,
-			final int maxElements,
-			final long maxTimeMs,
+			final String namespace, final long operationTimeoutMs, final int maxElements, final long maxTimeMs,
 			final boolean failOnQuietTimeout
 		) {
 			this.namespace = namespace;
@@ -580,9 +567,7 @@ final class WsmanClient implements AutoCloseable {
 				shellWorkingDirectory = workingDirectory;
 				// A defensive copy: a recreation must replay exactly what the first command set, not
 				// whatever the caller's map contains by then.
-				shellEnvironment = environment == null || environment.isEmpty()
-					? null
-					: new LinkedHashMap<>(environment);
+				shellEnvironment = environment == null || environment.isEmpty() ? null : new LinkedHashMap<>(environment);
 				shellSettingsPinned = true;
 			}
 			if (shellId != null && shellCommands >= maxCommandsPerShell) {
@@ -1266,12 +1251,9 @@ final class WsmanClient implements AutoCloseable {
 					// the pause within its hard bound. A cancelled worker (its caller was already
 					// told the operation timed out) stops in the sleep.
 					if (closed
-						||
-						retriesLeft <= 0
-						||
-						!isConnectionFailure(e)
-						||
-						transport.remainingPollBudgetMillis() <= retryDelayMs) {
+						|| retriesLeft <= 0
+						|| !isConnectionFailure(e)
+						|| transport.remainingPollBudgetMillis() <= retryDelayMs) {
 						throw e;
 					}
 					retriesLeft--;
@@ -1292,12 +1274,8 @@ final class WsmanClient implements AutoCloseable {
 			final String authorization = pendingAuthorization != null ? pendingAuthorization : auth.requestAuthorization();
 			pendingAuthorization = null;
 
-			final HttpTransport.Response resp = transport.post(
-				"/wsman",
-				auth.wrap(body),
-				auth.wrapContentType(),
-				authorization
-			);
+			final HttpTransport.Response resp = transport
+				.post("/wsman", auth.wrap(body), auth.wrapContentType(), authorization);
 
 			// HTTP 401 = the server rejected the credentials/token. For NTLM and Kerberos this can only
 			// surface here — the Type 3 / AP-REQ rides the first real request, not the handshake — so we
@@ -1361,19 +1339,17 @@ final class WsmanClient implements AutoCloseable {
 		final DocumentBuilder builder = factory.newDocumentBuilder();
 		// Throw parse errors instead of letting the default handler print them to stderr — a request
 		// abandoned by the timeout may parse a truncated response on a soon-to-die background thread.
-		builder.setErrorHandler(
-			new org.xml.sax.helpers.DefaultHandler() {
-				@Override
-				public void error(final org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException {
-					throw e;
-				}
-
-				@Override
-				public void fatalError(final org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException {
-					throw e;
-				}
+		builder.setErrorHandler(new org.xml.sax.helpers.DefaultHandler() {
+			@Override
+			public void error(final org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException {
+				throw e;
 			}
-		);
+
+			@Override
+			public void fatalError(final org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException {
+				throw e;
+			}
+		});
 		return builder.parse(new ByteArrayInputStream(xml));
 	}
 
@@ -1390,8 +1366,7 @@ final class WsmanClient implements AutoCloseable {
 	 */
 	static boolean hasEnumerationElement(final Document doc, final String localName) {
 		return doc.getElementsByTagNameNS(WS_ENUMERATION_NS, localName).getLength() > 0
-			||
-			doc.getElementsByTagNameNS(WSMAN_NS, localName).getLength() > 0;
+			|| doc.getElementsByTagNameNS(WSMAN_NS, localName).getLength() > 0;
 	}
 
 	/** First text content of an element matched by both namespace and local name. */

@@ -98,8 +98,7 @@ public class ScriptedWindowsRemoteExecutor implements WindowsRemoteExecutor {
 
 	@Override
 	public List<Map<String, Object>> executeWql(final String wqlQuery, final long timeout) {
-		return wqlHandlers
-			.stream()
+		return wqlHandlers.stream()
 			.filter(handler -> wqlQuery.contains(handler.substring))
 			.findFirst()
 			.map(handler -> handler.rows)
@@ -115,8 +114,7 @@ public class ScriptedWindowsRemoteExecutor implements WindowsRemoteExecutor {
 	) {
 		executedCommands.add(command);
 
-		return commandHandlers
-			.stream()
+		return commandHandlers.stream()
 			.filter(handler -> command.contains(handler.substring))
 			.findFirst()
 			.map(CommandHandler::next)
