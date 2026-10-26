@@ -37,9 +37,8 @@ class ChunkDecoderTest {
 	/** Decode the bytes in two chunks split at the given position, plus the final flush. */
 	private static String decodeSplit(final byte[] bytes, final int split, final Charset charset) {
 		final ChunkDecoder decoder = new ChunkDecoder(charset);
-		return (decoder.decode(Arrays.copyOfRange(bytes, 0, split)) +
-			decoder.decode(Arrays.copyOfRange(bytes, split, bytes.length)) +
-			decoder.finish());
+		return (decoder.decode(Arrays.copyOfRange(bytes, 0, split))
+			+ decoder.decode(Arrays.copyOfRange(bytes, split, bytes.length)) + decoder.finish());
 	}
 
 	@Test

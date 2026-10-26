@@ -230,9 +230,8 @@ class WinRMCommandExecutorTest {
 		final Path localFile = tempDir.resolve("MyScript.vbs");
 		Files.write(localFile, content);
 
-		final String hashOutput = "SHA256 hash of file:\r\n" +
-			sha256Hex(content) +
-			"\r\nCertUtil: -hashfile command completed successfully.\r\n";
+		final String hashOutput = "SHA256 hash of file:\r\n" + sha256Hex(content)
+			+ "\r\nCertUtil: -hashfile command completed successfully.\r\n";
 
 		try (FakeWsmanServer server = new FakeWsmanServer(DOMAIN, USER, PASSWORD_STRING)) {
 			// The in-shell transfer sequence of ShellFileCopy, scripted response by response
@@ -277,8 +276,7 @@ class WinRMCommandExecutorTest {
 			assertTrue(requests.stream().anyMatch(request -> request.contains(base64Content)));
 
 			// The executed command references the remote copy, wrapped in CMD.EXE /C (...)
-			final String finalCommand = requests
-				.stream()
+			final String finalCommand = requests.stream()
 				.filter(request -> request.contains("<rsp:Command>CMD.EXE /C (CSCRIPT "))
 				.findFirst()
 				.orElseThrow(() -> new AssertionError("No CMD.EXE /C command found:\n" + String.join("\n---\n", requests)));

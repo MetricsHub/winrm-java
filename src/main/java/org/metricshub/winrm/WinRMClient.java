@@ -84,10 +84,7 @@ public final class WinRMClient implements AutoCloseable {
 	private final Duration timeout;
 
 	private WinRMClient(
-		final WindowsRemoteExecutor executor,
-		final String hostname,
-		final String namespace,
-		final Duration timeout
+		final WindowsRemoteExecutor executor, final String hostname, final String namespace, final Duration timeout
 	) {
 		this.executor = executor;
 		this.hostname = hostname;
@@ -135,9 +132,9 @@ public final class WinRMClient implements AutoCloseable {
 	 * newlines, and {@code $variables} reach PowerShell exactly as written.
 	 *
 	 * <pre>{@code
-	 * CommandResult result = client.powerShell(
-	 * 	"Get-Service | Where-Object { $_.Status -eq 'Running' } | Select-Object -First 5 Name"
-	 * ).execute();
+	 * CommandResult result = client
+	 * 	.powerShell("Get-Service | Where-Object { $_.Status -eq 'Running' } | Select-Object -First 5 Name")
+	 * 	.execute();
 	 * }</pre>
 	 *
 	 * The returned request is the same as for {@link #command(String)}: every option and both
@@ -393,8 +390,7 @@ public final class WinRMClient implements AutoCloseable {
 		 * @return this builder
 		 */
 		@SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "The password char[] is deliberately shared, not copied, so the caller "
-			+
-			"can wipe the single authoritative copy of the secret")
+			+ "can wipe the single authoritative copy of the secret")
 		public Builder credentials(final String username, final char[] password) {
 			Utils.checkNonNull(username, "username");
 			Utils.checkNonNull(password, "password");

@@ -87,8 +87,7 @@ class WinRMClientTest {
 	}
 
 	private WinRMClient.Builder builder(final String password) {
-		return WinRMClient
-			.builder("127.0.0.1")
+		return WinRMClient.builder("127.0.0.1")
 			.port(server.port())
 			.credentials(DOMAIN + "\\" + USER, password.toCharArray());
 	}
@@ -103,31 +102,16 @@ class WinRMClientTest {
 			.enqueue(
 				200,
 				envelope(
-					"<wsen:EnumerateResponse xmlns:wsen=\"" +
-						WSEN +
-						"\" xmlns:wsman=\"" +
-						WSMAN +
-						"\">" +
-						"<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" +
-						"<wsman:Items>" +
-						service("Spooler", "Running") +
-						"</wsman:Items>" +
-						"</wsen:EnumerateResponse>"
+					"<wsen:EnumerateResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN + "\">"
+						+ "<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" + "<wsman:Items>"
+						+ service("Spooler", "Running") + "</wsman:Items>" + "</wsen:EnumerateResponse>"
 				)
 			)
 			.enqueue(
 				200,
 				envelope(
-					"<wsen:PullResponse xmlns:wsen=\"" +
-						WSEN +
-						"\" xmlns:wsman=\"" +
-						WSMAN +
-						"\">" +
-						"<wsen:Items>" +
-						service("WinRM", "Stopped") +
-						"</wsen:Items>" +
-						"<wsman:EndOfSequence/>" +
-						"</wsen:PullResponse>"
+					"<wsen:PullResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN + "\">" + "<wsen:Items>"
+						+ service("WinRM", "Stopped") + "</wsen:Items>" + "<wsman:EndOfSequence/>" + "</wsen:PullResponse>"
 				)
 			);
 
@@ -168,32 +152,20 @@ class WinRMClientTest {
 			.enqueue(
 				200,
 				envelope(
-					"<wsen:EnumerateResponse xmlns:wsen=\"" +
-						WSEN +
-						"\">" +
-						"<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" +
-						"</wsen:EnumerateResponse>"
+					"<wsen:EnumerateResponse xmlns:wsen=\"" + WSEN + "\">"
+						+ "<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" + "</wsen:EnumerateResponse>"
 				)
 			)
 			.enqueue(
 				200,
 				envelope(
-					"<wsen:PullResponse xmlns:wsen=\"" +
-						WSEN +
-						"\" xmlns:wsman=\"" +
-						WSMAN +
-						"\">" +
-						"<wsen:Items>" +
-						service("Spooler", "Running") +
-						"</wsen:Items>" +
-						"<wsman:EndOfSequence/>" +
-						"</wsen:PullResponse>"
+					"<wsen:PullResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN + "\">" + "<wsen:Items>"
+						+ service("Spooler", "Running") + "</wsen:Items>" + "<wsman:EndOfSequence/>" + "</wsen:PullResponse>"
 				)
 			);
 
 		try (WinRMClient client = builder(PASSWORD).build()) {
-			final WqlResult result = client
-				.wql("SELECT Name, State FROM Win32_Service")
+			final WqlResult result = client.wql("SELECT Name, State FROM Win32_Service")
 				.namespace("root\\custom")
 				.pageSize(100)
 				.pullTimeout(Duration.ofSeconds(5))
@@ -216,15 +188,14 @@ class WinRMClientTest {
 
 	@Test
 	void commandReturnsTypedResult() throws Exception {
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				200,
 				envelope(
 					receiveResponse(
-						stream("stdout", "CMD-1", "output".getBytes(StandardCharsets.UTF_8)) +
-							stream("stderr", "CMD-1", "warn".getBytes(StandardCharsets.UTF_8)),
+						stream("stdout", "CMD-1", "output".getBytes(StandardCharsets.UTF_8))
+							+ stream("stderr", "CMD-1", "warn".getBytes(StandardCharsets.UTF_8)),
 						done("CMD-1", 3)
 					)
 				)
@@ -232,8 +203,7 @@ class WinRMClientTest {
 			.enqueue(200, envelope(signalResponse()));
 
 		try (WinRMClient client = builder(PASSWORD).build()) {
-			final CommandResult result = client
-				.command("mycommand.exe")
+			final CommandResult result = client.command("mycommand.exe")
 				.workingDirectory("C:\\Temp")
 				.charset(StandardCharsets.UTF_8)
 				.execute();
@@ -252,8 +222,7 @@ class WinRMClientTest {
 
 	@Test
 	void environmentVariablesAreSentInTheCreateShellRequest() throws Exception {
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				200,
@@ -262,8 +231,7 @@ class WinRMClientTest {
 			.enqueue(200, envelope(signalResponse()));
 
 		try (WinRMClient client = builder(PASSWORD).build()) {
-			final CommandResult result = client
-				.command("echo %BUILD_NUMBER%")
+			final CommandResult result = client.command("echo %BUILD_NUMBER%")
 				.environment("BUILD_NUMBER", "42")
 				.environment("CONFIG", "a<b&\"c\"")
 				.workingDirectory("C:\\build")
@@ -276,10 +244,8 @@ class WinRMClientTest {
 		// Insertion order preserved, values XML-escaped.
 		assertTrue(
 			create.contains(
-				"<rsp:Environment>" +
-					"<rsp:Variable Name=\"BUILD_NUMBER\">42</rsp:Variable>" +
-					"<rsp:Variable Name=\"CONFIG\">a&lt;b&amp;&quot;c&quot;</rsp:Variable>" +
-					"</rsp:Environment>"
+				"<rsp:Environment>" + "<rsp:Variable Name=\"BUILD_NUMBER\">42</rsp:Variable>"
+					+ "<rsp:Variable Name=\"CONFIG\">a&lt;b&amp;&quot;c&quot;</rsp:Variable>" + "</rsp:Environment>"
 			),
 			create
 		);
@@ -293,8 +259,7 @@ class WinRMClientTest {
 
 	@Test
 	void powerShellEncodesTheScriptSoNoEscapingIsNeeded() throws Exception {
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				200,
@@ -336,9 +301,8 @@ class WinRMClientTest {
 		for (final byte b : java.security.MessageDigest.getInstance("SHA-256").digest(content)) {
 			digest.append(String.format("%02x", b));
 		}
-		final String certutil = "SHA256 hash of file x:\r\n" +
-			digest +
-			"\r\nCertUtil: -hashfile command completed successfully.\r\n";
+		final String certutil = "SHA256 hash of file x:\r\n" + digest
+			+ "\r\nCertUtil: -hashfile command completed successfully.\r\n";
 
 		server
 			// ShellFileCopy locates the Windows directory with a WQL query (no shell involved)...
@@ -373,8 +337,7 @@ class WinRMClientTest {
 			assertEquals("collect", result.stdout());
 		}
 
-		final String command = server
-			.decryptedRequests()
+		final String command = server.decryptedRequests()
 			.stream()
 			.filter(r -> r.contains("-EncodedCommand"))
 			.findFirst()
@@ -401,8 +364,7 @@ class WinRMClientTest {
 		// 3040 characters encode to an 8166-character invocation, which still fits the remote
 		// shell's 8191-character command line WITH room for the CMD.EXE /C ( ) wrapper an uploaded
 		// request would add — so it rides the command line, no file transfer involved.
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				200,
@@ -438,9 +400,8 @@ class WinRMClientTest {
 		for (final byte b : java.security.MessageDigest.getInstance("SHA-256").digest(content)) {
 			digest.append(String.format("%02x", b));
 		}
-		final String certutil = "SHA256 hash of file x:\r\n" +
-			digest +
-			"\r\nCertUtil: -hashfile command completed successfully.\r\n";
+		final String certutil = "SHA256 hash of file x:\r\n" + digest
+			+ "\r\nCertUtil: -hashfile command completed successfully.\r\n";
 
 		server
 			// ShellFileCopy locates the Windows directory with a WQL query (no shell involved)...
@@ -478,8 +439,7 @@ class WinRMClientTest {
 			assertEquals(0, result.exitCode());
 		}
 
-		final String command = server
-			.decryptedRequests()
+		final String command = server.decryptedRequests()
 			.stream()
 			.filter(r -> r.contains("[ScriptBlock]::Create"))
 			.findFirst()
@@ -508,9 +468,8 @@ class WinRMClientTest {
 		for (final byte b : java.security.MessageDigest.getInstance("SHA-256").digest(content)) {
 			digest.append(String.format("%02x", b));
 		}
-		final String certutil = "SHA256 hash of file x:\r\n" +
-			digest +
-			"\r\nCertUtil: -hashfile command completed successfully.\r\n";
+		final String certutil = "SHA256 hash of file x:\r\n" + digest
+			+ "\r\nCertUtil: -hashfile command completed successfully.\r\n";
 
 		server
 			// ShellFileCopy locates the Windows directory with a WQL query (no shell involved)...
@@ -538,8 +497,7 @@ class WinRMClientTest {
 			.enqueue(200, envelope(signalResponse()));
 
 		try (WinRMClient client = builder(PASSWORD).build()) {
-			final CommandResult result = client
-				.command(localFile.toString())
+			final CommandResult result = client.command(localFile.toString())
 				.upload(localFile)
 				.environment("BUILD_NUMBER", "42")
 				.execute();
@@ -548,8 +506,7 @@ class WinRMClientTest {
 		}
 
 		final List<String> requests = server.decryptedRequests();
-		final List<String> creates = requests
-			.stream()
+		final List<String> creates = requests.stream()
 			.filter(r -> r.contains("<rsp:InputStreams>"))
 			.collect(java.util.stream.Collectors.toList());
 		assertEquals(1, creates.size(), () -> String.join("\n---\n", requests));
@@ -562,8 +519,7 @@ class WinRMClientTest {
 
 	@Test
 	void commandDecodesOutputAsUtf8WithoutProbingTheRemoteCodeSet() throws Exception {
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				200,
@@ -603,15 +559,14 @@ class WinRMClientTest {
 		// survives a single-byte OEM code page: CP437 has no 番, and decoding its bytes as the ANSI
 		// code page turned "numéro" into "num‚ro" (#142).
 		final String output = "Le numéro de série du volume est E6B6-D774\r\nボリューム シリアル番号\r\n";
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				200,
 				envelope(
 					receiveResponse(
-						stream("stdout", "CMD-1", output.getBytes(StandardCharsets.UTF_8)) +
-							stream("stderr", "CMD-1", "Accès refusé".getBytes(StandardCharsets.UTF_8)),
+						stream("stdout", "CMD-1", output.getBytes(StandardCharsets.UTF_8))
+							+ stream("stderr", "CMD-1", "Accès refusé".getBytes(StandardCharsets.UTF_8)),
 						done("CMD-1", 0)
 					)
 				)
@@ -689,8 +644,7 @@ class WinRMClientTest {
 		// Thread A holds the serial connection with a slow command; thread B's command times out
 		// while QUEUED behind it. B's worker must abort instead of executing the command "later" —
 		// side effects must never run after the caller was already told the operation timed out.
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueueDelayed(
 				200,
@@ -733,8 +687,7 @@ class WinRMClientTest {
 		// The Create-shell response arrives AFTER the caller's timeout. A socket read does not
 		// observe the cancellation interrupt, so the worker outlives the timeout — but it must
 		// abort before STARTING the command, not run it after the caller was told it timed out.
-		server
-			.enqueueDelayed(200, envelope(resourceCreated("SHELL-1")), 2_000)
+		server.enqueueDelayed(200, envelope(resourceCreated("SHELL-1")), 2_000)
 			// Responses for the follow-up command, proving the client stays usable (shell reused).
 			.enqueue(200, envelope(commandResponse("CMD-2")))
 			.enqueue(
@@ -768,8 +721,7 @@ class WinRMClientTest {
 		// PARTIAL output (no Done state). The abandoned worker must not re-issue Receive until the
 		// remote command eventually ends — it must stop, terminate the command, and release the
 		// serial connection for the next operation.
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueueDelayed(
 				200,
@@ -843,8 +795,7 @@ class WinRMClientTest {
 		try (WinRMClient client = builder(PASSWORD).loadUserProfile().build()) {
 			assertEquals(
 				"first",
-				client
-					.command("first.exe")
+				client.command("first.exe")
 					.workingDirectory("C:\\Work")
 					.environment("BUILD_NUMBER", "42")
 					.charset(StandardCharsets.UTF_8)
@@ -861,8 +812,7 @@ class WinRMClientTest {
 			() -> String.join("\n---\n", requests)
 		);
 		// Exactly two shells were created, and second.exe was sent twice (rejected, then retried).
-		final List<String> creates = requests
-			.stream()
+		final List<String> creates = requests.stream()
 			.filter(r -> r.contains("<rsp:InputStreams>"))
 			.collect(java.util.stream.Collectors.toList());
 		assertEquals(2, creates.size());
@@ -888,8 +838,7 @@ class WinRMClientTest {
 		// exactly what it sends on a French host (0x82 is "é" in CP850, invalid as UTF-8).
 		final Charset oem = Charset.forName("IBM850");
 		final byte[] output = "Code du pays ou de la région".getBytes(oem);
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(200, envelope(receiveResponse(stream("stdout", "CMD-1", output), done("CMD-1", 0))))
 			.enqueue(200, envelope(signalResponse()));
@@ -917,8 +866,7 @@ class WinRMClientTest {
 
 	/** Script a whole command printing the given output, in the current shell. */
 	private void enqueueCommand(final String commandId, final String stdout) {
-		server
-			.enqueue(200, envelope(commandResponse(commandId)))
+		server.enqueue(200, envelope(commandResponse(commandId)))
 			.enqueue(
 				200,
 				envelope(

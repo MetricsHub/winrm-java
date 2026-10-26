@@ -86,8 +86,7 @@ class StreamingApiTest {
 	}
 
 	private WinRMClient.Builder builder() {
-		return WinRMClient
-			.builder("127.0.0.1")
+		return WinRMClient.builder("127.0.0.1")
 			.port(server.port())
 			.credentials(DOMAIN + "\\" + USER, PASSWORD.toCharArray())
 			.timeout(Duration.ofSeconds(10));
@@ -100,8 +99,7 @@ class StreamingApiTest {
 	/** An EnumerateResponse carrying rows and an open enumeration context (more pages follow). */
 	private static String enumeratePage(final String context, final String... instances) {
 		final StringBuilder xml = new StringBuilder();
-		xml
-			.append("<wsen:EnumerateResponse xmlns:wsen=\"")
+		xml.append("<wsen:EnumerateResponse xmlns:wsen=\"")
 			.append(WSEN)
 			.append("\" xmlns:wsman=\"")
 			.append(WSMAN)
@@ -119,8 +117,7 @@ class StreamingApiTest {
 	/** A final PullResponse: the last rows and the end-of-sequence marker. */
 	private static String pullDone(final String... instances) {
 		final StringBuilder xml = new StringBuilder();
-		xml
-			.append("<wsen:PullResponse xmlns:wsen=\"")
+		xml.append("<wsen:PullResponse xmlns:wsen=\"")
 			.append(WSEN)
 			.append("\" xmlns:wsman=\"")
 			.append(WSMAN)
@@ -208,8 +205,7 @@ class StreamingApiTest {
 
 	@Test
 	void wqlStreamMapsOperationTimeoutFaultToInactivityTimeout() throws Exception {
-		server
-			.enqueue(200, envelope(enumeratePage("uuid:CTX-1", service("Spooler", "Running"))))
+		server.enqueue(200, envelope(enumeratePage("uuid:CTX-1", service("Spooler", "Running"))))
 			.enqueue(500, fault(FAULT_OPERATION_TIMEOUT, "The operation timed out."));
 
 		try (WinRMClient client = builder().timeout(Duration.ofMillis(500)).build()) {
@@ -227,8 +223,7 @@ class StreamingApiTest {
 
 	@Test
 	void totalServerSilenceIsBoundedByTheInactivityTimeout() throws Exception {
-		server
-			.enqueue(200, envelope(enumeratePage("uuid:CTX-1", service("Spooler", "Running"))))
+		server.enqueue(200, envelope(enumeratePage("uuid:CTX-1", service("Spooler", "Running"))))
 			// The Pull response arrives way past the inactivity timeout — a server that stopped
 			// answering entirely (no op-timeout fault). The socket read itself must give up at the
 			// inactivity bound, not 10 seconds later (the headroom the blocking paths keep).
@@ -366,8 +361,7 @@ class StreamingApiTest {
 	@Test
 	void startStreamsOutputWhileTheCommandIsStillRunning() throws Exception {
 		enqueueCommandStartup();
-		server
-			.enqueue(200, envelope(receiveResponse(stdoutChunk("line1\n"), null)))
+		server.enqueue(200, envelope(receiveResponse(stdoutChunk("line1\n"), null)))
 			.enqueue(200, envelope(receiveResponse(stdoutChunk("line2\n"), done(COMMAND_ID, 7))))
 			.enqueue(200, envelope(signalResponse()));
 
@@ -395,8 +389,7 @@ class StreamingApiTest {
 	@Test
 	void interleavedChannelsAreSplitAndOrderIsPreservedPerChannel() throws Exception {
 		enqueueCommandStartup();
-		server
-			.enqueue(200, envelope(receiveResponse(stdoutChunk("out1\n") + stderrChunk("err1\n"), null)))
+		server.enqueue(200, envelope(receiveResponse(stdoutChunk("out1\n") + stderrChunk("err1\n"), null)))
 			.enqueue(200, envelope(receiveResponse(stderrChunk("err2\n") + stdoutChunk("out2\n"), done(COMMAND_ID, 0))))
 			.enqueue(200, envelope(signalResponse()));
 
@@ -414,14 +407,9 @@ class StreamingApiTest {
 	void multibyteCharacterSplitAcrossReceiveResponsesIsDecodedCorrectly() throws Exception {
 		final byte[] eAcute = "é".getBytes(StandardCharsets.UTF_8); // 0xC3 0xA9
 		enqueueCommandStartup();
-		server
+		server.enqueue(200, envelope(receiveResponse(stream("stdout", COMMAND_ID, new byte[] { 'a', eAcute[0] }), null)))
 			.enqueue(200, envelope(receiveResponse(stream("stdout", COMMAND_ID, new byte[]
-			{ 'a', eAcute[0] }), null)))
-			.enqueue(
-				200,
-				envelope(receiveResponse(stream("stdout", COMMAND_ID, new byte[]
-				{ eAcute[1], 'b' }), done(COMMAND_ID, 0)))
-			)
+			{ eAcute[1], 'b' }), done(COMMAND_ID, 0))))
 			.enqueue(200, envelope(signalResponse()));
 
 		try (
@@ -435,8 +423,7 @@ class StreamingApiTest {
 	@Test
 	void closingTheProcessEarlyTerminatesTheRemoteCommand() throws Exception {
 		enqueueCommandStartup();
-		server
-			.enqueue(200, envelope(receiveResponse(stdoutChunk("tick\n"), null)))
+		server.enqueue(200, envelope(receiveResponse(stdoutChunk("tick\n"), null)))
 			.enqueue(200, envelope(signalResponse()));
 
 		try (WinRMClient client = builder().build()) {
@@ -468,8 +455,7 @@ class StreamingApiTest {
 		// killed by the terminate Signal, but a real service answers only when the Signal's
 		// OperationTimeout expires: the Signal asks for a short hold, whose expiry is no failure.
 		enqueueCommandStartup();
-		server
-			.enqueue(200, envelope(receiveResponse(stdoutChunk("block\n"), null)))
+		server.enqueue(200, envelope(receiveResponse(stdoutChunk("block\n"), null)))
 			.enqueue(
 				500,
 				fault(
@@ -496,8 +482,7 @@ class StreamingApiTest {
 	@Test
 	void closingAfterTheFinalChunkStillExposesTheExitCode() throws Exception {
 		enqueueCommandStartup();
-		server
-			.enqueue(200, envelope(receiveResponse(stdoutChunk("all\n"), done(COMMAND_ID, 5))))
+		server.enqueue(200, envelope(receiveResponse(stdoutChunk("all\n"), done(COMMAND_ID, 5))))
 			.enqueue(200, envelope(signalResponse()));
 
 		try (WinRMClient client = builder().build()) {
@@ -517,8 +502,7 @@ class StreamingApiTest {
 	@Test
 	void waitForDeadlineExpiresWhileTheCommandKeepsRunning() throws Exception {
 		enqueueCommandStartup();
-		server
-			.enqueueDelayed(200, envelope(receiveResponse(stdoutChunk("slow\n"), null)), 300)
+		server.enqueueDelayed(200, envelope(receiveResponse(stdoutChunk("slow\n"), null)), 300)
 			.enqueue(200, envelope(signalResponse()));
 
 		try (WinRMClient client = builder().build()) {
@@ -633,8 +617,7 @@ class StreamingApiTest {
 	@Test
 	void completionSignalIsBoundedByThePollBudget() throws Exception {
 		enqueueCommandStartup();
-		server
-			.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 5))))
+		server.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 5))))
 			// The Signal acknowledging the ALREADY-COMPLETED command stalls far past the poll
 			// budget: completion (and the known exit code) must win over the cleanup hiccup.
 			.enqueueDelayed(200, envelope(signalResponse()), 3_000);
@@ -679,8 +662,7 @@ class StreamingApiTest {
 	@Test
 	void aSubFloorInactivityTimeoutKeepsBoundedPollsLocalAndTheProcessUsable() throws Exception {
 		enqueueCommandStartup();
-		server
-			.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 4))))
+		server.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 4))))
 			.enqueue(200, envelope(signalResponse()));
 
 		// The per-round-trip timeout caps a bounded poll STRICTLY: a 500 ms inactivity timeout
@@ -723,8 +705,7 @@ class StreamingApiTest {
 	@Test
 	void faultAnsweringTheCompletionSignalDoesNotHideCompletion() throws Exception {
 		enqueueCommandStartup();
-		server
-			.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 5))))
+		server.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 5))))
 			// The Signal acknowledging the ALREADY-COMPLETED command is answered with a fault: pure
 			// cleanup noise — the completion and its exit code must win.
 			.enqueue(500, fault("999", "Signal rejected"));
@@ -746,8 +727,7 @@ class StreamingApiTest {
 	@Test
 	void faultAnsweringTheCompletionSignalDoesNotFailThePlainFetchEither() throws Exception {
 		enqueueCommandStartup();
-		server
-			.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 5))))
+		server.enqueue(200, envelope(receiveResponse(stdoutChunk("done\n"), done(COMMAND_ID, 5))))
 			// Same as the bounded-poll case, but on the ordinary next() path: reading EOF from a
 			// COMPLETED command must not fail because the cleanup Signal was answered with a fault.
 			.enqueue(500, fault("999", "Signal rejected"));
@@ -849,8 +829,7 @@ class StreamingApiTest {
 	/** Script the next command: the retired shell's Delete, then a whole command in SHELL-2. */
 	private void enqueueNextCommandInANewShell() {
 		enqueueShellDeletion(server);
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-2")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-2")))
 			.enqueue(200, envelope(commandResponse("CMD-2")))
 			.enqueue(
 				200,
@@ -878,8 +857,7 @@ class StreamingApiTest {
 	@Test
 	void commandSilenceBeyondTheTimeoutSurfacesAsInactivityTimeout() throws Exception {
 		enqueueCommandStartup();
-		server
-			.enqueue(500, fault(FAULT_OPERATION_TIMEOUT, "The operation timed out."))
+		server.enqueue(500, fault(FAULT_OPERATION_TIMEOUT, "The operation timed out."))
 			.enqueue(200, envelope(signalResponse()));
 
 		try (WinRMClient client = builder().timeout(Duration.ofMillis(500)).build()) {
@@ -908,24 +886,14 @@ class StreamingApiTest {
 					{ eAcute[0] })), null)
 				)
 			)
-			.enqueue(
-				200,
-				envelope(
-					receiveResponse(
-						stream("stdout", COMMAND_ID, concat(new byte[]
-						{ eAcute[1] }, "second".getBytes(StandardCharsets.UTF_8))) +
-							stderrChunk("warning"),
-						done(COMMAND_ID, 3)
-					)
-				)
-			)
+			.enqueue(200, envelope(receiveResponse(stream("stdout", COMMAND_ID, concat(new byte[]
+			{ eAcute[1] }, "second".getBytes(StandardCharsets.UTF_8))) + stderrChunk("warning"), done(COMMAND_ID, 3))))
 			.enqueue(200, envelope(signalResponse()));
 
 		final List<String> stdoutChunks = new ArrayList<>();
 		final List<String> stderrChunks = new ArrayList<>();
 		try (WinRMClient client = builder().build()) {
-			final CommandResult result = client
-				.command("chatty.exe")
+			final CommandResult result = client.command("chatty.exe")
 				.charset(StandardCharsets.UTF_8)
 				.onStdout(stdoutChunks::add)
 				.onStderr(stderrChunks::add)

@@ -59,11 +59,7 @@ public final class RemoteFileInfo {
 	 * @param lastAccessed the last access time
 	 */
 	RemoteFileInfo(
-		final String path,
-		final int attributes,
-		final long size,
-		final Instant lastModified,
-		final Instant created,
+		final String path, final int attributes, final long size, final Instant lastModified, final Instant created,
 		final Instant lastAccessed
 	) {
 		this.path = path;
@@ -207,16 +203,11 @@ public final class RemoteFileInfo {
 		}
 		final RemoteFileInfo that = (RemoteFileInfo) other;
 		return attributes == that.attributes
-			&&
-			size == that.size
-			&&
-			path.equals(that.path)
-			&&
-			lastModified.equals(that.lastModified)
-			&&
-			created.equals(that.created)
-			&&
-			lastAccessed.equals(that.lastAccessed);
+			&& size == that.size
+			&& path.equals(that.path)
+			&& lastModified.equals(that.lastModified)
+			&& created.equals(that.created)
+			&& lastAccessed.equals(that.lastAccessed);
 	}
 
 	@Override

@@ -69,8 +69,8 @@ public final class CommandRequest {
 	 * method rather than {@code Get-Content -Raw}, which PowerShell 2.0 (Windows Server 2008 R2)
 	 * does not have.
 	 */
-	private static final String POWERSHELL_FILE_INVOCATION = "powershell.exe -NoProfile -NonInteractive -Command " +
-		"\". ([ScriptBlock]::Create([System.IO.File]::ReadAllText('%s')))\"";
+	private static final String POWERSHELL_FILE_INVOCATION = "powershell.exe -NoProfile -NonInteractive -Command "
+		+ "\". ([ScriptBlock]::Create([System.IO.File]::ReadAllText('%s')))\"";
 
 	/**
 	 * Local name of the fallback script file. The name is constant: the file is created in a
@@ -289,9 +289,7 @@ public final class CommandRequest {
 	 * {@link org.metricshub.winrm.command.WinRMCommandExecutor}:
 	 *
 	 * <pre>{@code
-	 * client.command("CSCRIPT c:\\scripts\\collect.vbs")
-	 * 	.upload(Path.of("c:\\scripts\\collect.vbs"))
-	 * 	.execute();
+	 * client.command("CSCRIPT c:\\scripts\\collect.vbs").upload(Path.of("c:\\scripts\\collect.vbs")).execute();
 	 * }</pre>
 	 *
 	 * transfers the script and executes {@code CSCRIPT <remote copy>}.
@@ -463,15 +461,11 @@ public final class CommandRequest {
 		final long timeoutMillis = WinRMClient.toMillis(timeout);
 		try {
 			final Prepared prepared = prepare(timeoutMillis, start);
-			final long remaining = TimeoutHelper.getRemainingTime(
-				timeoutMillis,
-				start,
-				"No time left to execute the command"
-			);
+			final long remaining = TimeoutHelper
+				.getRemainingTime(timeoutMillis, start, "No time left to execute the command");
 
 			if (stdoutConsumer == null && stderrConsumer == null && stdinSource == null) {
-				final WindowsRemoteCommandResult result = client
-					.executor()
+				final WindowsRemoteCommandResult result = client.executor()
 					.executeCommand(
 						prepared.command,
 						prepared.workingDirectory,
@@ -540,8 +534,7 @@ public final class CommandRequest {
 			final Prepared prepared = prepare(timeoutMillis, start);
 			// The full timeout, not the remaining time: for a streaming consumer it bounds each
 			// round trip (inactivity), not the overall exchange the preparation steps count against.
-			final CommandCursor cursor = client
-				.executor()
+			final CommandCursor cursor = client.executor()
 				.startCommand(prepared.command, prepared.workingDirectory, prepared.environment, timeoutMillis, !pipeStdin);
 			if (stdinSource != null) {
 				try {
@@ -585,10 +578,7 @@ public final class CommandRequest {
 		final Charset stdinCharset;
 
 		Prepared(
-			final String command,
-			final String workingDirectory,
-			final Map<String, String> environment,
-			final Charset charset,
+			final String command, final String workingDirectory, final Map<String, String> environment, final Charset charset,
 			final Charset stdinCharset
 		) {
 			this.command = command;

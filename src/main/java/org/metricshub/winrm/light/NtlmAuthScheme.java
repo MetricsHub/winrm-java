@@ -33,12 +33,9 @@ final class NtlmAuthScheme implements AuthScheme {
 	// Type 1 flags over plain HTTP: engine defaults + SIGN | SEAL | KEY_EXCH (matches
 	// NtlmMasqAsSpnegoScheme). Message sealing is what protects the SOAP over an unencrypted transport.
 	private static final int TYPE1_FLAGS_ENCRYPTED = (int) (Type1Message.getDefaultFlags()
-		|
-		NTLMEngineUtils.NTLMSSP_NEGOTIATE_SIGN
-		|
-		NTLMEngineUtils.NTLMSSP_NEGOTIATE_SEAL
-		|
-		NTLMEngineUtils.NTLMSSP_NEGOTIATE_KEY_EXCH);
+		| NTLMEngineUtils.NTLMSSP_NEGOTIATE_SIGN
+		| NTLMEngineUtils.NTLMSSP_NEGOTIATE_SEAL
+		| NTLMEngineUtils.NTLMSSP_NEGOTIATE_KEY_EXCH);
 
 	// Type 1 flags over HTTPS: engine defaults only. TLS already provides confidentiality/integrity, so
 	// we authenticate WITHOUT negotiating sealing and exchange plaintext SOAP — claiming SEAL but then
@@ -69,12 +66,8 @@ final class NtlmAuthScheme implements AuthScheme {
 
 		// Request A: Type 1 under the Negotiate header. No keys yet, so send the bogus placeholder.
 		final String type1 = new Type1Message(null, null, https ? TYPE1_FLAGS_PLAIN : TYPE1_FLAGS_ENCRYPTED).getResponse();
-		final HttpTransport.Response challenge = transport.post(
-			"/wsman",
-			PRE_AUTH_BOGUS,
-			SOAP_CONTENT_TYPE,
-			"Negotiate " + type1
-		);
+		final HttpTransport.Response challenge = transport
+			.post("/wsman", PRE_AUTH_BOGUS, SOAP_CONTENT_TYPE, "Negotiate " + type1);
 		if (challenge.status != 401) {
 			throw new IllegalStateException("Expected HTTP 401 with an NTLM challenge, got HTTP " + challenge.status);
 		}

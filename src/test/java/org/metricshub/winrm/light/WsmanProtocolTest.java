@@ -98,42 +98,24 @@ class WsmanProtocolTest {
 			.enqueue(
 				200,
 				envelope(
-					"<wsen:EnumerateResponse xmlns:wsen=\"" +
-						WSEN +
-						"\" xmlns:wsman=\"" +
-						WSMAN +
-						"\">" +
-						"<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" +
-						"<wsman:Items>" +
-						service("Spooler", "Running") +
-						"</wsman:Items>" +
-						"</wsen:EnumerateResponse>"
+					"<wsen:EnumerateResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN + "\">"
+						+ "<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" + "<wsman:Items>"
+						+ service("Spooler", "Running") + "</wsman:Items>" + "</wsen:EnumerateResponse>"
 				)
 			)
 			.enqueue(
 				200,
 				envelope(
-					"<wsen:PullResponse xmlns:wsen=\"" +
-						WSEN +
-						"\">" +
-						"<wsen:EnumerationContext>uuid:CTX-2</wsen:EnumerationContext>" +
-						"<wsen:Items>" +
-						service("WinRM", "Running") +
-						service("Wecsvc", "Stopped") +
-						"</wsen:Items>" +
-						"</wsen:PullResponse>"
+					"<wsen:PullResponse xmlns:wsen=\"" + WSEN + "\">"
+						+ "<wsen:EnumerationContext>uuid:CTX-2</wsen:EnumerationContext>" + "<wsen:Items>"
+						+ service("WinRM", "Running") + service("Wecsvc", "Stopped") + "</wsen:Items>" + "</wsen:PullResponse>"
 				)
 			)
 			.enqueue(
 				200,
 				envelope(
-					"<wsen:PullResponse xmlns:wsen=\"" +
-						WSEN +
-						"\" xmlns:wsman=\"" +
-						WSMAN +
-						"\">" +
-						"<wsman:EndOfSequence/>" +
-						"</wsen:PullResponse>"
+					"<wsen:PullResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN + "\">" + "<wsman:EndOfSequence/>"
+						+ "</wsen:PullResponse>"
 				)
 			);
 
@@ -166,36 +148,20 @@ class WsmanProtocolTest {
 		// Real WinRM hosts answer with Transfer-Encoding: chunked. The client must reassemble the
 		// chunks AND consume the trailer fields that follow the terminating chunk — leftover trailer
 		// bytes desync the kept-alive NTLM connection, so the SECOND request on it is what fails.
-		server
-			.withChunkedResponses()
+		server.withChunkedResponses()
 			.enqueue(
 				200,
 				envelope(
-					"<wsen:EnumerateResponse xmlns:wsen=\"" +
-						WSEN +
-						"\" xmlns:wsman=\"" +
-						WSMAN +
-						"\">" +
-						"<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" +
-						"<wsman:Items>" +
-						service("Spooler", "Running") +
-						"</wsman:Items>" +
-						"</wsen:EnumerateResponse>"
+					"<wsen:EnumerateResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN + "\">"
+						+ "<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" + "<wsman:Items>"
+						+ service("Spooler", "Running") + "</wsman:Items>" + "</wsen:EnumerateResponse>"
 				)
 			)
 			.enqueue(
 				200,
 				envelope(
-					"<wsen:PullResponse xmlns:wsen=\"" +
-						WSEN +
-						"\" xmlns:wsman=\"" +
-						WSMAN +
-						"\">" +
-						"<wsman:Items>" +
-						service("WinRM", "Running") +
-						"</wsman:Items>" +
-						"<wsman:EndOfSequence/>" +
-						"</wsen:PullResponse>"
+					"<wsen:PullResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN + "\">" + "<wsman:Items>"
+						+ service("WinRM", "Running") + "</wsman:Items>" + "<wsman:EndOfSequence/>" + "</wsen:PullResponse>"
 				)
 			);
 
@@ -227,28 +193,16 @@ class WsmanProtocolTest {
 			.enqueue(
 				200,
 				envelope(
-					"<wsen:EnumerateResponse xmlns:wsen=\"" +
-						WSEN +
-						"\" xmlns:wsman=\"" +
-						WSMAN +
-						"\">" +
-						"<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" +
-						"<wsman:Items>" +
-						service("Spooler", "Running") +
-						"</wsman:Items>" +
-						"</wsen:EnumerateResponse>"
+					"<wsen:EnumerateResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN + "\">"
+						+ "<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" + "<wsman:Items>"
+						+ service("Spooler", "Running") + "</wsman:Items>" + "</wsen:EnumerateResponse>"
 				)
 			)
 			.enqueue(
 				200,
 				envelope(
-					"<wsen:PullResponse xmlns:wsen=\"" +
-						WSEN +
-						"\" xmlns:wsman=\"" +
-						WSMAN +
-						"\">" +
-						"<wsman:EndOfSequence/>" +
-						"</wsen:PullResponse>"
+					"<wsen:PullResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN + "\">" + "<wsman:EndOfSequence/>"
+						+ "</wsen:PullResponse>"
 				)
 			);
 
@@ -270,8 +224,7 @@ class WsmanProtocolTest {
 		final byte[] chunk1 = java.util.Arrays.copyOfRange(utf8, 0, 2); // 'h' + first byte of 'é'
 		final byte[] chunk2 = java.util.Arrays.copyOfRange(utf8, 2, utf8.length);
 
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(200, envelope(receiveResponse(stream("stdout", "CMD-1", chunk1), null)))
 			.enqueue(
@@ -286,12 +239,8 @@ class WsmanProtocolTest {
 			.enqueue(200, envelope(signalResponse()));
 
 		try (LightWinRMService service = client(PASSWORD)) {
-			final WindowsRemoteCommandResult result = service.executeCommand(
-				"echo héllo!",
-				null,
-				StandardCharsets.UTF_8,
-				TIMEOUT
-			);
+			final WindowsRemoteCommandResult result = service
+				.executeCommand("echo héllo!", null, StandardCharsets.UTF_8, TIMEOUT);
 
 			assertEquals("héllo!", result.getStdout());
 			assertEquals("warn!", result.getStderr());
@@ -320,8 +269,7 @@ class WsmanProtocolTest {
 	void receiveRetriesOnOperationTimeoutFault() throws Exception {
 		// No output before OperationTimeout: the server faults with 2150858793 and the client must
 		// immediately re-issue the Receive rather than fail the command.
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				500,
@@ -332,9 +280,7 @@ class WsmanProtocolTest {
 			)
 			.enqueue(
 				200,
-				envelope(
-					receiveResponse(stream("stdout", "CMD-1", "late".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0))
-				)
+				envelope(receiveResponse(stream("stdout", "CMD-1", "late".getBytes(StandardCharsets.UTF_8)), done("CMD-1", 0)))
 			)
 			.enqueue(200, envelope(signalResponse()));
 
@@ -354,8 +300,7 @@ class WsmanProtocolTest {
 		// Windows reports HRESULT exit codes (e.g. certutil's 0x80070002 for a missing file) as
 		// unsigned 32-bit values like 2147942402, which overflow Integer.parseInt: the client
 		// must narrow them to the equivalent signed int instead of failing the whole command.
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				200,
@@ -366,21 +311,16 @@ class WsmanProtocolTest {
 							"CMD-1",
 							"CertUtil: -hashfile command FAILED: 0x80070002".getBytes(StandardCharsets.UTF_8)
 						),
-						"<rsp:CommandState CommandId=\"CMD-1\" State=\"" +
-							RSP +
-							"/CommandState/Done\"><rsp:ExitCode>2147942402</rsp:ExitCode></rsp:CommandState>"
+						"<rsp:CommandState CommandId=\"CMD-1\" State=\"" + RSP
+							+ "/CommandState/Done\"><rsp:ExitCode>2147942402</rsp:ExitCode></rsp:CommandState>"
 					)
 				)
 			)
 			.enqueue(200, envelope(signalResponse()));
 
 		try (LightWinRMService service = client(PASSWORD)) {
-			final WindowsRemoteCommandResult result = service.executeCommand(
-				"certutil -hashfile \"C:\\missing\" SHA256",
-				null,
-				StandardCharsets.UTF_8,
-				TIMEOUT
-			);
+			final WindowsRemoteCommandResult result = service
+				.executeCommand("certutil -hashfile \"C:\\missing\" SHA256", null, StandardCharsets.UTF_8, TIMEOUT);
 
 			assertEquals((int) 2147942402L, result.getStatusCode());
 			assertTrue(result.getStdout().contains("0x80070002"));
@@ -391,8 +331,7 @@ class WsmanProtocolTest {
 	void terminateSignalToleratesShellNotFoundFault() throws Exception {
 		// The command finished and the shell may already be gone: fault 2150858843 on the terminate
 		// Signal must not fail the (successful) command.
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				200,
@@ -415,8 +354,7 @@ class WsmanProtocolTest {
 		// Issue #196: a command whose terminate Signal failed keeps holding one of the user's WSMan
 		// operations until its shell is deleted. A long-lived client that kept reusing the shell piled
 		// them up until MaxConcurrentOperationsPerUser refused every Command.
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				200,
@@ -432,8 +370,7 @@ class WsmanProtocolTest {
 	void aTerminateSignalLostInTransitRetiresTheShell() throws Exception {
 		// Same as a faulted Signal, but the connection drops before the answer: whether the command
 		// was terminated is unknown, so its shell must not be reused either.
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				200,
@@ -450,8 +387,7 @@ class WsmanProtocolTest {
 		// The last command's Signal failed, and no other command follows to delete its shell: close()
 		// must. A client per collection cycle would otherwise leave a shell and its held operation behind
 		// every cycle.
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				200,
@@ -474,8 +410,7 @@ class WsmanProtocolTest {
 	void aRetiredShellDeleteAnsweredWithAnUnexpectedStatusDoesNotFailTheNextCommand() throws Exception {
 		// The best-effort Delete draws an HTTP 503 whose sealed body is never decrypted: reusing that
 		// connection would decrypt the Create's response with an out-of-sync cipher stream.
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(200, envelope(commandResponse("CMD-1")))
 			.enqueue(
 				200,
@@ -496,8 +431,7 @@ class WsmanProtocolTest {
 
 	/** Script a whole command in a freshly created SHELL-2. */
 	private void enqueueCommandInShell2() {
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-2")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-2")))
 			.enqueue(200, envelope(commandResponse("CMD-2")))
 			.enqueue(
 				200,
@@ -577,39 +511,23 @@ class WsmanProtocolTest {
 		// HTTP Basic is stateless: the Authorization header must repeat on EVERY request, and the
 		// payload is plaintext SOAP (no message protection). The fake server enforces the header and
 		// serves plaintext responses, so a successful round trip proves both.
-		final String expectedHeader = "Basic " + Base64.getEncoder().encodeToString(
-			(DOMAIN + "\\" + USER + ":" + PASSWORD).getBytes(StandardCharsets.UTF_8)
-		);
+		final String expectedHeader = "Basic "
+			+ Base64.getEncoder().encodeToString((DOMAIN + "\\" + USER + ":" + PASSWORD).getBytes(StandardCharsets.UTF_8));
 		server.withBasicAuth(expectedHeader);
 		server
 			.enqueue(
 				200,
 				envelope(
-					"<wsen:EnumerateResponse xmlns:wsen=\"" +
-						WSEN +
-						"\" xmlns:wsman=\"" +
-						WSMAN +
-						"\">" +
-						"<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" +
-						"<wsman:Items>" +
-						service("Spooler", "Running") +
-						"</wsman:Items>" +
-						"</wsen:EnumerateResponse>"
+					"<wsen:EnumerateResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN + "\">"
+						+ "<wsen:EnumerationContext>uuid:CTX-1</wsen:EnumerationContext>" + "<wsman:Items>"
+						+ service("Spooler", "Running") + "</wsman:Items>" + "</wsen:EnumerateResponse>"
 				)
 			)
 			.enqueue(
 				200,
 				envelope(
-					"<wsen:PullResponse xmlns:wsen=\"" +
-						WSEN +
-						"\" xmlns:wsman=\"" +
-						WSMAN +
-						"\">" +
-						"<wsman:Items>" +
-						service("WinRM", "Running") +
-						"</wsman:Items>" +
-						"<wsman:EndOfSequence/>" +
-						"</wsen:PullResponse>"
+					"<wsen:PullResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN + "\">" + "<wsman:Items>"
+						+ service("WinRM", "Running") + "</wsman:Items>" + "<wsman:EndOfSequence/>" + "</wsen:PullResponse>"
 				)
 			);
 
@@ -716,9 +634,8 @@ class WsmanProtocolTest {
 	// --- response body builders -----------------------------------------------------
 
 	private static String expectedNormalizedHeader() {
-		return "Basic " + Base64.getEncoder().encodeToString(
-			(DOMAIN + "\\" + USER + ":" + PASSWORD).getBytes(StandardCharsets.UTF_8)
-		);
+		return "Basic "
+			+ Base64.getEncoder().encodeToString((DOMAIN + "\\" + USER + ":" + PASSWORD).getBytes(StandardCharsets.UTF_8));
 	}
 
 	private static String service(final String name, final String state) {

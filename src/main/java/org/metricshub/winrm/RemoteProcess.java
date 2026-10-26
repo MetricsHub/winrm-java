@@ -120,12 +120,8 @@ public final class RemoteProcess implements AutoCloseable {
 	private boolean stdinClosed;
 
 	RemoteProcess(
-		final CommandCursor cursor,
-		final Charset charset,
-		final Charset stdinCharset,
-		final String hostname,
-		final Duration timeout,
-		final boolean stdinAlreadySupplied
+		final CommandCursor cursor, final Charset charset, final Charset stdinCharset, final String hostname,
+		final Duration timeout, final boolean stdinAlreadySupplied
 	) {
 		this.cursor = cursor;
 		this.hostname = hostname;
@@ -220,8 +216,7 @@ public final class RemoteProcess implements AutoCloseable {
 	 * @return the standard input writer
 	 */
 	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = "The writer IS the API: it feeds the process's standard input, exactly like "
-		+
-		"Process.getOutputStream()")
+		+ "Process.getOutputStream()")
 	public BufferedWriter stdin() {
 		return stdin;
 	}

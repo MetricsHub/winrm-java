@@ -76,8 +76,7 @@ class WsmanRetryTest {
 		server.close();
 	}
 
-	private LightWinRMService service(final int port, final int retries, final long retryDelayMillis)
-		throws Exception {
+	private LightWinRMService service(final int port, final int retries, final long retryDelayMillis) throws Exception {
 		return service(port, retries, retryDelayMillis, List.of(AuthenticationEnum.NTLM));
 	}
 
@@ -95,17 +94,8 @@ class WsmanRetryTest {
 			PASSWORD.toCharArray(),
 			null
 		);
-		return LightWinRMService.createInstance(
-			endpoint,
-			TIMEOUT,
-			null,
-			authentications,
-			null,
-			false,
-			0,
-			retries,
-			retryDelayMillis
-		);
+		return LightWinRMService
+			.createInstance(endpoint, TIMEOUT, null, authentications, null, false, 0, retries, retryDelayMillis);
 	}
 
 	/** A local port with no listener: connecting to it is refused immediately. */
@@ -160,8 +150,7 @@ class WsmanRetryTest {
 		enqueueEnumeration(server, instance("Win32_Service", "Name", "Spooler"));
 
 		try (
-			WinRMClient client = WinRMClient
-				.builder("127.0.0.1")
+			WinRMClient client = WinRMClient.builder("127.0.0.1")
 				.port(server.port())
 				.credentials(DOMAIN + "\\" + USER, PASSWORD.toCharArray())
 				.retries(1, Duration.ofMillis(50))
@@ -205,8 +194,7 @@ class WsmanRetryTest {
 				WinRMException.class,
 				() -> service.executeCommand("echo risky", null, StandardCharsets.UTF_8, TIMEOUT)
 			);
-			final long commandRequests = server
-				.decryptedRequests()
+			final long commandRequests = server.decryptedRequests()
 				.stream()
 				.filter(request -> request.contains(":CommandLine>"))
 				.count();
@@ -226,17 +214,8 @@ class WsmanRetryTest {
 		);
 		final long start = System.currentTimeMillis();
 		try (
-			LightWinRMService service = LightWinRMService.createInstance(
-				endpoint,
-				TIMEOUT,
-				null,
-				List.of(AuthenticationEnum.NTLM),
-				null,
-				false,
-				0,
-				3,
-				60_000L
-			)) {
+			LightWinRMService service = LightWinRMService
+				.createInstance(endpoint, TIMEOUT, null, List.of(AuthenticationEnum.NTLM), null, false, 0, 3, 60_000L)) {
 			final WinRMException e = assertThrows(
 				WinRMException.class,
 				() -> service.executeWql("SELECT Name FROM Win32_Service", TIMEOUT)
@@ -276,8 +255,7 @@ class WsmanRetryTest {
 	void aRetiredShellDeleteCancelledInARetryPauseIsSentByTheNextCommand() throws Exception {
 		// The first command's terminate Signal is lost in transit: SHELL-1 is retired (issue #196).
 		enqueueShellCreation(server);
-		server
-			.enqueue(200, envelope(commandResponse(COMMAND_ID)))
+		server.enqueue(200, envelope(commandResponse(COMMAND_ID)))
 			.enqueue(
 				200,
 				envelope(
@@ -336,31 +314,13 @@ class WsmanRetryTest {
 		);
 		assertThrows(
 			IllegalArgumentException.class,
-			() -> LightWinRMService.createInstance(
-				endpoint,
-				TIMEOUT,
-				null,
-				List.of(AuthenticationEnum.NTLM),
-				null,
-				false,
-				0,
-				-1,
-				0L
-			)
+			() -> LightWinRMService
+				.createInstance(endpoint, TIMEOUT, null, List.of(AuthenticationEnum.NTLM), null, false, 0, -1, 0L)
 		);
 		assertThrows(
 			IllegalArgumentException.class,
-			() -> LightWinRMService.createInstance(
-				endpoint,
-				TIMEOUT,
-				null,
-				List.of(AuthenticationEnum.NTLM),
-				null,
-				false,
-				0,
-				1,
-				-1L
-			)
+			() -> LightWinRMService
+				.createInstance(endpoint, TIMEOUT, null, List.of(AuthenticationEnum.NTLM), null, false, 0, 1, -1L)
 		);
 	}
 }

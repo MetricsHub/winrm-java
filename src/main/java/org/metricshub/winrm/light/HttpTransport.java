@@ -80,10 +80,7 @@ final class HttpTransport implements AutoCloseable {
 	}
 
 	HttpTransport(
-		final String host,
-		final int port,
-		final int timeoutMillis,
-		final SSLSocketFactory sslSocketFactory,
+		final String host, final int port, final int timeoutMillis, final SSLSocketFactory sslSocketFactory,
 		final boolean verifyHostname
 	) {
 		this.host = host;

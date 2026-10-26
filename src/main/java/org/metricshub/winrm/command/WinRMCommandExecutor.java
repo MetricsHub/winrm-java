@@ -98,19 +98,11 @@ public class WinRMCommandExecutor {
 			: localFileToCopyList.stream().filter(Utils::isNotBlank).collect(Collectors.toList());
 
 		try (
-			WindowsRemoteExecutor winRMService = WinRMExecutorFactory.createInstance(
-				winRMEndpoint,
-				timeout,
-				ticketCache,
-				authentications
-			)) {
+			WindowsRemoteExecutor winRMService = WinRMExecutorFactory
+				.createInstance(winRMEndpoint, timeout, ticketCache, authentications)) {
 			if (localFiles.isEmpty()) {
-				return winRMService.executeCommand(
-					command,
-					workingDirectory,
-					WindowsRemoteExecutor.SHELL_OUTPUT_CHARSET,
-					timeout
-				);
+				return winRMService
+					.executeCommand(command, workingDirectory, WindowsRemoteExecutor.SHELL_OUTPUT_CHARSET, timeout);
 			}
 
 			// Copy the specified list of files through the command shell, and update the command accordingly

@@ -250,9 +250,7 @@ public final class WinRmCli {
 	private static char[] readConsolePassword() throws CliUsageException {
 		final Console console = System.console();
 		if (console == null) {
-			throw new CliUsageException(
-				"no interactive console is available; use --password-file for non-interactive runs"
-			);
+			throw new CliUsageException("no interactive console is available; use --password-file for non-interactive runs");
 		}
 		return console.readPassword("Password: ");
 	}
@@ -272,14 +270,10 @@ public final class WinRmCli {
 				if (arguments.operation() == CliArguments.Operation.WQL) {
 					// Flush after every row so a downstream pipe sees each row as soon as the server
 					// hands it out, not when the enumeration ends.
-					remote.streamWql(
-						arguments.input(),
-						arguments.timeout(),
-						row -> {
-							JsonLinesWriter.write(row, standardOutput);
-							standardOutput.flush();
-						}
-					);
+					remote.streamWql(arguments.input(), arguments.timeout(), row -> {
+						JsonLinesWriter.write(row, standardOutput);
+						standardOutput.flush();
+					});
 					return 0;
 				}
 				if (arguments.operation() == CliArguments.Operation.SHELL) {
@@ -496,14 +490,8 @@ public final class WinRmCli {
 
 	/** The {@code ls} line of an entry: mode, size, last modification time, path. */
 	private static String line(final RemoteFileInfo info) {
-		return String.format(
-			Locale.ROOT,
-			"%s %12d %s %s",
-			mode(info),
-			info.size(),
-			timestamp(info.lastModified()),
-			info.path()
-		);
+		return String
+			.format(Locale.ROOT, "%s %12d %s %s", mode(info), info.size(), timestamp(info.lastModified()), info.path());
 	}
 
 	/**
@@ -519,8 +507,7 @@ public final class WinRmCli {
 					info.isReadOnly() ? 'r' : '-',
 					info.isHidden() ? 'h' : '-',
 					info.isSystem() ? 's' : '-',
-					info.isReparsePoint() ? 'l' : '-'
-			}
+					info.isReparsePoint() ? 'l' : '-' }
 		);
 	}
 
@@ -548,12 +535,9 @@ public final class WinRmCli {
 				// Object methods a well-behaved proxy must answer (equals/hashCode/toString).
 				return invokeObjectMethod(proxy, method, args);
 			};
-			final Object handler = Proxy.newProxyInstance(
-				handlerClass.getClassLoader(),
-				new Class<?>[]
-				{ handlerClass },
-				invocationHandler
-			);
+			final Object handler = Proxy
+				.newProxyInstance(handlerClass.getClassLoader(), new Class<?>[]
+				{ handlerClass }, invocationHandler);
 			final Object sigint = signalClass.getConstructor(String.class).newInstance("INT");
 			final Method handle = signalClass.getMethod("handle", signalClass, handlerClass);
 			final Object previous = handle.invoke(null, sigint, handler);
@@ -591,8 +575,7 @@ public final class WinRmCli {
 	 * {@link FluentRemoteOperations#shell}.
 	 */
 	static FluentRemoteOperations connect(final CliArguments arguments, final int consoleCodePage) {
-		final WinRMClient.Builder builder = WinRMClient
-			.builder(arguments.hostname())
+		final WinRMClient.Builder builder = WinRMClient.builder(arguments.hostname())
 			.port(arguments.port())
 			.credentials(arguments.username(), arguments.password())
 			.timeout(Duration.ofMillis(arguments.timeout()));
@@ -616,8 +599,7 @@ public final class WinRmCli {
 		final List<AuthenticationEnum> authentications = arguments.authentications();
 		if (authentications != null && !authentications.isEmpty()) {
 			builder.authentication(
-				authentications
-					.stream()
+				authentications.stream()
 					.map(
 						scheme -> scheme == AuthenticationEnum.KERBEROS
 							? AuthScheme.KERBEROS
@@ -649,23 +631,16 @@ public final class WinRmCli {
 				return EXIT_IO;
 			}
 			if (className.startsWith("javax.security.auth.login.")
-				||
-				className.startsWith("org.ietf.jgss.")
-				||
-				(message != null && message.toLowerCase(Locale.ROOT).contains("authentication error"))) {
+				|| className.startsWith("org.ietf.jgss.")
+				|| (message != null && message.toLowerCase(Locale.ROOT).contains("authentication error"))) {
 				return EXIT_AUTHENTICATION;
 			}
 			if (current instanceof ConnectException
-				||
-				current instanceof NoRouteToHostException
-				||
-				current instanceof UnknownHostException
-				||
-				current instanceof SocketException
-				||
-				current instanceof SSLException
-				||
-				current instanceof IOException) {
+				|| current instanceof NoRouteToHostException
+				|| current instanceof UnknownHostException
+				|| current instanceof SocketException
+				|| current instanceof SSLException
+				|| current instanceof IOException) {
 				return EXIT_CONNECTION;
 			}
 		}
@@ -684,10 +659,7 @@ public final class WinRmCli {
 		standardError.println("winrm-java: " + message);
 	}
 
-	private static void setKerberosConfiguration(
-		final CliArguments arguments,
-		final PrintStream standardError
-	) {
+	private static void setKerberosConfiguration(final CliArguments arguments, final PrintStream standardError) {
 		if (arguments.kerberosKdc() == null) {
 			return;
 		}
@@ -696,10 +668,7 @@ public final class WinRmCli {
 		if (arguments.kerberosRealmInferred()) {
 			diagnostic(
 				standardError,
-				"using Kerberos realm " +
-					arguments.kerberosRealm() +
-					" inferred from KDC " +
-					arguments.kerberosKdc()
+				"using Kerberos realm " + arguments.kerberosRealm() + " inferred from KDC " + arguments.kerberosKdc()
 			);
 		}
 	}
@@ -719,54 +688,45 @@ public final class WinRmCli {
 	}
 
 	private static String help() {
-		return "Usage:\n" +
-			"  winrm-java [options] wql <query>\n" +
-			"  winrm-java [options] command|cmd|exec|run <command line...>\n" +
-			"  winrm-java [options] shell\n" +
-			"  winrm-java [options] ls <directory> [ls options]\n" +
-			"  winrm-java [options] stat <path> [--json]\n" +
-			"  winrm-java [options] cat <file> [cat options]\n" +
-			"  winrm-java [options] get <file> [<local path>]\n" +
-			"\n" +
-			"Options (before the subcommand):\n" +
-			"  -h, --hostname <host>       Target hostname or IP address (required)\n" +
-			"  -u, --username <user>       User name, optionally DOMAIN\\user (required)\n" +
-			"  -p, --password <password>   Password (visible to local processes; avoid in automation)\n" +
-			"  -pf, --password-file <file> Read a UTF-8 password from a file (preferred for automation)\n" +
-			"  -P, --port <port>           Target port (default: HTTP 5985, HTTPS 5986)\n" +
-			"  -t, --timeout <ms>          Operation timeout in milliseconds (default: 60000)\n" +
-			"  -d, --directory <path>      Working directory of the remote command or shell\n" +
-			"      --env <NAME=VALUE>      Environment variable of the remote command or shell (repeatable)\n" +
-			"      --profile               Load the user profile in the remote command or shell\n" +
-			"  -i, --stdin                 Always forward the local standard input (automatic when redirected)\n" +
-			"      --https                 Use HTTPS\n" +
-			"      --https-permissive      Trust any HTTPS certificate and hostname (insecure)\n" +
-			"      --ntlm                  Use NTLM authentication (default)\n" +
-			"      --kerberos              Use Kerberos authentication (requires HTTPS)\n" +
-			"      --basic                 Use HTTP Basic authentication (use HTTPS to protect the credential)\n" +
-			"      --kerberos-kdc <host>   Set the Kerberos KDC; infer realm from its DNS suffix\n" +
-			"      --kerberos-realm <realm> Override the realm inferred from --kerberos-kdc\n" +
-			"      --allow-delegate        Let the remote side use your Kerberos credentials (second hop)\n" +
-			"      --help                  Show this help\n" +
-			"      --version               Show the project version\n" +
-			"\n" +
-			"File options (after the subcommand):\n" +
-			"      --glob <pattern>        ls: only names matching a wildcard pattern (* and ?)\n" +
-			"      --recursive             ls: list the whole tree\n" +
-			"      --depth <n>             ls: list the tree down to depth n (1: the directory's own entries)\n" +
-			"      --files-only            ls: list files only\n" +
-			"      --directories-only      ls: list directories only\n" +
-			"      --modified-after <date> ls: only entries modified after an ISO-8601 date or date-time\n" +
-			"      --min-size <bytes>      ls: only files of at least this size\n" +
-			"      --json                  ls, stat: print JSON Lines instead of text\n" +
-			"      --offset <bytes>        cat: start at this byte (negative: from the end)\n" +
-			"      --length <bytes>        cat: read at most this many bytes\n" +
-			"      --charset <name>        cat: print the text decoded with this charset, not the raw bytes\n" +
-			"\n" +
-			"If neither password option is given, the password is requested from the interactive console.\n" +
-			"\n" +
-			"Full manual - streaming behavior, password files, Kerberos, exit codes:\n" +
-			"  https://metricshub.org/winrm-java/cli.html\n";
+		return "Usage:\n" + "  winrm-java [options] wql <query>\n"
+			+ "  winrm-java [options] command|cmd|exec|run <command line...>\n" + "  winrm-java [options] shell\n"
+			+ "  winrm-java [options] ls <directory> [ls options]\n" + "  winrm-java [options] stat <path> [--json]\n"
+			+ "  winrm-java [options] cat <file> [cat options]\n" + "  winrm-java [options] get <file> [<local path>]\n"
+			+ "\n" + "Options (before the subcommand):\n"
+			+ "  -h, --hostname <host>       Target hostname or IP address (required)\n"
+			+ "  -u, --username <user>       User name, optionally DOMAIN\\user (required)\n"
+			+ "  -p, --password <password>   Password (visible to local processes; avoid in automation)\n"
+			+ "  -pf, --password-file <file> Read a UTF-8 password from a file (preferred for automation)\n"
+			+ "  -P, --port <port>           Target port (default: HTTP 5985, HTTPS 5986)\n"
+			+ "  -t, --timeout <ms>          Operation timeout in milliseconds (default: 60000)\n"
+			+ "  -d, --directory <path>      Working directory of the remote command or shell\n"
+			+ "      --env <NAME=VALUE>      Environment variable of the remote command or shell (repeatable)\n"
+			+ "      --profile               Load the user profile in the remote command or shell\n"
+			+ "  -i, --stdin                 Always forward the local standard input (automatic when redirected)\n"
+			+ "      --https                 Use HTTPS\n"
+			+ "      --https-permissive      Trust any HTTPS certificate and hostname (insecure)\n"
+			+ "      --ntlm                  Use NTLM authentication (default)\n"
+			+ "      --kerberos              Use Kerberos authentication (requires HTTPS)\n"
+			+ "      --basic                 Use HTTP Basic authentication (use HTTPS to protect the credential)\n"
+			+ "      --kerberos-kdc <host>   Set the Kerberos KDC; infer realm from its DNS suffix\n"
+			+ "      --kerberos-realm <realm> Override the realm inferred from --kerberos-kdc\n"
+			+ "      --allow-delegate        Let the remote side use your Kerberos credentials (second hop)\n"
+			+ "      --help                  Show this help\n" + "      --version               Show the project version\n"
+			+ "\n" + "File options (after the subcommand):\n"
+			+ "      --glob <pattern>        ls: only names matching a wildcard pattern (* and ?)\n"
+			+ "      --recursive             ls: list the whole tree\n"
+			+ "      --depth <n>             ls: list the tree down to depth n (1: the directory's own entries)\n"
+			+ "      --files-only            ls: list files only\n"
+			+ "      --directories-only      ls: list directories only\n"
+			+ "      --modified-after <date> ls: only entries modified after an ISO-8601 date or date-time\n"
+			+ "      --min-size <bytes>      ls: only files of at least this size\n"
+			+ "      --json                  ls, stat: print JSON Lines instead of text\n"
+			+ "      --offset <bytes>        cat: start at this byte (negative: from the end)\n"
+			+ "      --length <bytes>        cat: read at most this many bytes\n"
+			+ "      --charset <name>        cat: print the text decoded with this charset, not the raw bytes\n" + "\n"
+			+ "If neither password option is given, the password is requested from the interactive console.\n" + "\n"
+			+ "Full manual - streaming behavior, password files, Kerberos, exit codes:\n"
+			+ "  https://metricshub.org/winrm-java/cli.html\n";
 	}
 
 	@FunctionalInterface
@@ -885,8 +845,7 @@ public final class WinRmCli {
 			final Consumer<String> stdoutConsumer,
 			final Consumer<String> stderrConsumer
 		) {
-			final CommandRequest request = client
-				.command(command)
+			final CommandRequest request = client.command(command)
 				.timeout(Duration.ofMillis(timeout))
 				.onStdout(stdoutConsumer)
 				.onStderr(stderrConsumer);
@@ -929,8 +888,7 @@ public final class WinRmCli {
 				// cmd.exe /Q: no command echo — the local terminal already shows what the user
 				// types. Pipe-mode stdin (stdin()) makes the local end-of-input a real EOF, which
 				// cmd.exe exits on.
-				final CommandRequest shellRequest = shellClient
-					.command(SHELL_COMMAND)
+				final CommandRequest shellRequest = shellClient.command(SHELL_COMMAND)
 					.timeout(Duration.ofMillis(timeout))
 					.charset(encoding.charset())
 					.stdin();
@@ -943,15 +901,8 @@ public final class WinRmCli {
 					environment.forEach(shellRequest::environment);
 				}
 				try (RemoteProcess process = shellRequest.start()) {
-					return InteractiveShell.run(
-						process,
-						localInput,
-						out,
-						err,
-						interruptRequested,
-						InteractiveShell.DEFAULT_POLL_MILLIS,
-						null
-					);
+					return InteractiveShell
+						.run(process, localInput, out, err, interruptRequested, InteractiveShell.DEFAULT_POLL_MILLIS, null);
 				}
 			}
 		}
@@ -1000,8 +951,7 @@ public final class WinRmCli {
 						"windows-" + reportedCodePage,
 						"IBM" + reportedCodePage,
 						"x-IBM" + reportedCodePage,
-						"MS" + reportedCodePage
-				}) {
+						"MS" + reportedCodePage }) {
 					try {
 						return new SessionEncoding(reportedCodePage, Charset.forName(name));
 					} catch (final RuntimeException ignored) {
@@ -1023,8 +973,7 @@ public final class WinRmCli {
 			try {
 				final List<WqlRow> rows;
 				try (
-					Stream<WqlRow> stream = client
-						.wql("SELECT CodeSet FROM Win32_OperatingSystem")
+					Stream<WqlRow> stream = client.wql("SELECT CodeSet FROM Win32_OperatingSystem")
 						.timeout(Duration.ofMillis(timeout))
 						.stream()) {
 					rows = stream.collect(java.util.stream.Collectors.toList());

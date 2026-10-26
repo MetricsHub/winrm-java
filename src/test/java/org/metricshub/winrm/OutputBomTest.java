@@ -71,8 +71,7 @@ class OutputBomTest {
 	}
 
 	private WinRMClient client() {
-		return WinRMClient
-			.builder("127.0.0.1")
+		return WinRMClient.builder("127.0.0.1")
 			.port(server.port())
 			.credentials(DOMAIN + "\\" + USER, PASSWORD.toCharArray())
 			.timeout(Duration.ofSeconds(10))
@@ -98,8 +97,7 @@ class OutputBomTest {
 	private void enqueueSplitBomExchange() {
 		final byte[] stdout = concat(BOM, utf8("x\r\n"), BOM, utf8("y\r\n"));
 		enqueueShellCreation(server);
-		server
-			.enqueue(200, envelope(commandResponse(COMMAND_ID)))
+		server.enqueue(200, envelope(commandResponse(COMMAND_ID)))
 			.enqueue(200, envelope(receiveResponse(stream("stdout", COMMAND_ID, Arrays.copyOfRange(stdout, 0, 2)), null)))
 			.enqueue(
 				200,

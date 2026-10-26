@@ -40,10 +40,7 @@ public class WindowsRemoteCommandResult {
 	 * @param statusCode The command return status code
 	 */
 	public WindowsRemoteCommandResult(
-		final String stdout,
-		final String stderr,
-		final float executionTime,
-		final int statusCode
+		final String stdout, final String stderr, final float executionTime, final int statusCode
 	) {
 		this.stdout = stdout;
 		this.stderr = stderr;
@@ -89,8 +86,7 @@ public class WindowsRemoteCommandResult {
 
 	@Override
 	public String toString() {
-		return new StringBuilder()
-			.append("WindowsRemoteCommandResult:\nstdout:\n")
+		return new StringBuilder().append("WindowsRemoteCommandResult:\nstdout:\n")
 			.append(stdout)
 			.append("\nstderr:\n")
 			.append(stderr)

@@ -474,9 +474,8 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			: authentications;
 		if (allowDelegation && !requested.contains(AuthenticationEnum.KERBEROS)) {
 			throw new WinRMException(
-				"Credential delegation requires Kerberos authentication (requested: " +
-					requested +
-					"): NTLM and Basic credentials cannot be delegated."
+				"Credential delegation requires Kerberos authentication (requested: " + requested
+					+ "): NTLM and Basic credentials cannot be delegated."
 			);
 		}
 
@@ -493,16 +492,14 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 			} else if (auth == AuthenticationEnum.KERBEROS) {
 				if (https) {
 					// The SPN is HTTP/<hostname>, so the caller must connect by the FQDN the KDC knows.
-					schemes.add(
-						new KerberosAuthScheme(winRMEndpoint.getHostname(), username, password, ticketCache, allowDelegation)
-					);
+					schemes
+						.add(new KerberosAuthScheme(winRMEndpoint.getHostname(), username, password, ticketCache, allowDelegation));
 				} else {
 					// Fail closed: Kerberos cannot be protected over plain HTTP, so reject it for any
 					// list rather than silently downgrading to the remaining schemes.
 					throw new WinRMException(
-						"Kerberos over WinRM requires HTTPS (endpoint was " +
-							winRMEndpoint.getEndpoint() +
-							"): there is no Kerberos message encryption over plain HTTP. Use https()."
+						"Kerberos over WinRM requires HTTPS (endpoint was " + winRMEndpoint.getEndpoint()
+							+ "): there is no Kerberos message encryption over plain HTTP. Use https()."
 					);
 				}
 			} else if (auth == AuthenticationEnum.BASIC) {
@@ -517,9 +514,7 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 				schemes.add(new BasicAuthScheme(basicAccount, password));
 			} else {
 				throw new WinRMException(
-					"The light WinRM backend supports only NTLM, Kerberos, and Basic (requested: " +
-						requested +
-						")."
+					"The light WinRM backend supports only NTLM, Kerberos, and Basic (requested: " + requested + ")."
 				);
 			}
 		}
@@ -545,17 +540,14 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 
 		// Enforce the caller's timeout as a wall-clock deadline (throwing TimeoutException), matching
 		// the CXF WinRMService and bounding the WSMan Pull loop.
-		return executeWithTimeout(
-			() -> {
-				final List<Map<String, String>> rows = client.wql(namespace, wqlQuery, timeout, maxElements, pullTimeout);
-				final List<Map<String, Object>> result = new ArrayList<>(rows.size());
-				for (final Map<String, String> row : rows) {
-					result.add(new LinkedHashMap<>(row));
-				}
-				return result;
-			},
-			timeout
-		);
+		return executeWithTimeout(() -> {
+			final List<Map<String, String>> rows = client.wql(namespace, wqlQuery, timeout, maxElements, pullTimeout);
+			final List<Map<String, Object>> result = new ArrayList<>(rows.size());
+			for (final Map<String, String> row : rows) {
+				result.add(new LinkedHashMap<>(row));
+			}
+			return result;
+		}, timeout);
 	}
 
 	@Override
@@ -757,21 +749,13 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 
 		// Enforce the caller's timeout as a wall-clock deadline (throwing TimeoutException), matching
 		// the CXF WinRMService and bounding the WSMan Receive loop.
-		return executeWithTimeout(
-			() -> {
-				final long start = Utils.getCurrentTimeMillis();
-				final WsmanClient.CommandOutput output = client.executeCommand(
-					command,
-					workingDirectory,
-					environment,
-					charset,
-					timeout
-				);
-				final float executionTime = (Utils.getCurrentTimeMillis() - start) / 1000.0f;
-				return new WindowsRemoteCommandResult(output.stdout, output.stderr, executionTime, output.exitCode);
-			},
-			timeout
-		);
+		return executeWithTimeout(() -> {
+			final long start = Utils.getCurrentTimeMillis();
+			final WsmanClient.CommandOutput output = client
+				.executeCommand(command, workingDirectory, environment, charset, timeout);
+			final float executionTime = (Utils.getCurrentTimeMillis() - start) / 1000.0f;
+			return new WindowsRemoteCommandResult(output.stdout, output.stderr, executionTime, output.exitCode);
+		}, timeout);
 	}
 
 	/**

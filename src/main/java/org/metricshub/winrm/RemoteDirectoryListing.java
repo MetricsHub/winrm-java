@@ -39,7 +39,8 @@ import org.metricshub.winrm.exceptions.WinRMTimeoutException;
  * filters, then collect the result with {@link #execute()} or stream it with {@link #stream()}.
  *
  * <pre>{@code
- * RemoteFileList logs = client.file("C:\\inetpub\\logs").list()
+ * RemoteFileList logs = client.file("C:\\inetpub\\logs")
+ * 	.list()
  * 	.glob("*.log")
  * 	.recursive()
  * 	.filesOnly()
@@ -274,16 +275,8 @@ public final class RemoteDirectoryListing {
 	}
 
 	private Stream<RemoteFileInfo> stream(final Consumer<String> inaccessible) {
-		final String script = RemoteFiles.listScript(
-			path,
-			glob,
-			type,
-			minSize,
-			maxSize,
-			after,
-			before,
-			recursive ? maxDepth : 1
-		);
+		final String script = RemoteFiles
+			.listScript(path, glob, type, minSize, maxSize, after, before, recursive ? maxDepth : 1);
 		final RemoteProcess process = RemoteFiles.start(client, path, script, timeout);
 		final BufferedReader stdout = process.stdout();
 		final String hostname = client.hostname();

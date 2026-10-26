@@ -57,16 +57,11 @@ public class WinRMEndpoint {
 	@SuppressFBWarnings(value = {
 			"EI_EXPOSE_REP2",
 			"CT_CONSTRUCTOR_THROW" }, justification = "The password char[] is deliberately shared, not copied, so the caller can wipe "
-				+
-				"the single authoritative copy of the secret; and the constructor intentionally validates its " +
-				"arguments — no partially-initialized instance escapes since nothing publishes 'this'")
+				+ "the single authoritative copy of the secret; and the constructor intentionally validates its "
+				+ "arguments — no partially-initialized instance escapes since nothing publishes 'this'")
 	public WinRMEndpoint(
-		final WinRMHttpProtocolEnum protocol,
-		final String hostname,
-		final Integer port,
-		final String username,
-		final char[] password,
-		final String namespace
+		final WinRMHttpProtocolEnum protocol, final String hostname, final Integer port, final String username,
+		final char[] password, final String namespace
 	) {
 		Utils.checkNonNull(hostname, "hostname");
 		Utils.checkNonNull(username, "username");
@@ -128,8 +123,7 @@ public class WinRMEndpoint {
 
 	/** Get the password */
 	@SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = "The password char[] is deliberately handed out by reference so there is a "
-		+
-		"single wipeable copy of the secret; cloning it here would scatter copies of the password in memory")
+		+ "single wipeable copy of the secret; cloning it here would scatter copies of the password in memory")
 	public char[] getPassword() {
 		return password;
 	}
@@ -237,18 +231,14 @@ public class WinRMEndpoint {
 		}
 		final WinRMEndpoint other = (WinRMEndpoint) obj;
 		return Objects.equals(endpoint, other.endpoint)
-			&&
-			Objects.equals(namespace, other.namespace)
-			&&
-			Arrays.equals(password, other.password)
-			&&
-			Objects.equals(rawUsername, other.rawUsername);
+			&& Objects.equals(namespace, other.namespace)
+			&& Arrays.equals(password, other.password)
+			&& Objects.equals(rawUsername, other.rawUsername);
 	}
 
 	@Override
 	public String toString() {
-		return new StringBuilder()
-			.append("WinRMEndpoint [")
+		return new StringBuilder().append("WinRMEndpoint [")
 			.append("endpoint=")
 			.append(endpoint)
 			.append(", domain=")

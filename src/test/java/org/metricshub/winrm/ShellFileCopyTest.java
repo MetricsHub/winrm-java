@@ -99,18 +99,14 @@ class ShellFileCopyTest {
 
 	/** Reassemble the file bytes from the base64 payloads echoed by the recorded upload legs. */
 	private static byte[] echoedContent(final List<String> commands) {
-		final String base64 = commands
-			.stream()
-			.filter(command -> command.contains(" echo "))
-			.flatMap(command -> {
-				final Matcher matcher = ECHO_PAYLOAD.matcher(command);
-				final StringBuilder payload = new StringBuilder();
-				while (matcher.find()) {
-					payload.append(matcher.group(1));
-				}
-				return payload.length() > 0 ? java.util.stream.Stream.of(payload.toString()) : java.util.stream.Stream.empty();
-			})
-			.collect(Collectors.joining());
+		final String base64 = commands.stream().filter(command -> command.contains(" echo ")).flatMap(command -> {
+			final Matcher matcher = ECHO_PAYLOAD.matcher(command);
+			final StringBuilder payload = new StringBuilder();
+			while (matcher.find()) {
+				payload.append(matcher.group(1));
+			}
+			return payload.length() > 0 ? java.util.stream.Stream.of(payload.toString()) : java.util.stream.Stream.empty();
+		}).collect(Collectors.joining());
 
 		return Base64.getDecoder().decode(base64);
 	}
@@ -121,8 +117,7 @@ class ShellFileCopyTest {
 		final Path localFile = tempDir.resolve("My Script.vbs");
 		Files.write(localFile, content);
 
-		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory()
-			.expectCommand(" echo ", SUCCESS)
+		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory().expectCommand(" echo ", SUCCESS)
 			.expectCommand("certutil -f -decode", hashOutput("SHA256", sha256Hex(content)))
 			.expectCommand("MOVE /Y", hashOutput("SHA256", sha256Hex(content)))
 			.expectCommand("certutil -hashfile", FAILURE);
@@ -144,8 +139,7 @@ class ShellFileCopyTest {
 		assertArrayEquals(content, echoedContent(executor.getExecutedCommands()));
 
 		// The decode leg produces the operation-unique staging file and removes the base64 sidecar
-		final String decodeCommand = executor
-			.getExecutedCommands()
+		final String decodeCommand = executor.getExecutedCommands()
 			.stream()
 			.filter(command -> command.contains("certutil -f -decode"))
 			.findFirst()
@@ -157,15 +151,13 @@ class ShellFileCopyTest {
 
 		// The verified staging file is then published as the content-addressed destination
 		assertTrue(
-			executor
-				.getExecutedCommands()
+			executor.getExecutedCommands()
 				.stream()
 				.anyMatch(command -> command.contains("MOVE /Y") && command.contains("\"" + remoteFile + "\""))
 		);
 
 		// The age-based purge rides the directory-creation leg (exit code stays MKDIR's)
-		final String directoryCommand = executor
-			.getExecutedCommands()
+		final String directoryCommand = executor.getExecutedCommands()
 			.stream()
 			.filter(command -> command.contains("MKDIR"))
 			.findFirst()
@@ -184,12 +176,8 @@ class ShellFileCopyTest {
 		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory()
 			.expectCommand("certutil -hashfile", hashOutput("SHA256", sha256Hex(content)));
 
-		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
-			executor,
-			"CMD /C " + localFile,
-			List.of(localFile.toString()),
-			TIMEOUT
-		);
+		final String updatedCommand = ShellFileCopy
+			.copyLocalFilesToRemote(executor, "CMD /C " + localFile, List.of(localFile.toString()), TIMEOUT);
 
 		assertEquals(
 			"CMD /C " + expectedRemoteDirectory() + "\\" + ShellFileCopy.contentAddressedName("script.bat", content),
@@ -205,18 +193,13 @@ class ShellFileCopyTest {
 		final Path localFile = tempDir.resolve("legacy.vbs");
 		Files.write(localFile, content);
 
-		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory()
-			.expectCommand(" echo ", SUCCESS)
+		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory().expectCommand(" echo ", SUCCESS)
 			.expectCommand("certutil -f -decode", hashOutput("SHA1", sha1Hex(content)))
 			.expectCommand("MOVE /Y", hashOutput("SHA1", sha1Hex(content)))
 			.expectCommand("certutil -hashfile", FAILURE);
 
-		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
-			executor,
-			localFile.toString(),
-			List.of(localFile.toString()),
-			TIMEOUT
-		);
+		final String updatedCommand = ShellFileCopy
+			.copyLocalFilesToRemote(executor, localFile.toString(), List.of(localFile.toString()), TIMEOUT);
 
 		assertEquals(
 			expectedRemoteDirectory() + "\\" + ShellFileCopy.contentAddressedName("legacy.vbs", content),
@@ -231,8 +214,7 @@ class ShellFileCopyTest {
 		final Path localFile = tempDir.resolve("corrupted.txt");
 		Files.write(localFile, content);
 
-		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory()
-			.expectCommand(" echo ", SUCCESS)
+		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory().expectCommand(" echo ", SUCCESS)
 			.expectCommand("certutil -f -decode", hashOutput("SHA256", sha256Hex("tampered".getBytes(UTF_8))))
 			.expectCommand("certutil -hashfile", FAILURE)
 			.expectCommand("DEL /F /Q", SUCCESS);
@@ -247,8 +229,7 @@ class ShellFileCopyTest {
 		final String remoteFile = expectedRemoteDirectory() + "\\"
 			+ ShellFileCopy.contentAddressedName("corrupted.txt", content);
 		assertTrue(
-			executor
-				.getExecutedCommands()
+			executor.getExecutedCommands()
 				.stream()
 				.anyMatch(command -> command.startsWith("DEL /F /Q") && command.contains(remoteFile))
 		);
@@ -262,18 +243,13 @@ class ShellFileCopyTest {
 
 		// The destination pre-exists with a DIFFERENT digest (e.g. a cached copy corrupted in
 		// place): the transfer must replace it, never trust it.
-		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory()
-			.expectCommand(" echo ", SUCCESS)
+		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory().expectCommand(" echo ", SUCCESS)
 			.expectCommand("certutil -f -decode", hashOutput("SHA256", sha256Hex(content)))
 			.expectCommand("MOVE /Y", hashOutput("SHA256", sha256Hex(content)))
 			.expectCommand("certutil -hashfile", hashOutput("SHA256", sha256Hex("corrupted".getBytes(UTF_8))));
 
-		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
-			executor,
-			localFile.toString(),
-			List.of(localFile.toString()),
-			TIMEOUT
-		);
+		final String updatedCommand = ShellFileCopy
+			.copyLocalFilesToRemote(executor, localFile.toString(), List.of(localFile.toString()), TIMEOUT);
 
 		assertEquals(
 			expectedRemoteDirectory() + "\\" + ShellFileCopy.contentAddressedName("repair.vbs", content),
@@ -282,8 +258,7 @@ class ShellFileCopyTest {
 
 		// The file was re-uploaded and force-published: a bare MOVE, not guarded by IF EXIST
 		assertArrayEquals(content, echoedContent(executor.getExecutedCommands()));
-		final String publishCommand = executor
-			.getExecutedCommands()
+		final String publishCommand = executor.getExecutedCommands()
 			.stream()
 			.filter(command -> command.contains("MOVE /Y"))
 			.findFirst()
@@ -299,8 +274,7 @@ class ShellFileCopyTest {
 
 		// Staging verifies fine, but the published destination reports a different digest:
 		// the operation must fail rather than let the caller execute unproven bytes.
-		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory()
-			.expectCommand(" echo ", SUCCESS)
+		final ScriptedWindowsRemoteExecutor executor = executorWithTempDirectory().expectCommand(" echo ", SUCCESS)
 			.expectCommand("certutil -f -decode", hashOutput("SHA256", sha256Hex(content)))
 			.expectCommand("MOVE /Y", hashOutput("SHA256", sha256Hex("something else".getBytes(UTF_8))))
 			.expectCommand("certutil -hashfile", FAILURE)
@@ -324,12 +298,8 @@ class ShellFileCopyTest {
 			.expectCommand("TYPE NUL", hashOutput("SHA256", sha256Hex(content)))
 			.expectCommand("certutil -hashfile", FAILURE);
 
-		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
-			executor,
-			localFile.toString(),
-			List.of(localFile.toString()),
-			TIMEOUT
-		);
+		final String updatedCommand = ShellFileCopy
+			.copyLocalFilesToRemote(executor, localFile.toString(), List.of(localFile.toString()), TIMEOUT);
 
 		assertEquals(
 			expectedRemoteDirectory() + "\\" + ShellFileCopy.contentAddressedName("empty.txt", content),
@@ -402,13 +372,8 @@ class ShellFileCopyTest {
 			}
 		};
 
-		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
-			recording,
-			localFile.toString(),
-			List.of(localFile.toString()),
-			environment,
-			TIMEOUT
-		);
+		final String updatedCommand = ShellFileCopy
+			.copyLocalFilesToRemote(recording, localFile.toString(), List.of(localFile.toString()), environment, TIMEOUT);
 
 		assertEquals(
 			expectedRemoteDirectory() + "\\" + ShellFileCopy.contentAddressedName("env.bat", content),
@@ -540,8 +505,7 @@ class ShellFileCopyTest {
 
 		// Same name, different content: different remote path (no cross-client overwrite)
 		assertFalse(
-			ShellFileCopy
-				.contentAddressedName("script.vbs", content)
+			ShellFileCopy.contentAddressedName("script.vbs", content)
 				.equals(ShellFileCopy.contentAddressedName("script.vbs", "abd".getBytes(UTF_8)))
 		);
 	}
@@ -630,12 +594,8 @@ class ShellFileCopyTest {
 			}
 		};
 
-		final String updatedCommand = ShellFileCopy.copyLocalFilesToRemote(
-			flaky,
-			localFile.toString(),
-			List.of(localFile.toString()),
-			TIMEOUT
-		);
+		final String updatedCommand = ShellFileCopy
+			.copyLocalFilesToRemote(flaky, localFile.toString(), List.of(localFile.toString()), TIMEOUT);
 
 		assertEquals(
 			expectedRemoteDirectory() + "\\" + ShellFileCopy.contentAddressedName("quota.bat", content),
@@ -646,8 +606,7 @@ class ShellFileCopyTest {
 	@Test
 	void parsesCertutilDigestOutputs() {
 		final String modern = "SHA256 hash of file C:\\x:\r\nAB12cd34AB12cd34AB12cd34AB12cd34AB12cd34AB12cd34AB12cd34AB12cd34\r\n"
-			+
-			"CertUtil: -hashfile command completed successfully.\r\n";
+			+ "CertUtil: -hashfile command completed successfully.\r\n";
 		assertEquals(
 			Optional.of("ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34"),
 			ShellFileCopy.parseCertutilDigest(modern, "SHA256")
@@ -655,8 +614,7 @@ class ShellFileCopyTest {
 
 		// Older certutil versions separate every byte with a space
 		final String legacy = "SHA1 hash of file C:\\x:\r\nab 12 cd 34 ab 12 cd 34 ab 12 cd 34 ab 12 cd 34 ab 12 cd 34\r\n"
-			+
-			"CertUtil: -hashfile command completed successfully.\r\n";
+			+ "CertUtil: -hashfile command completed successfully.\r\n";
 		assertEquals(
 			Optional.of("ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34"),
 			ShellFileCopy.parseCertutilDigest(legacy, "SHA1")
@@ -678,8 +636,7 @@ class ShellFileCopyTest {
 		final Path localFile = tempDir.resolve("collect.ps1");
 		Files.write(localFile, content);
 
-		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor()
-			.expectCommand("MKDIR", SUCCESS)
+		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor().expectCommand("MKDIR", SUCCESS)
 			.expectCommand(" echo ", SUCCESS)
 			.expectCommand("certutil -f -decode", hashOutput("SHA256", sha256Hex(content)))
 			.expectCommand("MOVE /Y", hashOutput("SHA256", sha256Hex(content)))
@@ -708,8 +665,7 @@ class ShellFileCopyTest {
 		final Path localFile = tempDir.resolve("same.ps1");
 		Files.write(localFile, content);
 
-		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor()
-			.expectCommand("MKDIR", SUCCESS)
+		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor().expectCommand("MKDIR", SUCCESS)
 			.expectCommand("certutil -hashfile", hashOutput("SHA256", sha256Hex(content)));
 
 		ShellFileCopy.copyLocalFileToRemoteFile(executor, localFile, "C:\\Deploy\\same.ps1", TIMEOUT);
@@ -725,8 +681,7 @@ class ShellFileCopyTest {
 		final Path localFile = tempDir.resolve("unc.ps1");
 		Files.write(localFile, content);
 
-		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor()
-			.expectCommand("MKDIR", SUCCESS)
+		final ScriptedWindowsRemoteExecutor executor = new ScriptedWindowsRemoteExecutor().expectCommand("MKDIR", SUCCESS)
 			.expectCommand("certutil -hashfile", hashOutput("SHA256", sha256Hex(content)));
 
 		ShellFileCopy.copyLocalFileToRemoteFile(executor, localFile, "\\\\server\\share\\deploy\\unc.ps1", TIMEOUT);

@@ -22,12 +22,8 @@ class WinRMExecutorFactoryTest {
 	@Test
 	void createsLightExecutorOverHttp() throws Exception {
 		try (
-			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
-				endpoint(WinRMHttpProtocolEnum.HTTP),
-				30000L,
-				null,
-				List.of(AuthenticationEnum.NTLM)
-			)) {
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory
+				.createInstance(endpoint(WinRMHttpProtocolEnum.HTTP), 30000L, null, List.of(AuthenticationEnum.NTLM))) {
 			assertInstanceOf(LightWinRMService.class, executor);
 			assertEquals("testhost", executor.getHostname());
 		}
@@ -38,12 +34,8 @@ class WinRMExecutorFactoryTest {
 		// The client supports HTTPS (TLS + plaintext SOAP). Building it does not open a connection
 		// (or a TLS handshake), so this stays offline.
 		try (
-			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
-				endpoint(WinRMHttpProtocolEnum.HTTPS),
-				30000L,
-				null,
-				List.of(AuthenticationEnum.NTLM)
-			)) {
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory
+				.createInstance(endpoint(WinRMHttpProtocolEnum.HTTPS), 30000L, null, List.of(AuthenticationEnum.NTLM))) {
 			assertInstanceOf(LightWinRMService.class, executor);
 		}
 	}
@@ -54,12 +46,8 @@ class WinRMExecutorFactoryTest {
 		// other scheme to fall back to, so a Kerberos-only request over HTTP is rejected.
 		assertThrows(
 			WinRMException.class,
-			() -> WinRMExecutorFactory.createInstance(
-				endpoint(WinRMHttpProtocolEnum.HTTP),
-				30000L,
-				null,
-				List.of(AuthenticationEnum.KERBEROS)
-			)
+			() -> WinRMExecutorFactory
+				.createInstance(endpoint(WinRMHttpProtocolEnum.HTTP), 30000L, null, List.of(AuthenticationEnum.KERBEROS))
 		);
 	}
 
@@ -84,12 +72,8 @@ class WinRMExecutorFactoryTest {
 		// Kerberos is supported over HTTPS; the login/handshake happen on the first operation, so
 		// constructing the executor stays offline.
 		try (
-			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
-				endpoint(WinRMHttpProtocolEnum.HTTPS),
-				30000L,
-				null,
-				List.of(AuthenticationEnum.KERBEROS)
-			)) {
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory
+				.createInstance(endpoint(WinRMHttpProtocolEnum.HTTPS), 30000L, null, List.of(AuthenticationEnum.KERBEROS))) {
 			assertInstanceOf(LightWinRMService.class, executor);
 		}
 	}
@@ -99,21 +83,13 @@ class WinRMExecutorFactoryTest {
 		// Basic is stateless and rides the Authorization header, so it is supported over both
 		// transports. Constructing the executor opens no connection, so this stays offline.
 		try (
-			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
-				endpoint(WinRMHttpProtocolEnum.HTTP),
-				30000L,
-				null,
-				List.of(AuthenticationEnum.BASIC)
-			)) {
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory
+				.createInstance(endpoint(WinRMHttpProtocolEnum.HTTP), 30000L, null, List.of(AuthenticationEnum.BASIC))) {
 			assertInstanceOf(LightWinRMService.class, executor);
 		}
 		try (
-			final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
-				endpoint(WinRMHttpProtocolEnum.HTTPS),
-				30000L,
-				null,
-				List.of(AuthenticationEnum.BASIC)
-			)) {
+			final WindowsRemoteExecutor executor = WinRMExecutorFactory
+				.createInstance(endpoint(WinRMHttpProtocolEnum.HTTPS), 30000L, null, List.of(AuthenticationEnum.BASIC))) {
 			assertInstanceOf(LightWinRMService.class, executor);
 		}
 	}
@@ -137,12 +113,8 @@ class WinRMExecutorFactoryTest {
 	void closedLightExecutorRejectsOperations() throws Exception {
 		// close() must release the executor for good: a later operation is rejected, not silently served
 		// by a fresh reconnect/handshake.
-		final WindowsRemoteExecutor executor = WinRMExecutorFactory.createInstance(
-			endpoint(WinRMHttpProtocolEnum.HTTP),
-			30000L,
-			null,
-			List.of(AuthenticationEnum.NTLM)
-		);
+		final WindowsRemoteExecutor executor = WinRMExecutorFactory
+			.createInstance(endpoint(WinRMHttpProtocolEnum.HTTP), 30000L, null, List.of(AuthenticationEnum.NTLM));
 		executor.close();
 		final IllegalStateException e = assertThrows(
 			IllegalStateException.class,

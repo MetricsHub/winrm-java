@@ -32,8 +32,7 @@ public enum AuthenticationEnum {
 	KERBEROS,
 	BASIC;
 
-	private static final Map<String, AuthenticationEnum> VALUES_OF = Stream
-		.of(values())
+	private static final Map<String, AuthenticationEnum> VALUES_OF = Stream.of(values())
 		.collect(Collectors.toMap(AuthenticationEnum::name, Function.identity()));
 
 	/**
@@ -45,8 +44,6 @@ public enum AuthenticationEnum {
 	public static Optional<AuthenticationEnum> getValueOf(final String name) {
 		// Locale.ROOT: the default-locale toUpperCase() mangles some names (Turkish: "basic" →
 		// "BASİC"), which would silently fail to resolve in those environments.
-		return name != null
-			? Optional.ofNullable(VALUES_OF.get(name.trim().toUpperCase(Locale.ROOT)))
-			: Optional.empty();
+		return name != null ? Optional.ofNullable(VALUES_OF.get(name.trim().toUpperCase(Locale.ROOT))) : Optional.empty();
 	}
 }

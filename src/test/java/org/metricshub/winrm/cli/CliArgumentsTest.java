@@ -33,8 +33,7 @@ class CliArgumentsTest {
 				"-p",
 				"secret",
 				"wql",
-				"SELECT Name FROM Win32_Service"
-		};
+				"SELECT Name FROM Win32_Service" };
 
 		final CliArguments parsed = CliArguments.parse(arguments);
 		assertEquals(CliArguments.Operation.WQL, parsed.operation());
@@ -57,26 +56,24 @@ class CliArgumentsTest {
 	@Test
 	void parsesHttpsKerberosAndExplicitValues() throws Exception {
 		try (
-			CliArguments parsed = CliArguments.parse(
-				new String[]
-				{
-						"--hostname=host.example.net",
-						"--username=user@example.net",
-						"--password=secret",
-						"--https",
-						"--https-permissive",
-						"--kerberos",
-						"--kerberos-kdc=kdc.example.net",
-						"--kerberos-realm=CORP.EXAMPLE.NET",
-						"--allow-delegate",
-						"--port=1234",
-						"--timeout=9876",
-						"wql",
-						"SELECT",
-						"Name",
-						"FROM",
-						"Win32_Service"
-				}
+			CliArguments parsed = CliArguments.parse(new String[]
+			{
+					"--hostname=host.example.net",
+					"--username=user@example.net",
+					"--password=secret",
+					"--https",
+					"--https-permissive",
+					"--kerberos",
+					"--kerberos-kdc=kdc.example.net",
+					"--kerberos-realm=CORP.EXAMPLE.NET",
+					"--allow-delegate",
+					"--port=1234",
+					"--timeout=9876",
+					"wql",
+					"SELECT",
+					"Name",
+					"FROM",
+					"Win32_Service" }
 			)) {
 			assertEquals(WinRMHttpProtocolEnum.HTTPS, parsed.protocol());
 			assertEquals(1234, parsed.port());
@@ -94,16 +91,14 @@ class CliArgumentsTest {
 	@Test
 	void parsesBasicOverHttp() throws Exception {
 		try (
-			CliArguments parsed = CliArguments.parse(
-				new String[]
-				{
-						"--hostname=host.example.net",
-						"--username=user@example.net",
-						"--password=secret",
-						"--basic",
-						"command",
-						"whoami"
-				}
+			CliArguments parsed = CliArguments.parse(new String[]
+			{
+					"--hostname=host.example.net",
+					"--username=user@example.net",
+					"--password=secret",
+					"--basic",
+					"command",
+					"whoami" }
 			)) {
 			// Basic is not HTTPS-only (unlike Kerberos): a plain HTTP endpoint is valid.
 			assertEquals(WinRMHttpProtocolEnum.HTTP, parsed.protocol());
@@ -114,22 +109,20 @@ class CliArgumentsTest {
 	@Test
 	void infersKerberosRealmFromKdcDnsSuffix() throws Exception {
 		try (
-			CliArguments parsed = CliArguments.parse(
-				new String[]
-				{
-						"-h",
-						"host",
-						"-u",
-						"user",
-						"-p",
-						"secret",
-						"--https",
-						"--kerberos",
-						"--kerberos-kdc",
-						"camus.internal.sentrysoftware.net",
-						"command",
-						"whoami"
-				}
+			CliArguments parsed = CliArguments.parse(new String[]
+			{
+					"-h",
+					"host",
+					"-u",
+					"user",
+					"-p",
+					"secret",
+					"--https",
+					"--kerberos",
+					"--kerberos-kdc",
+					"camus.internal.sentrysoftware.net",
+					"command",
+					"whoami" }
 			)) {
 			assertEquals("camus.internal.sentrysoftware.net", parsed.kerberosKdc());
 			assertEquals("INTERNAL.SENTRYSOFTWARE.NET", parsed.kerberosRealm());
@@ -140,21 +133,15 @@ class CliArgumentsTest {
 	@Test
 	void httpsUsesItsDefaultPort() throws Exception {
 		try (
-			CliArguments parsed = CliArguments.parse(
-				new String[]
-				{ "-h", "host", "-u", "user", "-p", "secret", "--https", "command", "hostname" }
-			)) {
+			CliArguments parsed = CliArguments.parse(new String[]
+			{ "-h", "host", "-u", "user", "-p", "secret", "--https", "command", "hostname" })) {
 			assertEquals(5986, parsed.port());
 		}
 	}
 
 	@Test
 	void acceptsOmittedPasswordForInteractivePrompting() throws Exception {
-		try (
-			CliArguments parsed = CliArguments.parse(
-				new String[]
-				{ "-h", "host", "-u", "user", "command", "whoami" }
-			)) {
+		try (CliArguments parsed = CliArguments.parse(new String[] { "-h", "host", "-u", "user", "command", "whoami" })) {
 			assertNull(parsed.password());
 		}
 	}
@@ -162,24 +149,18 @@ class CliArgumentsTest {
 	@Test
 	void parsesTheRemoteWorkingDirectory() throws Exception {
 		try (
-			CliArguments parsed = CliArguments.parse(
-				new String[]
-				{ "-h", "host", "-u", "user", "-p", "secret", "-d", "C:\\build", "command", "build.cmd" }
-			)) {
+			CliArguments parsed = CliArguments.parse(new String[]
+			{ "-h", "host", "-u", "user", "-p", "secret", "-d", "C:\\build", "command", "build.cmd" })) {
 			assertEquals("C:\\build", parsed.directory());
 		}
 		try (
-			CliArguments parsed = CliArguments.parse(
-				new String[]
-				{ "-h", "host", "-u", "user", "-p", "secret", "--directory=C:\\build", "shell" }
-			)) {
+			CliArguments parsed = CliArguments.parse(new String[]
+			{ "-h", "host", "-u", "user", "-p", "secret", "--directory=C:\\build", "shell" })) {
 			assertEquals("C:\\build", parsed.directory());
 		}
 		try (
-			CliArguments parsed = CliArguments.parse(
-				new String[]
-				{ "-h", "host", "-u", "user", "-p", "secret", "command", "whoami" }
-			)) {
+			CliArguments parsed = CliArguments.parse(new String[]
+			{ "-h", "host", "-u", "user", "-p", "secret", "command", "whoami" })) {
 			assertNull(parsed.directory());
 		}
 	}
@@ -187,23 +168,21 @@ class CliArgumentsTest {
 	@Test
 	void parsesRepeatableEnvironmentVariables() throws Exception {
 		try (
-			CliArguments parsed = CliArguments.parse(
-				new String[]
-				{
-						"-h",
-						"host",
-						"-u",
-						"user",
-						"-p",
-						"secret",
-						"--env",
-						"BUILD_NUMBER=42",
-						"--env=CONFIG=release",
-						"--env",
-						"OPTIONS=a=b",
-						"command",
-						"build.cmd"
-				}
+			CliArguments parsed = CliArguments.parse(new String[]
+			{
+					"-h",
+					"host",
+					"-u",
+					"user",
+					"-p",
+					"secret",
+					"--env",
+					"BUILD_NUMBER=42",
+					"--env=CONFIG=release",
+					"--env",
+					"OPTIONS=a=b",
+					"command",
+					"build.cmd" }
 			)) {
 			// Insertion order preserved; the value is split on the FIRST '=' only.
 			assertEquals(List.of("BUILD_NUMBER", "CONFIG", "OPTIONS"), List.copyOf(parsed.environment().keySet()));
@@ -213,19 +192,15 @@ class CliArgumentsTest {
 		}
 		// A repeated name replaces the value; an empty value is allowed (winrs-style).
 		try (
-			CliArguments parsed = CliArguments.parse(
-				new String[]
-				{ "-h", "host", "-u", "user", "-p", "secret", "--env", "A=1", "--env", "A=2", "--env", "B=", "shell" }
-			)) {
+			CliArguments parsed = CliArguments.parse(new String[]
+			{ "-h", "host", "-u", "user", "-p", "secret", "--env", "A=1", "--env", "A=2", "--env", "B=", "shell" })) {
 			assertEquals("2", parsed.environment().get("A"));
 			assertEquals("", parsed.environment().get("B"));
 		}
 		// Without the option, the environment is empty.
 		try (
-			CliArguments parsed = CliArguments.parse(
-				new String[]
-				{ "-h", "host", "-u", "user", "-p", "secret", "command", "whoami" }
-			)) {
+			CliArguments parsed = CliArguments.parse(new String[]
+			{ "-h", "host", "-u", "user", "-p", "secret", "command", "whoami" })) {
 			assertTrue(parsed.environment().isEmpty());
 		}
 	}
@@ -234,10 +209,8 @@ class CliArgumentsTest {
 	void acceptsEveryCommandAlias() throws Exception {
 		for (final String alias : List.of("command", "cmd", "exec", "run")) {
 			try (
-				CliArguments parsed = CliArguments.parse(
-					new String[]
-					{ "-h", "host", "-u", "user", "-p", "secret", alias, "ipconfig", "/all" }
-				)) {
+				CliArguments parsed = CliArguments.parse(new String[]
+				{ "-h", "host", "-u", "user", "-p", "secret", alias, "ipconfig", "/all" })) {
 				assertEquals(CliArguments.Operation.COMMAND, parsed.operation());
 				assertEquals("ipconfig /all", parsed.input());
 			}
@@ -278,9 +251,8 @@ class CliArgumentsTest {
 		}
 		// Options may come before the path; a date alone stands for midnight UTC.
 		try (
-			CliArguments parsed = CliArguments.parse(
-				concat(base, "ls", "--directories-only", "--modified-after=2026-01-31", "D:\\data")
-			)) {
+			CliArguments parsed = CliArguments
+				.parse(concat(base, "ls", "--directories-only", "--modified-after=2026-01-31", "D:\\data"))) {
 			assertEquals("D:\\data", parsed.input());
 			assertTrue(parsed.directoriesOnly());
 			assertEquals(Instant.parse("2026-01-31T00:00:00Z"), parsed.modifiedAfter());
@@ -334,19 +306,8 @@ class CliArgumentsTest {
 		Files.write(passwordFile, "line1\nline2\r\n".getBytes(StandardCharsets.UTF_8));
 
 		try (
-			CliArguments parsed = CliArguments.parse(
-				new String[]
-				{
-						"-h",
-						"host",
-						"-u",
-						"user",
-						"-pf",
-						passwordFile.toString(),
-						"wql",
-						"SELECT Name FROM Win32_Service"
-				}
-			)) {
+			CliArguments parsed = CliArguments.parse(new String[]
+			{ "-h", "host", "-u", "user", "-pf", passwordFile.toString(), "wql", "SELECT Name FROM Win32_Service" })) {
 			assertArrayEquals("line1\nline2".toCharArray(), parsed.password());
 		}
 	}
@@ -357,76 +318,42 @@ class CliArgumentsTest {
 		final Object[][] invalidArguments = {
 				{
 						"--password and --password-file are mutually exclusive",
-						concat(base, "-pf", "other.txt", "wql", "SELECT Name FROM Win32_Service")
-				},
+						concat(base, "-pf", "other.txt", "wql", "SELECT Name FROM Win32_Service") },
 				{
 						"--ntlm and --kerberos are mutually exclusive",
-						concat(base, "--https", "--ntlm", "--kerberos", "command", "whoami")
-				},
-				{
-						"--ntlm and --basic are mutually exclusive",
-						concat(base, "--ntlm", "--basic", "command", "whoami")
-				},
+						concat(base, "--https", "--ntlm", "--kerberos", "command", "whoami") },
+				{ "--ntlm and --basic are mutually exclusive", concat(base, "--ntlm", "--basic", "command", "whoami") },
 				{
 						"--kerberos and --basic are mutually exclusive",
-						concat(base, "--https", "--kerberos", "--basic", "command", "whoami")
-				},
+						concat(base, "--https", "--kerberos", "--basic", "command", "whoami") },
 				{ "--kerberos requires --https", concat(base, "--kerberos", "command", "whoami") },
 				{
 						"--kerberos-kdc and --kerberos-realm require --kerberos",
-						concat(base, "--kerberos-kdc", "kdc.example.net", "command", "whoami")
-				},
-				{
-						"--allow-delegate requires --kerberos",
-						concat(base, "--https", "--allow-delegate", "command", "whoami")
-				},
+						concat(base, "--kerberos-kdc", "kdc.example.net", "command", "whoami") },
+				{ "--allow-delegate requires --kerberos", concat(base, "--https", "--allow-delegate", "command", "whoami") },
 				{
 						"--kerberos-realm requires --kerberos-kdc",
-						concat(
-							base,
-							"--https",
-							"--kerberos",
-							"--kerberos-realm",
-							"EXAMPLE.NET",
-							"command",
-							"whoami"
-						)
-				},
+						concat(base, "--https", "--kerberos", "--kerberos-realm", "EXAMPLE.NET", "command", "whoami") },
 				{
 						"cannot infer a realm from --kerberos-kdc; specify --kerberos-realm",
-						concat(
-							base,
-							"--https",
-							"--kerberos",
-							"--kerberos-kdc",
-							"localhost",
-							"command",
-							"whoami"
-						)
-				},
-				{
-						"--https-permissive requires --https",
-						concat(base, "--https-permissive", "command", "whoami")
-				},
+						concat(base, "--https", "--kerberos", "--kerberos-kdc", "localhost", "command", "whoami") },
+				{ "--https-permissive requires --https", concat(base, "--https-permissive", "command", "whoami") },
 				{ "-d requires a value", concat(base, "-d") },
 				{ "--directory requires a value", concat(base, "--directory=", "command", "whoami") },
 				{ "--directory requires a value", concat(base, "--directory", "  ", "command", "whoami") },
 				{
 						"--directory requires the command or shell subcommand",
-						concat(base, "-d", "C:\\build", "wql", "SELECT Name FROM Win32_Service")
-				},
+						concat(base, "-d", "C:\\build", "wql", "SELECT Name FROM Win32_Service") },
 				{ "--env requires a value", concat(base, "--env") },
 				{ "--env requires NAME=VALUE", concat(base, "--env", "NOEQUALS", "command", "whoami") },
 				{ "--env requires NAME=VALUE", concat(base, "--env", "=value", "command", "whoami") },
 				{ "--env requires NAME=VALUE", concat(base, "--env", " =value", "command", "whoami") },
 				{
 						"--env requires the command or shell subcommand",
-						concat(base, "--env", "A=b", "wql", "SELECT Name FROM Win32_Service")
-				},
+						concat(base, "--env", "A=b", "wql", "SELECT Name FROM Win32_Service") },
 				{
 						"--profile requires the command or shell subcommand",
-						concat(base, "--profile", "wql", "SELECT Name FROM Win32_Service")
-				},
+						concat(base, "--profile", "wql", "SELECT Name FROM Win32_Service") },
 				{ "-P must be between 1 and 65535", concat(base, "-P", "65536", "command", "whoami") },
 				{ "-t must be greater than zero", concat(base, "-t", "0", "command", "whoami") },
 				{ "missing subcommand (wql, command, shell, ls, stat, cat, or get)", base },
@@ -440,17 +367,14 @@ class CliArgumentsTest {
 				{ "--depth must be a number", concat(base, "ls", "C:\\a", "--depth", "three") },
 				{
 						"--modified-after must be an ISO-8601 date or date-time with an offset, e.g. 2026-01-31 or 2026-01-31T12:00:00Z",
-						concat(base, "ls", "C:\\a", "--modified-after", "2026-01-31T12:00:00")
-				},
+						concat(base, "ls", "C:\\a", "--modified-after", "2026-01-31T12:00:00") },
 				{
 						"--modified-after must be an ISO-8601 date or date-time with an offset, e.g. 2026-01-31 or 2026-01-31T12:00:00Z",
-						concat(base, "ls", "C:\\a", "--modified-after", "yesterday")
-				},
+						concat(base, "ls", "C:\\a", "--modified-after", "yesterday") },
 				{ "--min-size must be a number", concat(base, "ls", "C:\\a", "--min-size", "1M") },
 				{
 						"--files-only and --directories-only are mutually exclusive",
-						concat(base, "ls", "C:\\a", "--files-only", "--directories-only")
-				},
+						concat(base, "ls", "C:\\a", "--files-only", "--directories-only") },
 				{ "--glob requires a value", concat(base, "ls", "C:\\a", "--glob") },
 				{ "--glob requires a value", concat(base, "ls", "C:\\a", "--glob", " ") },
 				{ "--glob requires the ls subcommand", concat(base, "cat", "C:\\a", "--glob", "*.log") },
@@ -460,25 +384,17 @@ class CliArgumentsTest {
 				{ "--length must be greater than zero", concat(base, "cat", "C:\\a", "--length", "0") },
 				{
 						"--charset must name a charset known to Java, e.g. UTF-8 or windows-1252",
-						concat(base, "cat", "C:\\a", "--charset", "klingon")
-				},
+						concat(base, "cat", "C:\\a", "--charset", "klingon") },
 				{ "unknown option '-r'", concat(base, "ls", "C:\\a", "-r") },
 				{ "--directory requires the command or shell subcommand", concat(base, "-d", "C:\\build", "ls", "C:\\a") },
 				{ "--env requires the command or shell subcommand", concat(base, "--env", "A=b", "cat", "C:\\a") },
 				{ "wql requires a query", concat(base, "wql", "") },
-				{
-						"missing required option --hostname",
-						new String[]
-						{ "-u", "user", "-p", "secret", "command", "whoami" }
-				},
-		};
+				{ "missing required option --hostname", new String[]
+				{ "-u", "user", "-p", "secret", "command", "whoami" } }, };
 		for (final Object[] invalid : invalidArguments) {
 			final String expectedMessage = (String) invalid[0];
 			final String[] arguments = (String[]) invalid[1];
-			final CliUsageException exception = assertThrows(
-				CliUsageException.class,
-				() -> CliArguments.parse(arguments)
-			);
+			final CliUsageException exception = assertThrows(CliUsageException.class, () -> CliArguments.parse(arguments));
 			assertEquals(expectedMessage, exception.getMessage());
 		}
 	}

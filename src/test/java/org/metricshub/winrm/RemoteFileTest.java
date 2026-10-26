@@ -90,8 +90,7 @@ class RemoteFileTest {
 	}
 
 	private WinRMClient client() {
-		return WinRMClient
-			.builder("127.0.0.1")
+		return WinRMClient.builder("127.0.0.1")
 			.port(server.port())
 			.credentials(DOMAIN + "\\" + USER, PASSWORD.toCharArray())
 			.timeout(Duration.ofSeconds(10))
@@ -121,8 +120,8 @@ class RemoteFileTest {
 		server.enqueue(200, envelope(commandResponse(COMMAND_ID)));
 		for (int i = 0; i < chunks.length; i++) {
 			final boolean last = i == chunks.length - 1;
-			final String streams = stdout(chunks[i]) +
-				(last && stderr != null ? stream("stderr", COMMAND_ID, stderr.getBytes(StandardCharsets.UTF_8)) : "");
+			final String streams = stdout(chunks[i])
+				+ (last && stderr != null ? stream("stderr", COMMAND_ID, stderr.getBytes(StandardCharsets.UTF_8)) : "");
 			server.enqueue(200, envelope(receiveResponse(streams, last ? done(COMMAND_ID, exitCode) : null)));
 		}
 		server.enqueue(200, envelope(signalResponse()));
@@ -138,8 +137,7 @@ class RemoteFileTest {
 	/** The PowerShell scripts the client sent, in order, decoded from their -EncodedCommand. */
 	private List<String> sentScripts() {
 		final Pattern encoded = Pattern.compile("-EncodedCommand ([A-Za-z0-9+/=]+)");
-		return server
-			.decryptedRequests()
+		return server.decryptedRequests()
 			.stream()
 			.map(encoded::matcher)
 			.filter(Matcher::find)
@@ -154,8 +152,7 @@ class RemoteFileTest {
 
 	/** The probe output announcing the given size and the SHA-256 digest of the given content. */
 	private static byte[] probe(final long size, final byte[] content) throws Exception {
-		return ByteBuffer
-			.allocate(RemoteFiles.PROBE_LENGTH)
+		return ByteBuffer.allocate(RemoteFiles.PROBE_LENGTH)
 			.order(ByteOrder.LITTLE_ENDIAN)
 			.putLong(size)
 			.put(MessageDigest.getInstance("SHA-256").digest(content))
@@ -327,8 +324,7 @@ class RemoteFileTest {
 	@Test
 	void aStartRejectedByTheOperationQuotaIsRetried() {
 		// The Command is rejected by the host's operation quota before anything runs: retried after 5 s.
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(
 				500,
 				fault("2150859174", "The maximum number of concurrent operations for this user has been exceeded.")
@@ -343,8 +339,7 @@ class RemoteFileTest {
 	@Test
 	void noQuotaRetryStartsAfterTheTimeout() throws Exception {
 		// The first retry would start 5 s later, past the 3 s timeout of this stream: it is not attempted.
-		server
-			.enqueue(200, envelope(resourceCreated("SHELL-1")))
+		server.enqueue(200, envelope(resourceCreated("SHELL-1")))
 			.enqueue(
 				500,
 				fault("2150859174", "The maximum number of concurrent operations for this user has been exceeded.")
@@ -531,14 +526,9 @@ class RemoteFileTest {
 		final byte[] previous = "previous".getBytes(StandardCharsets.US_ASCII);
 		final Path local = Files.write(directory.resolve("copy.bin"), previous);
 		enqueueRead(0, null, probe(content));
-		server
-			.enqueue(200, envelope(commandResponse(COMMAND_ID)))
+		server.enqueue(200, envelope(commandResponse(COMMAND_ID)))
 			.enqueue(200, envelope(receiveResponse(stdout(new byte[600]), null)))
-			.enqueueDelayed(
-				200,
-				envelope(receiveResponse(stdout(new byte[400]), done(COMMAND_ID, 0))),
-				4_000
-			)
+			.enqueueDelayed(200, envelope(receiveResponse(stdout(new byte[400]), done(COMMAND_ID, 0))), 4_000)
 			.enqueue(200, envelope(signalResponse()));
 		try (WinRMClient client = client()) {
 			final RemoteFile file = client.file(PATH).timeout(Duration.ofSeconds(2));

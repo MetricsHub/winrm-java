@@ -81,13 +81,8 @@ public abstract class WmiHelper {
 		final long timeout
 	) throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
 		try {
-			return windowsRemoteExecutor.executeWql(
-				DEFAULT_NAMESPACE,
-				wqlQuery,
-				timeout,
-				WindowsRemoteExecutor.DEFAULT_WQL_MAX_ELEMENTS,
-				0
-			);
+			return windowsRemoteExecutor
+				.executeWql(DEFAULT_NAMESPACE, wqlQuery, timeout, WindowsRemoteExecutor.DEFAULT_WQL_MAX_ELEMENTS, 0);
 		} catch (final UnsupportedOperationException e) {
 			return windowsRemoteExecutor.executeWql(wqlQuery, timeout);
 		}
@@ -112,18 +107,12 @@ public abstract class WmiHelper {
 	public static boolean isLocalNetworkResource(final String networkResource) {
 		Utils.checkNonNull(networkResource, "networkResource");
 		return !networkResource.startsWith("\\\\")
-			||
-			networkResource.startsWith("\\\\localhost\\")
-			||
-			networkResource.startsWith("\\\\127.0.0.1\\")
-			||
-			networkResource.startsWith("\\\\0:0:0:0:0:0:0:1\\")
-			||
-			networkResource.startsWith("\\\\::1\\")
-			||
-			networkResource.startsWith("\\\\0000:0000:0000:0000:0000:0000:0000:0001\\")
-			||
-			networkResource.toLowerCase().startsWith("\\\\" + Utils.getComputerName().toLowerCase() + "\\");
+			|| networkResource.startsWith("\\\\localhost\\")
+			|| networkResource.startsWith("\\\\127.0.0.1\\")
+			|| networkResource.startsWith("\\\\0:0:0:0:0:0:0:1\\")
+			|| networkResource.startsWith("\\\\::1\\")
+			|| networkResource.startsWith("\\\\0000:0000:0000:0000:0000:0000:0000:0001\\")
+			|| networkResource.toLowerCase().startsWith("\\\\" + Utils.getComputerName().toLowerCase() + "\\");
 	}
 
 	/**
@@ -182,8 +171,7 @@ public abstract class WmiHelper {
 		// Create a new list based on queryPropertyArray (with its order), but with the values
 		// from resultProperties
 		final List<String> queryProperties = wqlQuery.getSelectedProperties();
-		return queryProperties
-			.stream()
+		return queryProperties.stream()
 			.map(property -> resultProperties.getOrDefault(property.toLowerCase(), property))
 			.collect(Collectors.toList());
 	}
