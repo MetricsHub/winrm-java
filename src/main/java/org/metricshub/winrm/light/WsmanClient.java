@@ -352,6 +352,8 @@ final class WsmanClient implements AutoCloseable {
 	 * Holds {@link #connectionPermit} from creation until exhaustion or {@link #close()}; closing
 	 * before the end sends a WS-Enumeration Release so the server frees the enumeration context.
 	 */
+	@SuppressFBWarnings(value = "AT_STALE_THREAD_WRITE_OF_PRIMITIVE", justification = "A single-consumer cursor, like an Iterator: "
+		+ "its state is only read and written by the thread that drives it")
 	final class WqlEnumeration implements AutoCloseable {
 
 		private final String namespace;
@@ -630,6 +632,8 @@ final class WsmanClient implements AutoCloseable {
 	 * (see {@link #finishBounded}), whose Signal is bounded by — or skipped for — the caller's
 	 * remaining wait.
 	 */
+	@SuppressFBWarnings(value = "AT_STALE_THREAD_WRITE_OF_PRIMITIVE", justification = "A single-consumer cursor, like an Iterator: "
+		+ "its state is only read and written by the thread that drives it")
 	final class RemoteCommand implements AutoCloseable {
 
 		/** One Receive response's worth of raw output bytes, split by stream. */
