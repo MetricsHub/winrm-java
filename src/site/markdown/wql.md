@@ -127,6 +127,21 @@ like a scalar (`"fr-FR"` for `MUILanguages`), and an empty or `NULL` array is le
 response, so `string()` returns `null` for it (unlike a scalar `NULL`, an empty string). The
 instance is still a row, even when that array is the only selected property.
 
+### Object paths: `__PATH` and references
+
+WinRM never returns WMI system properties, except `__PATH`: when you select it, the client asks for
+each instance's key properties and builds its object path. A **reference** property (`Antecedent`,
+`Dependent`, ...) gets the same format, so you can match the two:
+
+```sql
+SELECT __PATH, CurrentClockSpeed FROM Win32_Processor
+-- __PATH = \\.\root\cimv2:Win32_Processor.DeviceID="CPU0"
+```
+
+WinRM sends neither the server name nor the key types. The server is `.` (the local machine, for
+WMI) instead of the host name, and every key value is quoted, even a number. The path works as is in
+an `ASSOCIATORS OF {...}` or `REFERENCES OF {...}` query.
+
 ### Column order and case
 
 These rules apply to `WqlResult.columns()`; each row's `asMap()` keeps the server's order, and

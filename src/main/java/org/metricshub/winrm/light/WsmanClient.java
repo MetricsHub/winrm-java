@@ -267,6 +267,7 @@ final class WsmanClient implements AutoCloseable {
 	 *
 	 * @param namespace the WMI namespace
 	 * @param query the WQL query
+	 * @param withPath whether to add each instance's WMI object path as a {@code __PATH} property
 	 * @param operationTimeoutMs this operation's timeout, driving the WSMan OperationTimeout header
 	 *        and the socket read timeout
 	 * @param maxElements the WS-Enumeration MaxElements batch size for Enumerate and every Pull
@@ -275,12 +276,22 @@ final class WsmanClient implements AutoCloseable {
 	List<Map<String, String>> wql(
 		final String namespace,
 		final String query,
+		final boolean withPath,
 		final long operationTimeoutMs,
 		final int maxElements,
 		final long maxTimeMs
 	) throws Exception {
 		final List<Map<String, String>> rows = new ArrayList<>();
-		try (WqlEnumeration enumeration = openWql(namespace, query, operationTimeoutMs, maxElements, maxTimeMs, false)) {
+		try (
+			WqlEnumeration enumeration = openWql(
+				namespace,
+				query,
+				withPath,
+				operationTimeoutMs,
+				maxElements,
+				maxTimeMs,
+				false
+			)) {
 			Map<String, String> row;
 			while ((row = enumeration.next()) != null) {
 				rows.add(row);
@@ -296,6 +307,7 @@ final class WsmanClient implements AutoCloseable {
 	 *
 	 * @param namespace the WMI namespace
 	 * @param query the WQL query
+	 * @param withPath whether to add each instance's WMI object path as a {@code __PATH} property
 	 * @param operationTimeoutMs each WSMan round trip's timeout, driving the OperationTimeout
 	 *        header and the socket read timeout — for a streaming consumer this is the inactivity
 	 *        timeout: the longest silence tolerated between two responses
@@ -309,6 +321,7 @@ final class WsmanClient implements AutoCloseable {
 	WqlEnumeration openWql(
 		final String namespace,
 		final String query,
+		final boolean withPath,
 		final long operationTimeoutMs,
 		final int maxElements,
 		final long maxTimeMs,
@@ -331,7 +344,7 @@ final class WsmanClient implements AutoCloseable {
 			);
 			enumeration.ingest(
 				exchange(
-					Envelopes.enumerateWql(url, ns, query, operationTimeoutMs, maxElements),
+					Envelopes.enumerateWql(url, ns, query, withPath, operationTimeoutMs, maxElements),
 					"Enumerate",
 					operationTimeoutMs,
 					failOnQuietTimeout
@@ -1395,9 +1408,15 @@ final class WsmanClient implements AutoCloseable {
 		for (int i = 0; i < items.getLength(); i++) {
 			final NodeList instances = items.item(i).getChildNodes();
 			for (int j = 0; j < instances.getLength(); j++) {
-				final Node instance = instances.item(j);
+				Node instance = instances.item(j);
 				if (instance.getNodeType() != Node.ELEMENT_NODE) {
 					continue;
+				}
+				// EnumerateObjectAndEPR wraps each instance in an Item, next to its endpoint reference
+				String path = null;
+				if (WSMAN_NS.equals(instance.getNamespaceURI()) && "Item".equals(instance.getLocalName())) {
+					path = wmiPath(child(instance, "EndpointReference"));
+					instance = child(instance, null);
 				}
 				// A WMI array comes back as sibling elements sharing one name: join them. Built with
 				// StringBuilders so a large array (SMBIOS raw tables: tens of thousands of bytes) is
@@ -1409,20 +1428,75 @@ final class WsmanClient implements AutoCloseable {
 					if (prop.getNodeType() != Node.ELEMENT_NODE) {
 						continue;
 					}
+					// A reference property is an endpoint reference: render it as a WMI object path
+					final String reference = wmiPath(prop);
+					final String text = reference != null ? reference : prop.getTextContent();
 					final StringBuilder value = values.get(((Element) prop).getLocalName());
 					if (value == null) {
-						values.put(((Element) prop).getLocalName(), new StringBuilder(prop.getTextContent()));
+						values.put(((Element) prop).getLocalName(), new StringBuilder(text));
 					} else {
-						value.append(arraySeparator).append(prop.getTextContent());
+						value.append(arraySeparator).append(text);
 					}
 				}
 				// An instance with no property element is still a row: WinRM leaves out an empty (or
 				// NULL) array, so selecting only such a property yields empty instances
 				final Map<String, String> row = new LinkedHashMap<>();
 				values.forEach((name, value) -> row.put(name, value.toString()));
+				if (path != null) {
+					row.put("__PATH", path);
+				}
 				rows.add(row);
 			}
 		}
+	}
+
+	/**
+	 * The WMI object path of a WS-Addressing endpoint reference, like
+	 * {@code \\.\root\cimv2:Win32_Service.Name="WinRM"}, or {@code null} when the node is not one.
+	 * WinRM sends neither the server name nor the key types: the server is {@code .} (the local
+	 * machine, for WMI), and every key value is quoted.
+	 */
+	static String wmiPath(final Node reference) {
+		final Node parameters = child(reference, "ReferenceParameters");
+		if (parameters == null) {
+			return null;
+		}
+		// http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/Win32_Service -> \\.\root\cimv2:Win32_Service
+		final String uri = child(parameters, "ResourceURI").getTextContent().trim();
+		final String resource = uri.substring(uri.indexOf("/wmi/") + "/wmi/".length());
+		final int slash = resource.lastIndexOf('/');
+		final StringBuilder path = new StringBuilder("\\\\.\\").append(resource.substring(0, slash).replace('/', '\\'))
+			.append(':')
+			.append(resource.substring(slash + 1));
+		final Node selectorSet = child(parameters, "SelectorSet");
+		char separator = '.';
+		for (Node selector = selectorSet == null ? null : selectorSet.getFirstChild(); selector != null; selector = selector
+			.getNextSibling()) {
+			if (selector.getNodeType() != Node.ELEMENT_NODE) {
+				continue;
+			}
+			// A key of an association is itself a reference, quoted like any other value
+			final String nested = wmiPath(child(selector, "EndpointReference"));
+			final String value = nested != null ? nested : selector.getTextContent();
+			path.append(separator)
+				.append(((Element) selector).getAttribute("Name"))
+				.append("=\"")
+				.append(value.replace("\\", "\\\\").replace("\"", "\\\""))
+				.append('"');
+			separator = ',';
+		}
+		// No key: a singleton
+		return separator == '.' ? path.append("=@").toString() : path.toString();
+	}
+
+	/** The first child element with the given local name (any name if null), or null, also for a null parent. */
+	private static Node child(final Node parent, final String localName) {
+		for (Node node = parent == null ? null : parent.getFirstChild(); node != null; node = node.getNextSibling()) {
+			if (node.getNodeType() == Node.ELEMENT_NODE && (localName == null || localName.equals(node.getLocalName()))) {
+				return node;
+			}
+		}
+		return null;
 	}
 
 	private static void collectStreams(

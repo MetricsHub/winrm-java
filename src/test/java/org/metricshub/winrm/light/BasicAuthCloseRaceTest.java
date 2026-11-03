@@ -61,7 +61,7 @@ class BasicAuthCloseRaceTest {
 
 		final Thread worker = new Thread(() -> {
 			try {
-				client.openWql("ROOT/CIMV2", "SELECT Name FROM Win32_Service", TIMEOUT, 1000, 0, false);
+				client.openWql("ROOT/CIMV2", "SELECT Name FROM Win32_Service", false, TIMEOUT, 1000, 0, false);
 			} catch (final Exception ignored) {
 				// close() hard-cuts the read (or the server 401s/500s): the outcome is irrelevant —
 				// what matters is that the operation ran to the end and released the connection.
