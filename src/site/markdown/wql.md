@@ -141,18 +141,26 @@ lookups in it are case-sensitive.
 
 ## Supported WQL syntax
 
-The client validates that the query is a simple `SELECT`:
+The client validates that the query is a simple `SELECT`, or an `ASSOCIATORS OF` or
+`REFERENCES OF` query:
 
 ```sql
 SELECT * FROM Win32_OperatingSystem
 SELECT Name, State, StartMode FROM Win32_Service
 SELECT Name FROM Win32_Process WHERE Name = 'explorer.exe'
+ASSOCIATORS OF {Win32_Service.Name='W32Time'} WHERE ResultClass = Win32_Process
+REFERENCES OF {Win32_Service.Name='W32Time'}
+SELECT DeviceId, Wear FROM ASSOCIATORS OF {MSFT_PhysicalDisk.ObjectId="..."} WHERE ResultClass = MSFT_StorageReliabilityCounter
 ```
 
 The grammar is a single `SELECT` of either `*` or a comma-separated property list, a `FROM` clause
-naming one class, and an optional `WHERE` clause. Line breaks are accepted wherever whitespace is,
-so queries written as Java text blocks work as is. Anything else, such as `ASSOCIATORS OF`,
-`REFERENCES OF` or event queries (`WITHIN`), is rejected: an invalid query raises a
+naming one class or an `ASSOCIATORS OF {...}` / `REFERENCES OF {...}` statement, and an optional
+`WHERE` clause; the `SELECT ... FROM` part may be left out of an `ASSOCIATORS OF` /
+`REFERENCES OF` statement. WMI itself does not accept a property list on these statements: the
+client sends the bare statement, and the property list only sets the result's
+[columns](#column-order-and-case) (each row still holds every property of the instance). Line
+breaks are accepted wherever whitespace is, so queries written as Java text blocks work as is.
+Anything else, such as event queries (`WITHIN`), is rejected: an invalid query raises a
 [`WqlSyntaxException`](apidocs/org/metricshub/winrm/exceptions/WqlSyntaxException.html) before
 anything is sent to the host.
 

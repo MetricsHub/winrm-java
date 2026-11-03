@@ -43,6 +43,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
+import org.metricshub.winrm.WqlCursor;
 import org.metricshub.winrm.exceptions.WinRMException;
 import org.metricshub.winrm.service.WinRMEndpoint;
 import org.metricshub.winrm.service.client.auth.AuthenticationEnum;
@@ -138,9 +139,50 @@ class WsmanProtocolTest {
 		assertTrue(enumerate.contains("<wsman:OptimizeEnumeration/>"), enumerate);
 		assertTrue(enumerate.contains("<wsman:MaxElements>32000</wsman:MaxElements>"), enumerate);
 		assertTrue(enumerate.contains("http://schemas.microsoft.com/wbem/wsman/1/wmi/ROOT/CIMV2/*"), enumerate);
-		assertTrue(enumerate.contains("SELECT Name,State FROM Win32_Service"), enumerate);
+		// The clean WQL is sent (property names in lower case, which WMI does not mind)
+		assertTrue(enumerate.contains("SELECT name,state FROM Win32_Service"), enumerate);
 		assertTrue(requests.get(1).contains("uuid:CTX-1"), requests.get(1));
 		assertTrue(requests.get(2).contains("uuid:CTX-2"), requests.get(2));
+	}
+
+	@Test
+	void wqlSendsAssociatorsQueriesWithoutTheirSelectPrefix() throws Exception {
+		// WMI does not accept "SELECT props FROM ASSOCIATORS OF {...}": the blocking and the streaming
+		// paths must both send the bare ASSOCIATORS OF statement, and keep its WHERE clause.
+		final String endOfSequence = envelope(
+			"<wsen:EnumerateResponse xmlns:wsen=\"" + WSEN + "\" xmlns:wsman=\"" + WSMAN + "\">" + "<wsman:Items>"
+				+ instance("MSFT_StorageReliabilityCounter", "DeviceId", "0", "Wear", "3") + "</wsman:Items>"
+				+ "<wsman:EndOfSequence/>" + "</wsen:EnumerateResponse>"
+		);
+		server.enqueue(200, endOfSequence).enqueue(200, endOfSequence);
+		final String query = "SELECT DeviceId, Wear FROM ASSOCIATORS OF {MSFT_PhysicalDisk.ObjectId='disk-1'}"
+			+ " WHERE ResultClass = MSFT_StorageReliabilityCounter";
+
+		try (LightWinRMService service = client(PASSWORD)) {
+			final List<Map<String, Object>> rows = service.executeWql(query, TIMEOUT);
+			assertEquals(1, rows.size());
+			assertEquals("3", rows.get(0).get("Wear"));
+
+			try (WqlCursor cursor = service.streamWql("ROOT\\Microsoft\\Windows\\Storage", query, TIMEOUT, 10, 0)) {
+				assertEquals("0", cursor.next().get("DeviceId"));
+			}
+		}
+
+		final List<String> requests = server.decryptedRequests();
+		assertEquals(2, requests.size(), () -> String.join("\n---\n", requests));
+		for (final String enumerate : requests) {
+			assertTrue(
+				enumerate.contains(
+					"Dialect=\"http://schemas.microsoft.com/wbem/wsman/1/WQL\">ASSOCIATORS OF {MSFT_PhysicalDisk.ObjectId='disk-1'}"
+						+ " WHERE ResultClass = MSFT_StorageReliabilityCounter</wsman:Filter>"
+				),
+				enumerate
+			);
+		}
+		assertTrue(
+			requests.get(1).contains("http://schemas.microsoft.com/wbem/wsman/1/wmi/ROOT/Microsoft/Windows/Storage/*"),
+			requests.get(1)
+		);
 	}
 
 	@Test

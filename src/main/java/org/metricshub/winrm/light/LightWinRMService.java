@@ -36,8 +36,8 @@ import org.metricshub.winrm.Utils;
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
 import org.metricshub.winrm.WindowsRemoteCommandResult;
 import org.metricshub.winrm.WindowsRemoteExecutor;
-import org.metricshub.winrm.WmiHelper;
 import org.metricshub.winrm.WqlCursor;
+import org.metricshub.winrm.WqlQuery;
 import org.metricshub.winrm.exceptions.WinRMClientException;
 import org.metricshub.winrm.exceptions.WinRMException;
 import org.metricshub.winrm.exceptions.WindowsRemoteException;
@@ -536,12 +536,12 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final int maxElements,
 		final long pullTimeout
 	) throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
-		checkWqlArguments(namespace, wqlQuery, timeout, maxElements, pullTimeout);
+		final String cleanWql = checkWqlArguments(namespace, wqlQuery, timeout, maxElements, pullTimeout);
 
 		// Enforce the caller's timeout as a wall-clock deadline (throwing TimeoutException), matching
 		// the CXF WinRMService and bounding the WSMan Pull loop.
 		return executeWithTimeout(() -> {
-			final List<Map<String, String>> rows = client.wql(namespace, wqlQuery, timeout, maxElements, pullTimeout);
+			final List<Map<String, String>> rows = client.wql(namespace, cleanWql, timeout, maxElements, pullTimeout);
 			final List<Map<String, Object>> result = new ArrayList<>(rows.size());
 			for (final Map<String, String> row : rows) {
 				result.add(new LinkedHashMap<>(row));
@@ -558,12 +558,12 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final int maxElements,
 		final long pullTimeout
 	) throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
-		checkWqlArguments(namespace, wqlQuery, timeout, maxElements, pullTimeout);
+		final String cleanWql = checkWqlArguments(namespace, wqlQuery, timeout, maxElements, pullTimeout);
 
 		// The initial Enumerate is sent here, on the caller's thread, so configuration and
 		// authentication failures surface immediately rather than on the first row.
 		final WsmanClient.WqlEnumeration enumeration = callStreaming(
-			() -> client.openWql(namespace, wqlQuery, timeout, maxElements, pullTimeout, true)
+			() -> client.openWql(namespace, cleanWql, timeout, maxElements, pullTimeout, true)
 		);
 		return new WqlCursor() {
 			@Override
@@ -579,8 +579,13 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		};
 	}
 
-	/** Validate the arguments shared by the blocking and streaming WQL entry points. */
-	private void checkWqlArguments(
+	/**
+	 * Validate the arguments shared by the blocking and streaming WQL entry points.
+	 *
+	 * @return the query to send: {@link WqlQuery#getCleanWql()}, which WMI accepts, unlike the
+	 *         {@code SELECT props FROM ASSOCIATORS OF {...}} and sub-property forms it is parsed from
+	 */
+	private String checkWqlArguments(
 		final String namespace,
 		final String wqlQuery,
 		final long timeout,
@@ -590,14 +595,13 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		checkNotClosed();
 		Utils.checkNonNull(namespace, "namespace");
 		Utils.checkNonNull(wqlQuery, "wqlQuery");
-		if (!WmiHelper.isValidWql(wqlQuery)) {
-			throw new WqlQuerySyntaxException(wqlQuery);
-		}
+		final String cleanWql = WqlQuery.newInstance(wqlQuery).getCleanWql();
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
 		Utils.checkArgumentNotZeroOrNegative(maxElements, "maxElements");
 		if (pullTimeout < 0) {
 			throw new IllegalArgumentException("pullTimeout must not be negative.");
 		}
+		return cleanWql;
 	}
 
 	@Override
