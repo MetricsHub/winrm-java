@@ -536,12 +536,13 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final int maxElements,
 		final long pullTimeout
 	) throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
-		final String cleanWql = checkWqlArguments(namespace, wqlQuery, timeout, maxElements, pullTimeout);
+		final WqlQuery query = checkWqlArguments(namespace, wqlQuery, timeout, maxElements, pullTimeout);
 
 		// Enforce the caller's timeout as a wall-clock deadline (throwing TimeoutException), matching
 		// the CXF WinRMService and bounding the WSMan Pull loop.
 		return executeWithTimeout(() -> {
-			final List<Map<String, String>> rows = client.wql(namespace, cleanWql, timeout, maxElements, pullTimeout);
+			final List<Map<String, String>> rows = client
+				.wql(namespace, query.getCleanWql(), selectsPath(query), timeout, maxElements, pullTimeout);
 			final List<Map<String, Object>> result = new ArrayList<>(rows.size());
 			for (final Map<String, String> row : rows) {
 				result.add(new LinkedHashMap<>(row));
@@ -558,12 +559,12 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		final int maxElements,
 		final long pullTimeout
 	) throws TimeoutException, WqlQuerySyntaxException, WindowsRemoteException {
-		final String cleanWql = checkWqlArguments(namespace, wqlQuery, timeout, maxElements, pullTimeout);
+		final WqlQuery query = checkWqlArguments(namespace, wqlQuery, timeout, maxElements, pullTimeout);
 
 		// The initial Enumerate is sent here, on the caller's thread, so configuration and
 		// authentication failures surface immediately rather than on the first row.
 		final WsmanClient.WqlEnumeration enumeration = callStreaming(
-			() -> client.openWql(namespace, cleanWql, timeout, maxElements, pullTimeout, true)
+			() -> client.openWql(namespace, query.getCleanWql(), selectsPath(query), timeout, maxElements, pullTimeout, true)
 		);
 		return new WqlCursor() {
 			@Override
@@ -582,10 +583,10 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 	/**
 	 * Validate the arguments shared by the blocking and streaming WQL entry points.
 	 *
-	 * @return the query to send: {@link WqlQuery#getCleanWql()}, which WMI accepts, unlike the
+	 * @return the parsed query: send its {@link WqlQuery#getCleanWql()}, which WMI accepts, unlike the
 	 *         {@code SELECT props FROM ASSOCIATORS OF {...}} and sub-property forms it is parsed from
 	 */
-	private String checkWqlArguments(
+	private WqlQuery checkWqlArguments(
 		final String namespace,
 		final String wqlQuery,
 		final long timeout,
@@ -595,13 +596,21 @@ public final class LightWinRMService implements WindowsRemoteExecutor {
 		checkNotClosed();
 		Utils.checkNonNull(namespace, "namespace");
 		Utils.checkNonNull(wqlQuery, "wqlQuery");
-		final String cleanWql = WqlQuery.newInstance(wqlQuery).getCleanWql();
+		final WqlQuery query = WqlQuery.newInstance(wqlQuery);
 		Utils.checkArgumentNotZeroOrNegative(timeout, "timeout");
 		Utils.checkArgumentNotZeroOrNegative(maxElements, "maxElements");
 		if (pullTimeout < 0) {
 			throw new IllegalArgumentException("pullTimeout must not be negative.");
 		}
-		return cleanWql;
+		return query;
+	}
+
+	/**
+	 * Whether the query selects the {@code __PATH} system property, which WinRM never sends: it is
+	 * built from each instance's endpoint reference, requested only then.
+	 */
+	private static boolean selectsPath(final WqlQuery query) {
+		return query.getSelectedProperties().contains("__path");
 	}
 
 	@Override

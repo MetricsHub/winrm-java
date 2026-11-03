@@ -142,6 +142,61 @@ class WsmanClientParityTest {
 		assertEquals("real-row", rows.get(0).get("Name"));
 	}
 
+	// --- __PATH and reference properties ---------------------------------------
+
+	/** An endpoint reference to a root/cimv2 class with the given selectors, as WinRM sends it. */
+	private static String reference(final String element, final String className, final String selectors) {
+		return "<" + element + "><a:Address>http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</a:Address>"
+			+ "<a:ReferenceParameters><w:ResourceURI>http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/" + className
+			+ "</w:ResourceURI><w:SelectorSet>" + selectors + "</w:SelectorSet></a:ReferenceParameters></" + element + ">";
+	}
+
+	@Test
+	void pathAndReferencesAreRenderedAsWmiObjectPaths() throws Exception {
+		// Shapes captured from Windows Server 2022: SELECT __PATH, Antecedent FROM Win32_SessionProcess
+		// (enumerated with EnumerateObjectAndEPR), whose own keys are references, then a singleton
+		final String logon = "<w:Selector Name=\"LogonId\">999</w:Selector>";
+		final String process = "<w:Selector Name=\"Handle\">a\\b\"c</w:Selector>";
+		final Document doc = parse(
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\""
+				+ " xmlns:a=\"http://schemas.xmlsoap.org/ws/2004/08/addressing\" xmlns:w=\"" + WSMAN + "\">"
+				+ "<s:Body><n:EnumerateResponse xmlns:n=\"" + WSEN + "\"><w:Items><w:Item><w:XmlFragment>"
+				+ reference("Antecedent", "Win32_LogonSession", logon) + "</w:XmlFragment>"
+				+ reference(
+					"a:EndpointReference",
+					"Win32_SessionProcess",
+					"<w:Selector Name=\"Antecedent\">" + reference("a:EndpointReference", "Win32_LogonSession", logon)
+						+ "</w:Selector><w:Selector Name=\"Dependent\">"
+						+ reference("a:EndpointReference", "Win32_Process", process) + "</w:Selector>"
+				) + "</w:Item><w:Item><w:XmlFragment/>" + reference("a:EndpointReference", "Win32_WMISetting", "")
+				+ "</w:Item></w:Items></n:EnumerateResponse></s:Body></s:Envelope>"
+		);
+		final List<Map<String, String>> rows = new ArrayList<>();
+		WsmanClient.collectItems(doc, rows, "|");
+		assertEquals(2, rows.size());
+		assertEquals("\\\\.\\root\\cimv2:Win32_LogonSession.LogonId=\"999\"", rows.get(0).get("Antecedent"));
+		assertEquals(
+			"\\\\.\\root\\cimv2:Win32_SessionProcess"
+				+ ".Antecedent=\"\\\\\\\\.\\\\root\\\\cimv2:Win32_LogonSession.LogonId=\\\"999\\\"\""
+				+ ",Dependent=\"\\\\\\\\.\\\\root\\\\cimv2:Win32_Process.Handle=\\\"a\\\\\\\\b\\\\\\\"c\\\"\"",
+			rows.get(0).get("__PATH")
+		);
+		assertEquals(Map.of("__PATH", "\\\\.\\root\\cimv2:Win32_WMISetting=@"), rows.get(1));
+	}
+
+	@Test
+	void endpointReferencesAreRequestedOnlyForPath() {
+		final String mode = "<wsman:EnumerationMode>EnumerateObjectAndEPR</wsman:EnumerationMode>";
+		assertTrue(
+			Envelopes.enumerateWql("http://host:5985/wsman", "root/cimv2", "SELECT __PATH FROM X", true, 1000, 1)
+				.contains(mode)
+		);
+		assertFalse(
+			Envelopes.enumerateWql("http://host:5985/wsman", "root/cimv2", "SELECT Name FROM X", false, 1000, 1)
+				.contains(mode)
+		);
+	}
+
 	// --- Fault summaries ------------------------------------------------------
 
 	@Test
@@ -204,7 +259,13 @@ class WsmanClientParityTest {
 	}
 
 	private static String timeoutOf(final long timeoutMs) {
-		return Envelopes
-			.enumerateWql("http://host:5985/wsman", "root/cimv2", "SELECT * FROM Win32_OperatingSystem", timeoutMs, 32000);
+		return Envelopes.enumerateWql(
+			"http://host:5985/wsman",
+			"root/cimv2",
+			"SELECT * FROM Win32_OperatingSystem",
+			false,
+			timeoutMs,
+			32000
+		);
 	}
 }

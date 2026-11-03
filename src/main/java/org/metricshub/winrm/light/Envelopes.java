@@ -87,13 +87,17 @@ final class Envelopes {
 		final String url,
 		final String namespace,
 		final String wql,
+		final boolean withPath,
 		final long timeoutMs,
 		final int maxElements
 	) {
+		// EnumerateObjectAndEPR adds each instance's endpoint reference (class and keys): its __PATH
 		return envelopeOpen(false) + header(url, wmiResourceUri(namespace), ACTION_ENUMERATE, timeoutMs, null, null)
-			+ "<s:Body><wsen:Enumerate>" + "<wsman:OptimizeEnumeration/>" + "<wsman:MaxElements>" + maxElements
-			+ "</wsman:MaxElements>" + "<wsman:Filter Dialect=\"http://schemas.microsoft.com/wbem/wsman/1/WQL\">"
-			+ escape(wql) + "</wsman:Filter>" + "</wsen:Enumerate></s:Body></s:Envelope>";
+			+ "<s:Body><wsen:Enumerate>" + "<wsman:OptimizeEnumeration/>"
+			+ (withPath ? "<wsman:EnumerationMode>EnumerateObjectAndEPR</wsman:EnumerationMode>" : "") + "<wsman:MaxElements>"
+			+ maxElements + "</wsman:MaxElements>"
+			+ "<wsman:Filter Dialect=\"http://schemas.microsoft.com/wbem/wsman/1/WQL\">" + escape(wql) + "</wsman:Filter>"
+			+ "</wsen:Enumerate></s:Body></s:Envelope>";
 	}
 
 	static String pull(
