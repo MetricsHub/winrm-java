@@ -25,7 +25,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.metricshub.winrm.exceptions.WindowsRemoteException;
 import org.metricshub.winrm.exceptions.WqlQuerySyntaxException;
@@ -40,23 +39,21 @@ public abstract class WmiHelper {
 	public static final String DEFAULT_NAMESPACE = "ROOT\\CIMV2";
 
 	/**
-	 * Pattern to detect a simple WQL select query.
-	 */
-	private static final Pattern WQL_SIMPLE_SELECT_PATTERN = Pattern.compile(
-		"^\\s*SELECT\\s+(\\*|(?!SELECT|FROM|WHERE)[a-z0-9._]+|((?!SELECT|FROM|WHERE)[a-z0-9._]+\\s*,\\s*)+((?!SELECT|FROM|WHERE)[a-z0-9._]+))\\s+FROM\\s+((?!WHERE|FROM)\\w+)\\s*(WHERE\\s+.*)?$",
-		Pattern.CASE_INSENSITIVE | Pattern.DOTALL
-	);
-
-	/**
-	 * Check if the WQL Query respect the simple syntax in the form of
-	 * <code>Select * from (where)</code> or <code>Select a,b,c from (where)</code>
-	 * is valid.
+	 * Check whether the WQL query has one of the syntaxes {@link WqlQuery#newInstance(CharSequence)}
+	 * parses: <code>SELECT * FROM Class [WHERE ...]</code>, <code>SELECT a, b FROM Class [WHERE ...]</code>,
+	 * <code>[SELECT ... FROM] ASSOCIATORS OF {...} [WHERE ...]</code> or the same with
+	 * <code>REFERENCES OF</code>.
 	 *
-	 * @param wqlQuery
+	 * @param wqlQuery The WQL query to check
 	 * @return whether specified WQL query's syntax is valid or not
 	 */
 	public static boolean isValidWql(final String wqlQuery) {
-		return WQL_SIMPLE_SELECT_PATTERN.matcher(wqlQuery).find();
+		try {
+			WqlQuery.newInstance(wqlQuery);
+			return true;
+		} catch (final WqlQuerySyntaxException e) {
+			return false;
+		}
 	}
 
 	/**

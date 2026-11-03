@@ -12,6 +12,12 @@ All notable changes to this project are documented in this file.
   blocked by policy), every later request failed until the client was recreated, even after a
   transient failure of the first scheme (an unreachable KDC, a host restarting) was over. Once
   every scheme has failed, the next request now starts over from the first one.
+- **`ASSOCIATORS OF` and `REFERENCES OF` WQL queries are no longer refused** (#218). The client
+  only accepted `SELECT ... FROM Class` and raised a `WqlSyntaxException` for association
+  queries before sending anything, although the WinRM service runs them. Both statements are now
+  accepted, with or without a `SELECT props FROM` prefix (which sets the result's columns), and
+  the client sends the statement WMI accepts: without that prefix, and without the
+  sub-properties of a `SELECT PropA.Sub FROM Class` query.
 
 ## 3.1.00
 

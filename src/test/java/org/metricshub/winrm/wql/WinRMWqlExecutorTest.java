@@ -138,10 +138,10 @@ class WinRMWqlExecutorTest {
 			);
 			assertTrue(actual.getExecutionTime() >= 0);
 
-			// The query the factory-created executor put on the wire is the caller's, verbatim
+			// The query the factory-created executor put on the wire is the caller's, cleaned up
 			final List<String> requests = server.decryptedRequests();
 			assertEquals(1, requests.size(), () -> String.join("\n---\n", requests));
-			assertTrue(requests.get(0).contains(wqlQuery), requests.get(0));
+			assertTrue(requests.get(0).contains(">SELECT name,path FROM Win32_Share</wsman:Filter>"), requests.get(0));
 		}
 	}
 }

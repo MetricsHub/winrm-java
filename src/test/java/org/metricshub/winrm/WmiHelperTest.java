@@ -75,9 +75,23 @@ class WmiHelperTest {
 	}
 
 	@Test
-	void isValidWqlRejectsNonSelectQueries() {
-		assertFalse(WmiHelper.isValidWql("ASSOCIATORS OF {Win32_Service.Name='W32Time'}"));
-		assertFalse(WmiHelper.isValidWql("REFERENCES OF {Win32_Service.Name='W32Time'}"));
+	void isValidWqlAcceptsAssociatorsAndReferencesQueries() {
+		assertTrue(WmiHelper.isValidWql("ASSOCIATORS OF {Win32_Service.Name='W32Time'}"));
+		assertTrue(WmiHelper.isValidWql("REFERENCES OF {Win32_Service.Name='W32Time'}"));
+		assertTrue(WmiHelper.isValidWql("ASSOCIATORS OF {Win32_Service.Name='W32Time'} WHERE ResultClass = Win32_Process"));
+		assertTrue(
+			WmiHelper.isValidWql(
+				"SELECT DeviceId, Temperature, Wear FROM ASSOCIATORS OF"
+					+ " {MSFT_PhysicalDisk.ObjectId=\"{1}\\\\\\\\HOST\\\\root/Microsoft/Windows/Storage/Providers_v2"
+					+ "\\\\SPACES_PhysicalDisk.ObjectId=\\\"{a}:PD:{b}\\\"\"}\nWHERE ResultClass = MSFT_StorageReliabilityCounter"
+			)
+		);
+	}
+
+	@Test
+	void isValidWqlRejectsOtherQueries() {
+		assertFalse(WmiHelper.isValidWql("ASSOCIATORS {Win32_Service.Name='W32Time'}"));
+		assertFalse(WmiHelper.isValidWql("SELECT Name FROM ASSOCIATORS OF Win32_Service"));
 		assertFalse(
 			WmiHelper
 				.isValidWql("SELECT * FROM __InstanceModificationEvent WITHIN 1\nWHERE TargetInstance ISA 'Win32_Service'")
