@@ -135,12 +135,15 @@ each instance's key properties and builds its object path. A **reference** prope
 
 ```sql
 SELECT __PATH, CurrentClockSpeed FROM Win32_Processor
--- __PATH = \\.\root\cimv2:Win32_Processor.DeviceID="CPU0"
+-- __PATH = Win32_Processor.DeviceID="CPU0"
 ```
 
-WinRM sends neither the server name nor the key types. The server is `.` (the local machine, for
-WMI) instead of the host name, and every key value is quoted, even a number. The path works as is in
-an `ASSOCIATORS OF {...}` or `REFERENCES OF {...}` query.
+The path is relative to the namespace of the query, without server or namespace, like the
+`__PATH` and references returned by the WMI client. A reference nested in a key (the `__PATH` of an
+association like `Win32_SessionProcess`) stays absolute, with `.` (the local machine, for WMI) as the
+server, since WinRM sends no server name. WinRM sends no key types either: every key value is
+quoted, even a number. The path works as is in an `ASSOCIATORS OF {...}` or `REFERENCES OF {...}`
+query.
 
 ### Column order and case
 

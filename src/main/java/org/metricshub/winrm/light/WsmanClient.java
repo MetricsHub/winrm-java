@@ -1415,7 +1415,7 @@ final class WsmanClient implements AutoCloseable {
 				// EnumerateObjectAndEPR wraps each instance in an Item, next to its endpoint reference
 				String path = null;
 				if (WSMAN_NS.equals(instance.getNamespaceURI()) && "Item".equals(instance.getLocalName())) {
-					path = wmiPath(child(instance, "EndpointReference"));
+					path = wmiPath(child(instance, "EndpointReference"), false);
 					instance = child(instance, null);
 				}
 				// A WMI array comes back as sibling elements sharing one name: join them. Built with
@@ -1429,7 +1429,7 @@ final class WsmanClient implements AutoCloseable {
 						continue;
 					}
 					// A reference property is an endpoint reference: render it as a WMI object path
-					final String reference = wmiPath(prop);
+					final String reference = wmiPath(prop, false);
 					final String text = reference != null ? reference : prop.getTextContent();
 					final StringBuilder value = values.get(((Element) prop).getLocalName());
 					if (value == null) {
@@ -1451,12 +1451,18 @@ final class WsmanClient implements AutoCloseable {
 	}
 
 	/**
-	 * The WMI object path of a WS-Addressing endpoint reference, like
-	 * {@code \\.\root\cimv2:Win32_Service.Name="WinRM"}, or {@code null} when the node is not one.
-	 * WinRM sends neither the server name nor the key types: the server is {@code .} (the local
-	 * machine, for WMI), and every key value is quoted.
+	 * The WMI object path of a WS-Addressing endpoint reference, or {@code null} when the node is not one.
+	 * Relative, like {@code Win32_Service.Name="WinRM"}, for {@code __PATH} and reference properties, as
+	 * the WMI client returns them once the server and namespace are cut. Absolute, like
+	 * {@code \\.\root\cimv2:Win32_Service.Name="WinRM"}, for a reference nested in a key. WinRM sends
+	 * neither the server name nor the key types: the server is {@code .} (the local machine, for WMI),
+	 * and every key value is quoted.
+	 *
+	 * @param reference the endpoint reference node
+	 * @param absolute whether to prefix the server and namespace
+	 * @return the object path, or {@code null}
 	 */
-	static String wmiPath(final Node reference) {
+	static String wmiPath(final Node reference, final boolean absolute) {
 		final Node parameters = child(reference, "ReferenceParameters");
 		if (parameters == null) {
 			return null;
@@ -1465,9 +1471,11 @@ final class WsmanClient implements AutoCloseable {
 		final String uri = child(parameters, "ResourceURI").getTextContent().trim();
 		final String resource = uri.substring(uri.indexOf("/wmi/") + "/wmi/".length());
 		final int slash = resource.lastIndexOf('/');
-		final StringBuilder path = new StringBuilder("\\\\.\\").append(resource.substring(0, slash).replace('/', '\\'))
-			.append(':')
-			.append(resource.substring(slash + 1));
+		final StringBuilder path = new StringBuilder();
+		if (absolute) {
+			path.append("\\\\.\\").append(resource.substring(0, slash).replace('/', '\\')).append(':');
+		}
+		path.append(resource.substring(slash + 1));
 		final Node selectorSet = child(parameters, "SelectorSet");
 		char separator = '.';
 		for (Node selector = selectorSet == null ? null : selectorSet.getFirstChild(); selector != null; selector = selector
@@ -1476,13 +1484,15 @@ final class WsmanClient implements AutoCloseable {
 				continue;
 			}
 			// A key of an association is itself a reference, quoted like any other value
-			final String nested = wmiPath(child(selector, "EndpointReference"));
+			final String nested = wmiPath(child(selector, "EndpointReference"), true);
 			final String value = nested != null ? nested : selector.getTextContent();
-			path.append(separator)
-				.append(((Element) selector).getAttribute("Name"))
-				.append("=\"")
-				.append(value.replace("\\", "\\\\").replace("\"", "\\\""))
-				.append('"');
+			// WinRM 2.0 (Windows 2008 R2) leaves out the name of the key in some references: WMI's own
+			// short form, Win32_Service="winmgmt", is the one that works in a query
+			final String name = ((Element) selector).getAttribute("Name");
+			if (!name.isEmpty()) {
+				path.append(separator).append(name);
+			}
+			path.append("=\"").append(value.replace("\\", "\\\\").replace("\"", "\\\"")).append('"');
 			separator = ',';
 		}
 		// No key: a singleton
