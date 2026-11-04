@@ -18,6 +18,15 @@ All notable changes to this project are documented in this file.
   accepted, with or without a `SELECT props FROM` prefix (which sets the result's columns), and
   the client sends the statement WMI accepts: without that prefix, and without the
   sub-properties of a `SELECT PropA.Sub FROM Class` query.
+- **WQL returns `__PATH` and renders reference properties as WMI object paths** (#221). WinRM
+  never returns WMI system properties, so `__PATH` was silently missing, and reference properties
+  (`Antecedent`, `Dependent`, `SameElement`, ...) came back as the flattened text of their
+  endpoint reference, so the two could not be joined. When a query selects `__PATH`, the client
+  now builds it from each instance's endpoint reference, and references get the same format. Both
+  are relative to the query's namespace, like with the WMI client: `Win32_Processor.DeviceID="CPU0"`.
+  A reference nested in a key (the `__PATH` of an association) stays absolute, with `.` as the
+  server. Every key value is quoted, since WinRM sends no key types. On Windows Server 2008 R2,
+  a reference without its key name gets WMI's short form, `Win32_Service="winmgmt"`.
 
 ## 3.1.00
 
