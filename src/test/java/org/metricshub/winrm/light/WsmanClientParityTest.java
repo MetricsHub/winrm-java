@@ -174,14 +174,28 @@ class WsmanClientParityTest {
 		final List<Map<String, String>> rows = new ArrayList<>();
 		WsmanClient.collectItems(doc, rows, "|");
 		assertEquals(2, rows.size());
-		assertEquals("\\\\.\\root\\cimv2:Win32_LogonSession.LogonId=\"999\"", rows.get(0).get("Antecedent"));
+		assertEquals("Win32_LogonSession.LogonId=\"999\"", rows.get(0).get("Antecedent"));
 		assertEquals(
-			"\\\\.\\root\\cimv2:Win32_SessionProcess"
-				+ ".Antecedent=\"\\\\\\\\.\\\\root\\\\cimv2:Win32_LogonSession.LogonId=\\\"999\\\"\""
+			"Win32_SessionProcess" + ".Antecedent=\"\\\\\\\\.\\\\root\\\\cimv2:Win32_LogonSession.LogonId=\\\"999\\\"\""
 				+ ",Dependent=\"\\\\\\\\.\\\\root\\\\cimv2:Win32_Process.Handle=\\\"a\\\\\\\\b\\\\\\\"c\\\"\"",
 			rows.get(0).get("__PATH")
 		);
-		assertEquals(Map.of("__PATH", "\\\\.\\root\\cimv2:Win32_WMISetting=@"), rows.get(1));
+		assertEquals(Map.of("__PATH", "Win32_WMISetting=@"), rows.get(1));
+	}
+
+	@Test
+	void referenceWithUnnamedKeyUsesTheShortForm() throws Exception {
+		// Windows 2008 R2 (WinRM 2.0): SELECT Element FROM Win32_WMIElementSetting, a selector with no name
+		final Document doc = parse(
+			"<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\""
+				+ " xmlns:a=\"http://schemas.xmlsoap.org/ws/2004/08/addressing\" xmlns:w=\"" + WSMAN + "\">"
+				+ "<s:Body><n:EnumerateResponse xmlns:n=\"" + WSEN + "\"><w:Items><w:XmlFragment>"
+				+ reference("Element", "Win32_Service", "<w:Selector>winmgmt</w:Selector>")
+				+ "</w:XmlFragment></w:Items></n:EnumerateResponse></s:Body></s:Envelope>"
+		);
+		final List<Map<String, String>> rows = new ArrayList<>();
+		WsmanClient.collectItems(doc, rows, "|");
+		assertEquals(Map.of("Element", "Win32_Service=\"winmgmt\""), rows.get(0));
 	}
 
 	@Test
